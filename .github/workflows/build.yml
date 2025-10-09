@@ -1,77 +1,57 @@
-name: Build Boyin Executable
+# 工作流名称
+name: Build Python Application
 
+# 触发工作流的事件
 on:
+  # 1. 当代码被推送到 main 或 master 分支时触发
   push:
-    branches: [ main ]
-    tags:
-      - 'v*'
-  pull_request:
-    branches: [ main ]
+    branches: [ "main", "master" ]
+  # 2. 允许你从 GitHub Actions 页面手动触发此工作流
   workflow_dispatch:
 
+# 工作流中运行的任务（Jobs）
 jobs:
+  # 定义一个名为 "build-windows" 的任务
   build-windows:
+    # 指定运行此任务的虚拟机环境 (Windows 最新版)
     runs-on: windows-latest
 
+    # 任务的步骤
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      # 第 1 步：检出（下载）你的代码到虚拟机
+      - name: Check out repository code
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+      # 第 2 步：设置 Python 3.11 环境
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pyttsx3 pygame pyinstaller
+      # 第 3 步：安装项目依赖和打包工具
+      # 这一步会自动读取 requirements.txt 文件并安装所有列出的库
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
 
-    - name: Build with PyInstaller
-      run: |
-        pyinstaller --onefile --windowed --name=boyin boyin.py
+      # 第 4 步：使用 PyInstaller 打包应用程序
+      # --onefile: 打包成一个独立的 .exe 文件
+      # --windowed: 运行时不显示命令行窗口（GUI应用必备）
+      # --name: 指定生成的可执行文件名
+      # --icon: (可选) 如果你有图标文件，可以取消注释并使用它
+      - name: Build application with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onefile --windowed --name TimedBroadcastApp boyin.py
+          # pyinstaller --noconfirm --onefile --windowed --icon=your_icon.ico --name TimedBroadcastApp boyin.py
 
-    - name: Create folders structure
-      run: |
-        New-Item -Path "dist\提示音" -ItemType Directory -Force
-        New-Item -Path "dist\音频文件" -ItemType Directory -Force
-      shell: pwsh
-
-    - name: Create README
-      run: |
-        @"
-        定时播音系统 v1.0
-        
-        使用说明:
-        1. 将提示音文件(如 tone-a.mp3, tone-b.mp3)放入"提示音"文件夹
-        2. 将音频文件放入"音频文件"文件夹
-        3. 双击运行 boyin.exe 开始使用
-        
-        功能特点:
-        - 定时语音播报
-        - 音频文件播放
-        - 灵活的时间调度
-        - 任务管理
-        
-        注意事项:
-        - 首次运行需要等待语音引擎初始化
-        - 支持的音频格式: MP3, WAV, OGG
-        - 任务保存在 broadcast_tasks.json 文件中
-        "@  | Out-File -FilePath "dist\README.txt" -Encoding UTF8
-      shell: pwsh
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: boyin-windows
-        path: dist/
-
-    - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
-      with:
-        files: dist/boyin.exe
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 第 5 步：上传构建好的可执行文件作为 "artifact"
+      # 这样你就可以在 Actions 页面下载它
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # 上传文件的名称
+          name: TimedBroadcastApp-Windows
+          # 要上传的文件路径 (PyInstaller 会在 dist 文件夹下生成 .exe 文件)
+          path: dist/TimedBroadcastApp.exe
