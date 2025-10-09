@@ -10,12 +10,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [windows-latest]
-        python-version: ['3.10']
+  build-windows:
+    runs-on: windows-latest
 
     steps:
     - name: Checkout code
@@ -24,48 +20,57 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: '3.10'
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller pyttsx3 pygame
+        pip install pyttsx3 pygame pyinstaller
 
-    - name: Build with PyInstaller (Windows)
-      if: matrix.os == 'windows-latest'
+    - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --windowed --name=boyin --add-data="broadcast_tasks.json;." --hidden-import=pygame --collect-all pygame boyin.py
+        pyinstaller --onefile --windowed --name=boyin boyin.py
 
-    - name: Create folders in dist
-      if: matrix.os == 'windows-latest'
+    - name: Create folders structure
       run: |
-        mkdir dist\提示音 2>nul || echo "Folder exists"
-        mkdir dist\音频文件 2>nul || echo "Folder exists"
-        echo. > dist\README.txt
-        echo 定时播音系统 > dist\README.txt
-        echo. >> dist\README.txt
-        echo 使用说明: >> dist\README.txt
-        echo 1. 将提示音文件放入"提示音"文件夹 >> dist\README.txt
-        echo 2. 将音频文件放入"音频文件"文件夹 >> dist\README.txt
-        echo 3. 运行 boyin.exe 开始使用 >> dist\README.txt
+        New-Item -Path "dist\提示音" -ItemType Directory -Force
+        New-Item -Path "dist\音频文件" -ItemType Directory -Force
+      shell: pwsh
 
-    - name: Upload Windows Artifact
-      if: matrix.os == 'windows-latest'
+    - name: Create README
+      run: |
+        @"
+        定时播音系统 v1.0
+        
+        使用说明:
+        1. 将提示音文件(如 tone-a.mp3, tone-b.mp3)放入"提示音"文件夹
+        2. 将音频文件放入"音频文件"文件夹
+        3. 双击运行 boyin.exe 开始使用
+        
+        功能特点:
+        - 定时语音播报
+        - 音频文件播放
+        - 灵活的时间调度
+        - 任务管理
+        
+        注意事项:
+        - 首次运行需要等待语音引擎初始化
+        - 支持的音频格式: MP3, WAV, OGG
+        - 任务保存在 broadcast_tasks.json 文件中
+        "@  | Out-File -FilePath "dist\README.txt" -Encoding UTF8
+      shell: pwsh
+
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: boyin-windows
-        path: |
-          dist/boyin.exe
-          dist/提示音/
-          dist/音频文件/
-          dist/README.txt
+        path: dist/
 
-    - name: Create Release (on tag push)
+    - name: Create Release
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: |
-          dist/boyin.exe
+        files: dist/boyin.exe
         draft: false
         prerelease: false
       env:
