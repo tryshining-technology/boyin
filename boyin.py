@@ -7,6 +7,14 @@ import time
 from datetime import datetime
 import os
 
+# 尝试导入 win32com，这是获取语音列表的最佳方式
+try:
+    import win32com.client
+    WIN32COM_AVAILABLE = True
+except ImportError:
+    WIN32COM_AVAILABLE = False
+
+
 # --- 全局设置 ---
 # 获取脚本所在的目录，确保所有文件路径都是基于此目录
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,7 +43,6 @@ class TimedBroadcastApp:
         # 初始化语音引擎
         self.engine = None
         try:
-            # --- 修复：强制使用 sapi5 驱动 ---
             self.engine = pyttsx3.init(driverName='sapi5')
         except Exception as e:
             print(f"严重错误：主语音引擎 pyttsx3 初始化失败 - {e}。语音播报功能将不可用。")
@@ -408,32 +415,27 @@ class TimedBroadcastApp:
         voice_frame = tk.Frame(content_frame, bg='#E8E8E8')
         voice_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=8)
         
-        # --- 修复: 采用更稳健的语音列表刷新机制 ---
+        # --- 终极修复: 优先使用 win32com 获取语音列表 ---
         available_voices = []
-        # 1. 首先，获取启动时缓存的语音列表作为备用(fallback)
-        if self.engine:
+        if WIN32COM_AVAILABLE:
             try:
-                voices = self.engine.getProperty('voices')
-                for voice in voices:
-                    available_voices.append(voice.name)
+                speaker = win32com.client.Dispatch("SAPI.SpVoice")
+                voices = speaker.GetVoices()
+                available_voices = [v.GetDescription() for v in voices]
+                self.log("成功通过 win32com 刷新语音列表。")
             except Exception as e:
-                self.log(f"警告: 无法获取缓存的语音列表 - {e}")
+                self.log(f"警告: 使用 win32com 获取语音列表失败 - {e}")
+                WIN32COM_AVAILABLE = False # 标记为不可用，以防万一
 
-        # 2. 然后，尝试强制刷新列表以获取最新语音（如 NaturalVoiceSAPIAdapter）
-        try:
-            # --- 修复：强制使用 sapi5 驱动 ---
-            fresh_engine = pyttsx3.init(driverName='sapi5')
-            fresh_voices_list = [v.name for v in fresh_engine.getProperty('voices')]
-            fresh_engine.stop()
-            available_voices = fresh_voices_list # 如果成功，就使用这个最新的列表
-            self.log("成功刷新系统语音列表。")
-        except Exception as e:
-            # 如果刷新失败，则不做任何事，继续使用上面获取的备用列表
-            # 只记录一个警告日志，不弹窗打扰用户
-            self.log(f"警告: 实时刷新语音列表失败，将使用启动时的缓存列表。错误: {e}")
+        if not available_voices: # 如果 win32com 失败或不可用，则回退到 pyttsx3
+            self.log("win32com 未能获取语音，回退到 pyttsx3 方法。")
+            if self.engine:
+                try:
+                    available_voices = [v.name for v in self.engine.getProperty('voices')]
+                except Exception as e:
+                    self.log(f"警告: 备用方法 pyttsx3 获取语音列表也失败 - {e}")
             if not available_voices:
-                # 只有在备用列表也是空的情况下（说明主引擎也出错了），才弹窗报错
-                messagebox.showerror("严重错误", "无法获取任何系统语音，请检查语音引擎设置。")
+                 messagebox.showerror("严重错误", "无法获取任何系统语音，请检查语音引擎设置。")
 
         voice_var = tk.StringVar(value=available_voices[0] if available_voices else "")
         voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, values=available_voices,
@@ -797,13 +799,31 @@ class TimedBroadcastApp:
     def _speak(self, text, task):
         if not self.engine: self.log("错误：语音引擎未初始化"); self.root.after(0, self.on_playback_finished); return
         try:
+            # 在播报前，需要根据选择的语音名字(Description)找到对应的 voice ID
+            selected_voice_desc = task.get('voice')
+            
+            # 重新获取一次 voices 对象，以便按名字查找
+            if WIN32COM_AVAILABLE:
+                try:
+                    speaker = win32com.client.Dispatch("SAPI.SpVoice")
+                    all_voices = speaker.GetVoices()
+                    for voice in all_voices:
+                        if voice.GetDescription() == selected_voice_desc:
+                            self.engine.setProperty('voice', voice.Id)
+                            break
+                except Exception as e:
+                    self.log(f"警告: 播报时查找语音 ID 失败 - {e}")
+            else: # 如果 win32com 不可用，回退到 pyttsx3 的名字匹配
+                for v in self.engine.getProperty('voices'):
+                    if v.name == selected_voice_desc:
+                        self.engine.setProperty('voice', v.id)
+                        break
+
             if task.get('prompt', 0) and AUDIO_AVAILABLE and os.path.exists(p := os.path.join(PROMPT_FOLDER, task.get('prompt_file', ''))):
                 s = pygame.mixer.Sound(p); s.play(); time.sleep(s.get_length())
             self.engine.setProperty('volume', float(task.get('volume', 1.0)))
             self.engine.setProperty('rate', int(task.get('speed', 150)))
-            if (v_name := task.get('voice')):
-                for v in self.engine.getProperty('voices'):
-                    if v.name == v_name: self.engine.setProperty('voice', v.id); break
+
             for i in range(int(task.get('repeat', 1))):
                 if not self.running: break
                 self.log(f"正在播报第 {i+1} 遍"); self.engine.say(text); self.engine.runAndWait()
