@@ -1,4 +1,3 @@
-
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 import pyttsx3
@@ -43,11 +42,11 @@ class TimedBroadcastApp:
         
         # 导航按钮
         nav_buttons = [
-            ("定时广播", "频道"),
-            ("背景音乐", "频道"),
-            ("立即播播", "频道"),
+            ("定时广播", ""),
+            ("背景音乐", ""),
+            ("立即播播", ""),
             ("节假日、调休", "节假日不播或、调休"),
-            ("设置", "开关机、闭区、多路\n作息表切换、音响..."),
+            ("设置", ""),
             ("语音广告 制作", "")
         ]
         
@@ -93,10 +92,6 @@ class TimedBroadcastApp:
                               bg='white', fg='#2C5F7C')
         title_label.pack(side=tk.LEFT)
         
-        freq_label = tk.Label(top_frame, text="频道", font=('Microsoft YaHei', 10),
-                            bg='white', fg='#666')
-        freq_label.pack(side=tk.LEFT, padx=10)
-        
         # 控制按钮区
         btn_frame = tk.Frame(top_frame, bg='white')
         btn_frame.pack(side=tk.RIGHT)
@@ -109,7 +104,9 @@ class TimedBroadcastApp:
             ("上移", lambda: self.move_task(-1), '#3498DB'),
             ("下移", lambda: self.move_task(1), '#3498DB'),
             ("导入", self.import_tasks, '#1ABC9C'),
-            ("导出", self.export_tasks, '#1ABC9C')
+            ("导出", self.export_tasks, '#1ABC9C'),
+            ("启用", self.enable_task, '#27AE60'),
+            ("禁用", self.disable_task, '#95A5A6')
         ]
         
         for text, cmd, color in buttons:
@@ -183,16 +180,303 @@ class TimedBroadcastApp:
         self.log("定时播音软件已启动")
     
     def add_task(self):
-        """添加任务对话框"""
+        """添加任务 - 先选择类型"""
+        choice_dialog = tk.Toplevel(self.root)
+        choice_dialog.title("选择节目类型")
+        choice_dialog.geometry("400x250")
+        choice_dialog.transient(self.root)
+        choice_dialog.grab_set()
+        
+        # 居中显示
+        choice_dialog.update_idletasks()
+        x = (choice_dialog.winfo_screenwidth() // 2) - (400 // 2)
+        y = (choice_dialog.winfo_screenheight() // 2) - (250 // 2)
+        choice_dialog.geometry(f"400x250+{x}+{y}")
+        
+        main_frame = tk.Frame(choice_dialog, padx=30, pady=30)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        title_label = tk.Label(main_frame, text="请选择节目类型", 
+                              font=('Microsoft YaHei', 14, 'bold'), fg='#2C5F7C')
+        title_label.pack(pady=20)
+        
+        # 音频节目按钮
+        audio_btn = tk.Button(main_frame, text="🎵 音频节目", 
+                             command=lambda: self.open_audio_dialog(choice_dialog),
+                             bg='#5DADE2', fg='white', font=('Microsoft YaHei', 12, 'bold'),
+                             bd=0, padx=40, pady=15, cursor='hand2', width=20)
+        audio_btn.pack(pady=10)
+        
+        # 语音节目按钮
+        voice_btn = tk.Button(main_frame, text="🎙️ 语音节目", 
+                             command=lambda: self.open_voice_dialog(choice_dialog),
+                             bg='#3498DB', fg='white', font=('Microsoft YaHei', 12, 'bold'),
+                             bd=0, padx=40, pady=15, cursor='hand2', width=20)
+        voice_btn.pack(pady=10)
+    
+    def open_audio_dialog(self, parent_dialog):
+        """打开音频节目添加对话框"""
+        parent_dialog.destroy()
+        
         dialog = tk.Toplevel(self.root)
-        dialog.title("添加节目")
-        dialog.geometry("600x500")
+        dialog.title("定时广播频道 - 音频节目")
+        dialog.geometry("900x650")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.configure(bg='#E8E8E8')
+        
+        main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # ========== 内容区域 ==========
+        content_frame = tk.LabelFrame(main_frame, text="内容", font=('Microsoft YaHei', 12, 'bold'),
+                                     bg='#E8E8E8', padx=15, pady=15)
+        content_frame.grid(row=0, column=0, sticky='ew', pady=10)
+        
+        # 节目名称
+        tk.Label(content_frame, text="节目名称:", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
+            row=0, column=0, sticky='e', padx=5, pady=8)
+        name_entry = tk.Entry(content_frame, font=('Microsoft YaHei', 10), width=50)
+        name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=8)
+        
+        # 音频文件单选
+        audio_type_var = tk.StringVar(value="single")
+        
+        tk.Label(content_frame, text="音频文件", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
+            row=1, column=0, sticky='e', padx=5, pady=5)
+        
+        audio_single_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        audio_single_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=5)
+        
+        tk.Radiobutton(audio_single_frame, text="", variable=audio_type_var, value="single",
+                      bg='#E8E8E8', font=('Microsoft YaHei', 10)).pack(side=tk.LEFT)
+        
+        audio_single_entry = tk.Entry(audio_single_frame, font=('Microsoft YaHei', 9), width=35, state='readonly')
+        audio_single_entry.pack(side=tk.LEFT, padx=5)
+        
+        time_label = tk.Label(audio_single_frame, text="00:00", font=('Microsoft YaHei', 10), bg='#E8E8E8')
+        time_label.pack(side=tk.LEFT, padx=10)
+        
+        def select_single_audio():
+            filename = filedialog.askopenfilename(
+                title="选择音频文件",
+                filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac"), ("所有文件", "*.*")]
+            )
+            if filename:
+                audio_single_entry.config(state='normal')
+                audio_single_entry.delete(0, tk.END)
+                audio_single_entry.insert(0, filename)
+                audio_single_entry.config(state='readonly')
+        
+        tk.Button(audio_single_frame, text="选取...", command=select_single_audio, bg='#D0D0D0',
+                 font=('Microsoft YaHei', 9), bd=1, padx=15, pady=3).pack(side=tk.LEFT, padx=5)
+        
+        # 音频文件夹单选
+        tk.Label(content_frame, text="音频文件夹", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
+            row=2, column=0, sticky='e', padx=5, pady=5)
+        
+        audio_folder_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        audio_folder_frame.grid(row=2, column=1, columnspan=3, sticky='ew', padx=5, pady=5)
+        
+        tk.Radiobutton(audio_folder_frame, text="", variable=audio_type_var, value="folder",
+                      bg='#E8E8E8', font=('Microsoft YaHei', 10)).pack(side=tk.LEFT)
+        
+        audio_folder_entry = tk.Entry(audio_folder_frame, font=('Microsoft YaHei', 9), width=50, state='readonly')
+        audio_folder_entry.pack(side=tk.LEFT, padx=5)
+        
+        def select_folder():
+            foldername = filedialog.askdirectory(title="选择音频文件夹")
+            if foldername:
+                audio_folder_entry.config(state='normal')
+                audio_folder_entry.delete(0, tk.END)
+                audio_folder_entry.insert(0, foldername)
+                audio_folder_entry.config(state='readonly')
+        
+        tk.Button(audio_folder_frame, text="选取...", command=select_folder, bg='#D0D0D0',
+                 font=('Microsoft YaHei', 9), bd=1, padx=15, pady=3).pack(side=tk.LEFT, padx=5)
+        
+        # 播放顺序
+        play_order_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        play_order_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=5)
+        
+        play_order_var = tk.StringVar(value="sequential")
+        tk.Radiobutton(play_order_frame, text="顺序播试", variable=play_order_var, value="sequential",
+                      bg='#E8E8E8', font=('Microsoft YaHei', 9)).pack(side=tk.LEFT, padx=10)
+        tk.Label(play_order_frame, text="i", fg='blue', bg='#E8E8E8', cursor='hand2').pack(side=tk.LEFT, padx=5)
+        
+        tk.Radiobutton(play_order_frame, text="随机播试", variable=play_order_var, value="random",
+                      bg='#E8E8E8', font=('Microsoft YaHei', 9)).pack(side=tk.LEFT, padx=10)
+        tk.Label(play_order_frame, text="i", fg='blue', bg='#E8E8E8', cursor='hand2').pack(side=tk.LEFT, padx=5)
+        
+        # 音量设置
+        volume_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        volume_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=8)
+        
+        tk.Label(volume_frame, text="音量:", font=('Microsoft YaHei', 10), bg='#E8E8E8').pack(side=tk.LEFT)
+        volume_entry = tk.Entry(volume_frame, font=('Microsoft YaHei', 10), width=10)
+        volume_entry.insert(0, "80")
+        volume_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(volume_frame, text="25-100", font=('Microsoft YaHei', 9), bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
+        tk.Label(volume_frame, text="音量指南", font=('Microsoft YaHei', 9), fg='blue', 
+                bg='#E8E8E8', cursor='hand2').pack(side=tk.LEFT, padx=10)
+        
+        # ========== 时间区域 ==========
+        time_frame = tk.LabelFrame(main_frame, text="时间", font=('Microsoft YaHei', 12, 'bold'),
+                                   bg='#E8E8E8', padx=15, pady=15)
+        time_frame.grid(row=1, column=0, sticky='ew', pady=10)
+        
+        # 开始时间
+        tk.Label(time_frame, text="开始时间:", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
+            row=0, column=0, sticky='e', padx=5, pady=8)
+        start_time_entry = tk.Entry(time_frame, font=('Microsoft YaHei', 10), width=50)
+        start_time_entry.insert(0, "22:10:10")
+        start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=8)
+        tk.Label(time_frame, text="《可多个:如中铃》", font=('Microsoft YaHei', 9), bg='#E8E8E8').grid(
+            row=0, column=2, sticky='w', padx=5)
+        tk.Button(time_frame, text="设置...", bg='#D0D0D0', font=('Microsoft YaHei', 9), 
+                 bd=1, padx=15, pady=3).grid(row=0, column=3, padx=5)
+        
+        # 间隔播报
+        interval_var = tk.StringVar(value="first")
+        
+        interval_frame1 = tk.Frame(time_frame, bg='#E8E8E8')
+        interval_frame1.grid(row=1, column=1, columnspan=2, sticky='w', padx=5, pady=5)
+        
+        tk.Label(time_frame, text="间隔播报:", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
+            row=1, column=0, sticky='e', padx=5, pady=5)
+        tk.Radiobutton(interval_frame1, text="播 n 首", variable=interval_var, value="first",
+                      bg='#E8E8E8', font=('Microsoft YaHei', 9)).pack(side=tk.LEFT)
+        interval_first_entry = tk.Entry(interval_frame1, font=('Microsoft YaHei', 9), width=15)
+        interval_first_entry.insert(0, "1")
+        interval_first_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(interval_frame1, text="(单曲时,指 n 遍)", font=('Microsoft YaHei', 9), 
+                bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
+        
+        interval_frame2 = tk.Frame(time_frame, bg='#E8E8E8')
+        interval_frame2.grid(row=2, column=1, columnspan=2, sticky='w', padx=5, pady=5)
+        
+        tk.Radiobutton(interval_frame2, text="播 n 秒", variable=interval_var, value="seconds",
+                      bg='#E8E8E8', font=('Microsoft YaHei', 9)).pack(side=tk.LEFT)
+        interval_seconds_entry = tk.Entry(interval_frame2, font=('Microsoft YaHei', 9), width=15)
+        interval_seconds_entry.insert(0, "600")
+        interval_seconds_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(interval_frame2, text="(3600秒 = 1小时)", font=('Microsoft YaHei', 9), 
+                bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
+        
+        # 周几/几号
+        tk.Label(time_frame, text="周几/几号:", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
+            row=3, column=0, sticky='e', padx=5, pady=8)
+        weekday_entry = tk.Entry(time_frame, font=('Microsoft YaHei', 10), width=50)
+        weekday_entry.insert(0, "每周:1234567")
+        weekday_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=8)
+        tk.Button(time_frame, text="选取...", bg='#D0D0D0', font=('Microsoft YaHei', 9), 
+                 bd=1, padx=15, pady=3).grid(row=3, column=3, padx=5)
+        
+        # 日期范围
+        tk.Label(time_frame, text="日期范围:", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
+            row=4, column=0, sticky='e', padx=5, pady=8)
+        date_range_entry = tk.Entry(time_frame, font=('Microsoft YaHei', 10), width=50)
+        date_range_entry.insert(0, "2000-01-01 00:00 ~ 2088-12-31 24:00")
+        date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=8)
+        tk.Button(time_frame, text="设置...", bg='#D0D0D0', font=('Microsoft YaHei', 9), 
+                 bd=1, padx=15, pady=3).grid(row=4, column=3, padx=5)
+        
+        # 一次性播报
+        onetime_label = tk.Label(time_frame, text="一次性播报：将节目的日期范围限定为某天",
+                                font=('Microsoft YaHei', 9), bg='#E8E8E8', fg='#666')
+        onetime_label.grid(row=5, column=1, columnspan=2, sticky='w', padx=5, pady=5)
+        
+        # ========== 其它区域 ==========
+        other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'),
+                                    bg='#E8E8E8', padx=15, pady=15)
+        other_frame.grid(row=2, column=0, sticky='ew', pady=10)
+        
+        # 准时/延后
+        delay_var = tk.StringVar(value="ontime")
+        
+        tk.Label(other_frame, text="准时/延后:", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
+            row=0, column=0, sticky='e', padx=5, pady=5)
+        
+        delay_frame = tk.Frame(other_frame, bg='#E8E8E8')
+        delay_frame.grid(row=0, column=1, sticky='w', padx=5, pady=5)
+        
+        tk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们（默认）",
+                      variable=delay_var, value="ontime", bg='#E8E8E8', 
+                      font=('Microsoft YaHei', 9)).pack(anchor='w')
+        tk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候",
+                      variable=delay_var, value="delay", bg='#E8E8E8', 
+                      font=('Microsoft YaHei', 9)).pack(anchor='w')
+        
+        # ========== 底部按钮 ==========
+        button_frame = tk.Frame(main_frame, bg='#E8E8E8')
+        button_frame.grid(row=3, column=0, pady=20)
+        
+        def save_audio_task():
+            audio_type = audio_type_var.get()
+            if audio_type == "single":
+                audio_path = audio_single_entry.get().strip()
+            else:
+                audio_path = audio_folder_entry.get().strip()
+            
+            if not audio_path:
+                messagebox.showwarning("警告", "请选择音频文件或文件夹")
+                return
+            
+            task = {
+                'name': name_entry.get().strip(),
+                'time': start_time_entry.get().strip(),
+                'content': audio_path,
+                'type': 'audio',
+                'audio_type': audio_type,
+                'play_order': play_order_var.get(),
+                'volume': volume_entry.get().strip() or "80",
+                'interval_type': interval_var.get(),
+                'interval_first': interval_first_entry.get().strip(),
+                'interval_seconds': interval_seconds_entry.get().strip(),
+                'weekday': weekday_entry.get().strip(),
+                'date_range': date_range_entry.get().strip(),
+                'delay': delay_var.get(),
+                'status': '启用',
+                'last_run': None
+            }
+            
+            if not task['name'] or not task['time']:
+                messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）")
+                return
+            
+            self.tasks.append(task)
+            self.update_task_list()
+            self.save_tasks()
+            self.log(f"已添加音频节目: {task['name']} - {task['time']}")
+            dialog.destroy()
+        
+        tk.Button(button_frame, text="添加", command=save_audio_task, bg='#5DADE2', fg='white',
+                 font=('Microsoft YaHei', 10, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0',
+                 font=('Microsoft YaHei', 10), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        
+        # 配置列权重
+        content_frame.columnconfigure(1, weight=1)
+        time_frame.columnconfigure(1, weight=1)
+    
+    def open_voice_dialog(self, parent_dialog):
+        """打开语音节目添加对话框"""
+        parent_dialog.destroy()
+        
+        dialog = tk.Toplevel(self.root)
+        dialog.title("添加语音节目")
+        dialog.geometry("600x550")
         dialog.transient(self.root)
         dialog.grab_set()
         
         # 节目信息输入
         fields_frame = tk.Frame(dialog, padx=20, pady=20)
         fields_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 添加类型标识
+        type_label = tk.Label(fields_frame, text="🎙️ 语音播报节目", 
+                             font=('Microsoft YaHei', 12, 'bold'), fg='#3498DB')
+        type_label.grid(row=0, column=0, columnspan=2, pady=10)
         
         fields = [
             ("节目名称:", "name"),
@@ -205,9 +489,9 @@ class TimedBroadcastApp:
         
         entries = {}
         for i, (label_text, key) in enumerate(fields):
-            tk.Label(fields_frame, text=label_text, font=('Microsoft YaHei', 10)).grid(row=i, column=0, sticky='w', pady=8)
+            tk.Label(fields_frame, text=label_text, font=('Microsoft YaHei', 10)).grid(row=i+1, column=0, sticky='w', pady=8)
             entry = tk.Entry(fields_frame, font=('Microsoft YaHei', 10), width=40)
-            entry.grid(row=i, column=1, pady=8, padx=10)
+            entry.grid(row=i+1, column=1, pady=8, padx=10)
             entries[key] = entry
         
         # 默认值
@@ -217,16 +501,19 @@ class TimedBroadcastApp:
         entries['date_range'].insert(0, "全年")
         
         # 播放内容
-        tk.Label(fields_frame, text="播放内容:", font=('Microsoft YaHei', 10)).grid(row=len(fields), column=0, sticky='nw', pady=8)
+        content_row = len(fields) + 1
+        tk.Label(fields_frame, text="播放内容:", font=('Microsoft YaHei', 10)).grid(
+            row=content_row, column=0, sticky='nw', pady=8)
         content_text = scrolledtext.ScrolledText(fields_frame, height=6, font=('Microsoft YaHei', 10), width=40)
-        content_text.grid(row=len(fields), column=1, pady=8, padx=10)
+        content_text.grid(row=content_row, column=1, pady=8, padx=10)
         
         # 状态选择
-        tk.Label(fields_frame, text="状态:", font=('Microsoft YaHei', 10)).grid(row=len(fields)+1, column=0, sticky='w', pady=8)
+        tk.Label(fields_frame, text="状态:", font=('Microsoft YaHei', 10)).grid(
+            row=content_row+1, column=0, sticky='w', pady=8)
         status_var = tk.StringVar(value="启用")
         status_combo = ttk.Combobox(fields_frame, textvariable=status_var, values=["启用", "禁用"], 
                                    font=('Microsoft YaHei', 10), width=37, state='readonly')
-        status_combo.grid(row=len(fields)+1, column=1, pady=8, padx=10)
+        status_combo.grid(row=content_row+1, column=1, pady=8, padx=10)
         
         def save_task():
             task = {
@@ -234,6 +521,7 @@ class TimedBroadcastApp:
                 'time': entries['time'].get().strip(),
                 'delay': entries['delay'].get().strip() or "0",
                 'content': content_text.get('1.0', tk.END).strip(),
+                'type': 'voice',
                 'volume': entries['volume'].get().strip() or "100",
                 'weekday': entries['weekday'].get().strip() or "1-7",
                 'date_range': entries['date_range'].get().strip() or "全年",
@@ -248,7 +536,7 @@ class TimedBroadcastApp:
             self.tasks.append(task)
             self.update_task_list()
             self.save_tasks()
-            self.log(f"已添加节目: {task['name']} - {task['time']}")
+            self.log(f"已添加语音节目: {task['name']} - {task['time']}")
             dialog.destroy()
         
         # 按钮
@@ -337,13 +625,51 @@ class TimedBroadcastApp:
             except Exception as e:
                 messagebox.showerror("错误", f"导出失败: {str(e)}")
     
+    def enable_task(self):
+        """启用任务"""
+        selection = self.task_tree.selection()
+        if not selection:
+            messagebox.showwarning("警告", "请先选择要启用的节目")
+            return
+        
+        for item in selection:
+            index = self.task_tree.index(item)
+            self.tasks[index]['status'] = '启用'
+        
+        self.update_task_list()
+        self.save_tasks()
+        self.log(f"已启用 {len(selection)} 个节目")
+    
+    def disable_task(self):
+        """禁用任务"""
+        selection = self.task_tree.selection()
+        if not selection:
+            messagebox.showwarning("警告", "请先选择要禁用的节目")
+            return
+        
+        for item in selection:
+            index = self.task_tree.index(item)
+            self.tasks[index]['status'] = '禁用'
+        
+        self.update_task_list()
+        self.save_tasks()
+        self.log(f"已禁用 {len(selection)} 个节目")
+    
     def update_task_list(self):
         """更新任务列表"""
         for item in self.task_tree.get_children():
             self.task_tree.delete(item)
         
         for task in self.tasks:
-            content_preview = task['content'][:30] + '...' if len(task['content']) > 30 else task['content']
+            task_type = task.get('type', 'voice')
+            if task_type == 'audio':
+                # 音频节目显示文件名
+                import os
+                content_preview = os.path.basename(task['content'])
+            else:
+                # 语音节目显示文本内容
+                content_preview = task['content'][:30] + '...' if len(task['content']) > 30 else task['content']
+            
             self.task_tree.insert('', tk.END, values=(
                 task['name'],
                 task['status'],
@@ -399,11 +725,26 @@ class TimedBroadcastApp:
     
     def _execute_broadcast(self, task, current_date):
         """执行播报"""
-        self.playing_text.delete('1.0', tk.END)
-        self.playing_text.insert('1.0', f"[{task['name']}] {task['content']}")
-        self.log(f"开始播报: {task['name']}")
+        task_type = task.get('type', 'voice')
         
-        threading.Thread(target=self._speak, args=(task['content'],), daemon=True).start()
+        if task_type == 'audio':
+            # 音频文件播放
+            import os
+            filename = os.path.basename(task['content'])
+            self.playing_text.delete('1.0', tk.END)
+            self.playing_text.insert('1.0', f"[{task['name']}] 正在播放音频: {filename}")
+            self.log(f"播放音频: {task['name']} - {filename}")
+            
+            # 这里需要添加音频播放库，如 pygame 或 playsound
+            # 暂时只记录日志
+            self.log("注意：音频播放功能需要安装 pygame 或 playsound 库")
+        else:
+            # 语音播报
+            self.playing_text.delete('1.0', tk.END)
+            self.playing_text.insert('1.0', f"[{task['name']}] {task['content']}")
+            self.log(f"开始播报: {task['name']}")
+            threading.Thread(target=self._speak, args=(task['content'],), daemon=True).start()
+        
         task['last_run'] = current_date
         self.save_tasks()
     
