@@ -407,7 +407,19 @@ class TimedBroadcastApp:
             row=2, column=0, sticky='e', padx=5, pady=8)
         voice_frame = tk.Frame(content_frame, bg='#E8E8E8')
         voice_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=8)
-        available_voices = [v.name for v in self.engine.getProperty('voices')] if self.engine else []
+
+        # --- 修复: 实时刷新获取系统可用语音 ---
+        available_voices = []
+        try:
+            fresh_engine = pyttsx3.init()
+            voices = fresh_engine.getProperty('voices')
+            for voice in voices:
+                available_voices.append(voice.name)
+            fresh_engine.stop()
+        except Exception as e:
+            self.log(f"错误: 无法获取系统语音列表 - {e}")
+            messagebox.showerror("错误", "无法获取系统语音列表，请检查语音引擎设置。")
+
         voice_var = tk.StringVar(value=available_voices[0] if available_voices else "")
         voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, values=available_voices,
                                    font=('Microsoft YaHei', 10), width=35, state='readonly')
@@ -468,7 +480,6 @@ class TimedBroadcastApp:
         weekday_entry = tk.Entry(time_frame, font=('Microsoft YaHei', 10), width=50)
         weekday_entry.insert(0, "每周:1234567")
         weekday_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=5)
-        # --- 修复 2: 按钮文本从 "设置..." 改为 "选取..." ---
         tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry),
                  bg='#D0D0D0', font=('Microsoft YaHei', 10), bd=1, padx=12, pady=2).grid(row=2, column=3, padx=5)
         tk.Label(time_frame, text="日期范围:", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
@@ -699,17 +710,12 @@ class TimedBroadcastApp:
                  font=('Microsoft YaHei', 9), bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
 
     def update_task_list(self):
-        """更新任务列表"""
         selection = self.task_tree.selection()
         self.task_tree.delete(*self.task_tree.get_children())
         for task in self.tasks:
             content = task.get('content', '')
             content_preview = os.path.basename(content) if task.get('type') == 'audio' else (content[:30] + '...' if len(content) > 30 else content)
-            
-            # --- 修复 1: 将 ontime/delay 翻译为中文 ---
-            delay_mode = task.get('delay', 'ontime')
-            display_mode = "准时" if delay_mode == 'ontime' else "延时"
-
+            display_mode = "准时" if task.get('delay', 'ontime') == 'ontime' else "延时"
             self.task_tree.insert('', tk.END, values=(
                 task.get('name', ''), task.get('status', ''), task.get('time', ''),
                 display_mode, content_preview, task.get('volume', ''),
