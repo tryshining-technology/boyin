@@ -14,8 +14,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        python-version: ['3.9']
+        os: [windows-latest]
+        python-version: ['3.10']
 
     steps:
     - name: Checkout code
@@ -29,43 +29,36 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller pyttsx3
+        pip install pyinstaller pyttsx3 pygame
 
     - name: Build with PyInstaller (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        pyinstaller --onefile --windowed --name=boyin --icon=NONE boyin.py
+        pyinstaller --onefile --windowed --name=boyin --add-data="broadcast_tasks.json;." --hidden-import=pygame --collect-all pygame boyin.py
 
-    - name: Build with PyInstaller (Linux)
-      if: matrix.os == 'ubuntu-latest'
+    - name: Create folders in dist
+      if: matrix.os == 'windows-latest'
       run: |
-        pyinstaller --onefile --name=boyin boyin.py
-
-    - name: Build with PyInstaller (macOS)
-      if: matrix.os == 'macos-latest'
-      run: |
-        pyinstaller --onefile --windowed --name=boyin boyin.py
+        mkdir dist\提示音 2>nul || echo "Folder exists"
+        mkdir dist\音频文件 2>nul || echo "Folder exists"
+        echo. > dist\README.txt
+        echo 定时播音系统 > dist\README.txt
+        echo. >> dist\README.txt
+        echo 使用说明: >> dist\README.txt
+        echo 1. 将提示音文件放入"提示音"文件夹 >> dist\README.txt
+        echo 2. 将音频文件放入"音频文件"文件夹 >> dist\README.txt
+        echo 3. 运行 boyin.exe 开始使用 >> dist\README.txt
 
     - name: Upload Windows Artifact
       if: matrix.os == 'windows-latest'
       uses: actions/upload-artifact@v4
       with:
         name: boyin-windows
-        path: dist/boyin.exe
-
-    - name: Upload Linux Artifact
-      if: matrix.os == 'ubuntu-latest'
-      uses: actions/upload-artifact@v4
-      with:
-        name: boyin-linux
-        path: dist/boyin
-
-    - name: Upload macOS Artifact
-      if: matrix.os == 'macos-latest'
-      uses: actions/upload-artifact@v4
-      with:
-        name: boyin-macos
-        path: dist/boyin
+        path: |
+          dist/boyin.exe
+          dist/提示音/
+          dist/音频文件/
+          dist/README.txt
 
     - name: Create Release (on tag push)
       if: startsWith(github.ref, 'refs/tags/')
@@ -73,7 +66,6 @@ jobs:
       with:
         files: |
           dist/boyin.exe
-          dist/boyin
         draft: false
         prerelease: false
       env:
