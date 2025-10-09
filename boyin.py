@@ -35,7 +35,8 @@ class TimedBroadcastApp:
         # 初始化语音引擎
         self.engine = None
         try:
-            self.engine = pyttsx3.init()
+            # --- 修复：强制使用 sapi5 驱动 ---
+            self.engine = pyttsx3.init(driverName='sapi5')
         except Exception as e:
             print(f"严重错误：主语音引擎 pyttsx3 初始化失败 - {e}。语音播报功能将不可用。")
             messagebox.showerror("严重错误", f"主语音引擎初始化失败: {e}\n语音播报功能将不可用。")
@@ -407,7 +408,7 @@ class TimedBroadcastApp:
         voice_frame = tk.Frame(content_frame, bg='#E8E8E8')
         voice_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=8)
         
-        # --- BUG修复: 采用更稳健的语音列表刷新机制 ---
+        # --- 修复: 采用更稳健的语音列表刷新机制 ---
         available_voices = []
         # 1. 首先，获取启动时缓存的语音列表作为备用(fallback)
         if self.engine:
@@ -420,7 +421,8 @@ class TimedBroadcastApp:
 
         # 2. 然后，尝试强制刷新列表以获取最新语音（如 NaturalVoiceSAPIAdapter）
         try:
-            fresh_engine = pyttsx3.init()
+            # --- 修复：强制使用 sapi5 驱动 ---
+            fresh_engine = pyttsx3.init(driverName='sapi5')
             fresh_voices_list = [v.name for v in fresh_engine.getProperty('voices')]
             fresh_engine.stop()
             available_voices = fresh_voices_list # 如果成功，就使用这个最新的列表
