@@ -36,10 +36,9 @@ class TimedBroadcastApp:
         self.engine = None
         try:
             self.engine = pyttsx3.init()
-            self.engine.setProperty('rate', 150)
-            self.engine.setProperty('volume', 1.0)
         except Exception as e:
-            print(f"错误：pyttsx3 语音引擎初始化失败 - {e}。语音播报功能将不可用。")
+            print(f"严重错误：主语音引擎 pyttsx3 初始化失败 - {e}。语音播报功能将不可用。")
+            messagebox.showerror("严重错误", f"主语音引擎初始化失败: {e}\n语音播报功能将不可用。")
 
         # 任务列表
         self.tasks = []
@@ -407,18 +406,32 @@ class TimedBroadcastApp:
             row=2, column=0, sticky='e', padx=5, pady=8)
         voice_frame = tk.Frame(content_frame, bg='#E8E8E8')
         voice_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=8)
-
-        # --- 修复: 实时刷新获取系统可用语音 ---
+        
+        # --- BUG修复: 采用更稳健的语音列表刷新机制 ---
         available_voices = []
+        # 1. 首先，获取启动时缓存的语音列表作为备用(fallback)
+        if self.engine:
+            try:
+                voices = self.engine.getProperty('voices')
+                for voice in voices:
+                    available_voices.append(voice.name)
+            except Exception as e:
+                self.log(f"警告: 无法获取缓存的语音列表 - {e}")
+
+        # 2. 然后，尝试强制刷新列表以获取最新语音（如 NaturalVoiceSAPIAdapter）
         try:
             fresh_engine = pyttsx3.init()
-            voices = fresh_engine.getProperty('voices')
-            for voice in voices:
-                available_voices.append(voice.name)
+            fresh_voices_list = [v.name for v in fresh_engine.getProperty('voices')]
             fresh_engine.stop()
+            available_voices = fresh_voices_list # 如果成功，就使用这个最新的列表
+            self.log("成功刷新系统语音列表。")
         except Exception as e:
-            self.log(f"错误: 无法获取系统语音列表 - {e}")
-            messagebox.showerror("错误", "无法获取系统语音列表，请检查语音引擎设置。")
+            # 如果刷新失败，则不做任何事，继续使用上面获取的备用列表
+            # 只记录一个警告日志，不弹窗打扰用户
+            self.log(f"警告: 实时刷新语音列表失败，将使用启动时的缓存列表。错误: {e}")
+            if not available_voices:
+                # 只有在备用列表也是空的情况下（说明主引擎也出错了），才弹窗报错
+                messagebox.showerror("严重错误", "无法获取任何系统语音，请检查语音引擎设置。")
 
         voice_var = tk.StringVar(value=available_voices[0] if available_voices else "")
         voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, values=available_voices,
