@@ -8,13 +8,13 @@ from datetime import datetime
 import os
 
 # 音频播放库
+AUDIO_AVAILABLE = False
 try:
     import pygame
     pygame.mixer.init()
     AUDIO_AVAILABLE = True
-except ImportError:
-    AUDIO_AVAILABLE = False
-    print("警告: pygame未安装，音频播放功能不可用")
+except Exception as e:
+    print(f"警告: pygame初始化失败 - {e}")
 
 class TimedBroadcastApp:
     def __init__(self, root):
@@ -1202,23 +1202,59 @@ class TimedBroadcastApp:
         if task_type == 'audio':
             # 音频文件播放
             import os
-            filename = os.path.basename(task['content'])
+            audio_path = task['content']
+            
+            # 如果是相对路径，转换为绝对路径
+            if not os.path.isabs(audio_path):
+                audio_path = os.path.abspath(audio_path)
+            
+            if not os.path.exists(audio_path):
+                self.log(f"错误：音频文件不存在 - {audio_path}")
+                return
+            
+            filename = os.path.basename(audio_path)
             self.playing_text.delete('1.0', tk.END)
             self.playing_text.insert('1.0', f"[{task['name']}] 正在播放音频: {filename}")
             self.log(f"播放音频: {task['name']} - {filename}")
             
-            # 这里需要添加音频播放库，如 pygame 或 playsound
-            # 暂时只记录日志
-            self.log("注意：音频播放功能需要安装 pygame 或 playsound 库")
+            if AUDIO_AVAILABLE:
+                threading.Thread(target=self._play_audio, args=(audio_path,), daemon=True).start()
+            else:
+                self.log("错误：pygame未安装，无法播放音频")
         else:
             # 语音播报
             self.playing_text.delete('1.0', tk.END)
             self.playing_text.insert('1.0', f"[{task['name']}] {task['content']}")
             self.log(f"开始播报: {task['name']}")
+            
+            # 如果启用提示音，先播放提示音
+            if task.get('prompt', 0) == 1 and AUDIO_AVAILABLE:
+                prompt_file = task.get('prompt_file', 'tone-b.mp3')
+                prompt_path = os.path.join("提示音", prompt_file)
+                if os.path.exists(prompt_path):
+                    self._play_audio(prompt_path, wait=True)
+            
             threading.Thread(target=self._speak, args=(task['content'],), daemon=True).start()
         
         task['last_run'] = current_date
         self.save_tasks()
+    
+    def _play_audio(self, audio_path, wait=False):
+        """播放音频文件"""
+        try:
+            if not AUDIO_AVAILABLE:
+                self.log("错误：pygame未安装")
+                return
+            
+            pygame.mixer.music.load(audio_path)
+            pygame.mixer.music.play()
+            
+            if wait:
+                # 等待播放完成
+                while pygame.mixer.music.get_busy():
+                    time.sleep(0.1)
+        except Exception as e:
+            self.log(f"音频播放错误: {str(e)}")
     
     def _speak(self, text):
         """语音播报"""
