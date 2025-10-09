@@ -43,8 +43,8 @@ jobs:
       # --icon: (可选) 如果你有图标文件，可以取消注释并使用它
       - name: Build application with PyInstaller
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name TimedBroadcastApp boyin.py
-          # pyinstaller --noconfirm --onefile --windowed --icon=your_icon.ico --name TimedBroadcastApp boyin.py
+          pyinstaller --noconfirm --onefile --windowed --name boyin boyin.py
+          # pyinstaller --noconfirm --onefile --windowed --icon=your_icon.ico --name boyin boyin.py
 
       # 第 5 步：上传构建好的可执行文件作为 "artifact"
       # 这样你就可以在 Actions 页面下载它
