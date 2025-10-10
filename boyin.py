@@ -83,17 +83,27 @@ class TimedBroadcastApp:
         self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
 
-        nav_buttons = [("定时广播", ""), ("立即播播", ""), ("节假日、调休", "节假日不播或、调休"), ("设置", ""), ("语音广告 制作", "")]
+        # --- UI调整：修改侧边栏按钮文本和顺序 ---
+        nav_buttons = [
+            ("定时广播", ""),
+            ("立即插播", ""),
+            ("节假日", ""),
+            ("语音广告 制作", ""),
+            ("设置", ""),
+        ]
+
         for i, (title, subtitle) in enumerate(nav_buttons):
             btn_frame = tk.Frame(self.nav_frame, bg='#5DADE2' if i == 0 else '#A8D8E8')
             btn_frame.pack(fill=tk.X, pady=1)
+            
             btn = tk.Button(btn_frame, text=title, bg='#5DADE2' if i == 0 else '#A8D8E8',
                           fg='white' if i == 0 else 'black', font=('Microsoft YaHei', 13, 'bold'),
                           bd=0, padx=10, pady=8, anchor='w', command=lambda t=title: self.switch_page(t))
             btn.pack(fill=tk.X)
+
             if subtitle:
                 sub_label = tk.Label(btn_frame, text=subtitle, bg='#5DADE2' if i == 0 else '#A8D8E8',
-                                   fg='#FF6B35' if title == "节假日、调休" else ('#555' if i == 0 else '#666'),
+                                   fg='#555' if i == 0 else '#666',
                                    font=('Microsoft YaHei', 10), anchor='w', padx=10)
                 sub_label.pack(fill=tk.X)
 
@@ -197,6 +207,7 @@ class TimedBroadcastApp:
             context_menu.add_separator()
             context_menu.add_command(label="▶️ 启用", command=self.enable_task)
             context_menu.add_command(label="⏸️ 禁用", command=self.disable_task)
+
         else:
             self.task_tree.selection_set()
             context_menu.add_command(label="➕ 添加节目", command=self.add_task)
@@ -1037,26 +1048,29 @@ class TimedBroadcastApp:
                     break
             
             speaker.Rate = int(task.get('speed', '0'))
+            # Pitch 属性在 SAPI5 中是可选的，一些语音可能不支持
+            try:
+                speaker.Pitch = int(task.get('pitch', '0'))
+            except Exception:
+                self.log("警告: 当前语音不支持音调(Pitch)调整。")
+            
             speaker.Volume = int(task.get('volume', 80))
-
+            
             repeat_count = int(task.get('repeat', 1))
-            full_text = (text + " ") * repeat_count
             self.log(f"准备播报 {repeat_count} 遍...")
 
-            # SAPI5 的 Speak 方法是异步的，我们需要等待它完成
-            # 创建一个事件来同步
             event = threading.Event()
             
-            # 回调函数，当播报结束时会被 SAPI 调用
-            def end_stream_callback(stream_number, stream_position):
-                event.set()
+            # 这个回调函数现在不再需要，因为 Speak 方法会阻塞直到完成
+            # speaker.EventInterests = 1 << 1 
+            # speaker.SetNotifyCallback(...)
 
-            # 将回调与 SAPI 事件关联
-            speaker.EventInterests = 1 << 1 # 1 is SPEI_END_INPUT_STREAM
-            speaker.SetNotifyCallback(end_stream_callback)
-
-            speaker.Speak(full_text, 1) # 1 is SVSF_ASYNC
-            event.wait() # 阻塞线程直到播报完成
+            for i in range(repeat_count):
+                if not self.running: break
+                self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
+                speaker.Speak(text, 0) # 0 = SVSF_DEFAULT, 同步阻塞模式
+                if i < repeat_count - 1:
+                    time.sleep(0.5)
 
         except Exception as e:
             self.log(f"播报错误: {e}")
@@ -1065,7 +1079,6 @@ class TimedBroadcastApp:
                 pygame.mixer.music.stop()
                 self.log("背景音乐已停止。")
             self.root.after(0, self.on_playback_finished)
-
 
     def on_playback_finished(self):
         self.update_playing_text("等待下一个任务..."); self.status_labels[2].config(text="播放状态: 待机"); self.log("播放结束")
@@ -1135,15 +1148,13 @@ class TimedBroadcastApp:
             threading.Thread(target=self.tray_icon.run, daemon=True).start()
             self.log("程序已最小化到系统托盘。")
 
-    def show_from_tray(self):
-        if self.tray_icon:
-            self.tray_icon.stop()
-            self.tray_icon = None
+    def show_from_tray(self, icon, item):
+        icon.stop()
         self.root.after(0, self.root.deiconify)
         self.log("程序已从托盘恢复。")
 
-    def quit_app(self, from_tray=False):
-        if from_tray and self.tray_icon:
+    def quit_app(self, icon=None, item=None):
+        if self.tray_icon:
             self.tray_icon.stop()
         self.running = False
         self.save_tasks()
@@ -1159,8 +1170,10 @@ class TimedBroadcastApp:
             image = Image.new('RGB', (64, 64), 'white')
             print(f"警告: 未找到或无法加载图标文件 '{ICON_FILE}': {e}")
         
-        menu = (item('显示', self.show_from_tray, default=True), item('退出', lambda: self.quit_app(from_tray=True)))
+        menu = (item('显示', self.show_from_tray, default=True), item('退出', self.quit_app))
         self.tray_icon = Icon("boyin", image, "定时播音", menu)
+        # 绑定双击事件
+        self.tray_icon.left_click_action = self.show_from_tray
 
 def main():
     root = tk.Tk()
