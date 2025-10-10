@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 import os
 import random
+import sys
 
 # 尝试导入 win32com，这是获取语音列表的最佳方式
 try:
@@ -15,13 +16,18 @@ try:
 except ImportError:
     WIN32COM_AVAILABLE = False
 
+# --- 关键修复：确定程序运行的基础路径 ---
+# 如果是打包后的 .exe 文件，则获取 .exe 所在的目录
+if getattr(sys, 'frozen', False):
+    application_path = os.path.dirname(sys.executable)
+# 如果是直接运行 .py 脚本，则获取脚本所在的目录
+else:
+    application_path = os.path.dirname(os.path.abspath(__file__))
 
 # --- 全局设置 ---
-# 获取脚本所在的目录，确保所有文件路径都是基于此目录
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TASK_FILE = os.path.join(SCRIPT_DIR, "broadcast_tasks.json")
-PROMPT_FOLDER = os.path.join(SCRIPT_DIR, "提示音")
-AUDIO_FOLDER = os.path.join(SCRIPT_DIR, "音频文件")
+TASK_FILE = os.path.join(application_path, "broadcast_tasks.json")
+PROMPT_FOLDER = os.path.join(application_path, "提示音")
+AUDIO_FOLDER = os.path.join(application_path, "音频文件")
 
 # 音频播放库
 AUDIO_AVAILABLE = False
@@ -178,7 +184,6 @@ class TimedBroadcastApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.task_tree.configure(yscrollcommand=scrollbar.set)
         
-        self.create_context_menu()
         self.task_tree.bind("<Button-3>", self.show_context_menu)
 
         playing_frame = tk.LabelFrame(self.main_frame, text="正在播：", font=('Microsoft YaHei', 10),
@@ -213,50 +218,38 @@ class TimedBroadcastApp:
         self.update_status_bar()
         self.log("定时播音软件已启动")
 
-    def create_context_menu(self):
-        """创建并配置右键上下文菜单"""
-        self.context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 10))
-        self.context_menu.add_command(label="➕ 添加节目", command=self.add_task)
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="✏️ 修改选中", command=self.edit_task)
-        self.context_menu.add_command(label="❌ 删除选中", command=self.delete_task)
-        self.context_menu.add_command(label="📋 复制选中", command=self.copy_task)
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="🔼 上移", command=lambda: self.move_task(-1))
-        self.context_menu.add_command(label="🔽 下移", command=lambda: self.move_task(1))
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="▶️ 启用选中", command=self.enable_task)
-        self.context_menu.add_command(label="⏸️ 禁用选中", command=self.disable_task)
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="⏹️ 停止当前播放", command=self.stop_current_playback)
-
     def show_context_menu(self, event):
-        """根据选择状态智能显示右键菜单"""
+        """根据右击位置动态创建并显示上下文菜单"""
         iid = self.task_tree.identify_row(event.y)
-        if iid and iid not in self.task_tree.selection():
-            self.task_tree.selection_set(iid)
-        
-        selection = self.task_tree.selection()
-        num_selected = len(selection)
-
         is_playing = (AUDIO_AVAILABLE and pygame.mixer.music.get_busy()) or \
                      (self.engine and self.engine.isBusy())
         
-        self.context_menu.entryconfig("停止当前播放", state="normal" if is_playing else "disabled")
+        # 创建一个新的菜单
+        context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 10))
 
-        if num_selected == 0:
-            for label in ["修改选中", "删除选中", "复制选中", "上移", "下移", "启用选中", "禁用选中"]:
-                self.context_menu.entryconfig(label, state="disabled")
-        elif num_selected == 1:
-            for label in ["修改选中", "删除选中", "复制选中", "上移", "下移", "启用选中", "禁用选中"]:
-                self.context_menu.entryconfig(label, state="normal")
-        else: # 多选
-            for label in ["删除选中", "复制选中", "启用选中", "禁用选中"]:
-                self.context_menu.entryconfig(label, state="normal")
-            for label in ["修改选中", "上移", "下移"]:
-                self.context_menu.entryconfig(label, state="disabled")
+        if iid: # 如果在某个项目上右击
+            if iid not in self.task_tree.selection():
+                self.task_tree.selection_set(iid)
+            
+            context_menu.add_command(label="✏️ 修改", command=self.edit_task)
+            context_menu.add_command(label="❌ 删除", command=self.delete_task)
+            context_menu.add_command(label="📋 复制", command=self.copy_task)
+            context_menu.add_separator()
+            context_menu.add_command(label="🔼 上移", command=lambda: self.move_task(-1))
+            context_menu.add_command(label="🔽 下移", command=lambda: self.move_task(1))
+            context_menu.add_separator()
+            context_menu.add_command(label="▶️ 启用", command=self.enable_task)
+            context_menu.add_command(label="⏸️ 禁用", command=self.disable_task)
 
-        self.context_menu.post(event.x_root, event.y_root)
+        else: # 如果在空白处右击
+            self.task_tree.selection_set() # 清除所有选择
+            context_menu.add_command(label="➕ 添加节目", command=self.add_task)
+        
+        context_menu.add_separator()
+        stop_state = "normal" if is_playing else "disabled"
+        context_menu.add_command(label="⏹️ 停止当前播放", command=self.stop_current_playback, state=stop_state)
+        
+        context_menu.post(event.x_root, event.y_root)
 
     def stop_current_playback(self):
         """停止当前正在播放的音频或语音"""
@@ -268,7 +261,7 @@ class TimedBroadcastApp:
             self.engine.stop()
             self.log("手动停止语音播报。")
 
-        self.on_playback_finished()
+        self.on_playback_finished() # 更新UI状态
 
     def add_task(self):
         choice_dialog = tk.Toplevel(self.root)
@@ -834,7 +827,6 @@ class TimedBroadcastApp:
                 for trigger_time in [t.strip() for t in task.get('time', '').split(',')]:
                     if trigger_time == current_time_str and task.get('last_run', {}).get(trigger_time) != current_date_str:
                         self.root.after(0, self._execute_broadcast, task, trigger_time)
-                        # 这里不需要 break，以便检查同一秒内是否有其他任务
 
             time.sleep(1)
 
@@ -944,7 +936,7 @@ class TimedBroadcastApp:
                 self.engine.say(text)
                 self.engine.runAndWait()
                 if i < repeat_count - 1:
-                    time.sleep(0.5) # 每遍之间短暂间隔，听起来更自然
+                    time.sleep(0.5)
 
         except Exception as e: self.log(f"播报错误: {e}")
         finally: self.root.after(0, self.on_playback_finished)
