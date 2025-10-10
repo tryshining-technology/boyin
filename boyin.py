@@ -73,6 +73,7 @@ class TimedBroadcastApp:
         self.running = True
         self.task_file = TASK_FILE
         self.tray_icon = None
+        self.stop_playback_flag = threading.Event()
 
         self.create_folder_structure()
         self.create_widgets()
@@ -93,11 +94,8 @@ class TimedBroadcastApp:
         self.nav_frame.pack_propagate(False)
 
         nav_buttons = [
-            ("定时广播", ""),
-            ("立即插播", ""),
-            ("节假日", ""),
-            ("语音广告 制作", ""),
-            ("设置", ""),
+            ("定时广播", ""), ("立即插播", ""), ("节假日", ""),
+            ("语音广告 制作", ""), ("设置", "")
         ]
         for i, (title, subtitle) in enumerate(nav_buttons):
             btn_frame = tk.Frame(self.nav_frame, bg='#5DADE2' if i == 0 else '#A8D8E8')
@@ -234,6 +232,7 @@ class TimedBroadcastApp:
         self._execute_broadcast(task, "manual_play")
 
     def stop_current_playback(self):
+        self.stop_playback_flag.set() # --- 关键修复：设置停止标志
         if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
             pygame.mixer.music.stop()
             self.log("手动停止播放。")
@@ -941,6 +940,7 @@ class TimedBroadcastApp:
             time.sleep(1)
 
     def _execute_broadcast(self, task, trigger_time):
+        self.stop_playback_flag.clear()
         self.update_playing_text(f"[{task['name']}] 正在准备播放...")
         self.status_labels[2].config(text="播放状态: 播放中")
         
@@ -980,7 +980,7 @@ class TimedBroadcastApp:
 
             start_time = time.time()
             for audio_path in playlist:
-                if not self.running: break
+                if self.stop_playback_flag.is_set(): self.log("播放被手动停止。"); break
                 
                 self.log(f"正在播放: {os.path.basename(audio_path)}")
                 self.update_playing_text(f"[{task['name']}] 正在播放: {os.path.basename(audio_path)}")
@@ -989,7 +989,7 @@ class TimedBroadcastApp:
                 pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
                 pygame.mixer.music.play()
 
-                while pygame.mixer.music.get_busy() and self.running:
+                while pygame.mixer.music.get_busy() and not self.stop_playback_flag.is_set():
                     if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds:
                         pygame.mixer.music.stop()
                         self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
@@ -1047,27 +1047,26 @@ class TimedBroadcastApp:
             rate = task.get('speed', '0')
             pitch = task.get('pitch', '0')
             
+            escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("'", "&apos;").replace('"', "&quot;")
+            xml_text = f"<rate absspeed='{rate}'><pitch middle='{pitch}'>{escaped_text}</pitch></rate>"
+            
             repeat_count = int(task.get('repeat', 1))
             self.log(f"准备播报 {repeat_count} 遍...")
 
-            # 使用 XML 来包含重复的文本和属性
-            # 注意：XML标签内的文本不能包含特殊字符如 < > & ' "，需要转义
-            escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("'", "&apos;").replace('"', "&quot;")
-            full_text_with_pause = (escaped_text + " <silence msec='500'/>") * repeat_count
-            xml_text = f"<rate absspeed='{rate}'><pitch middle='{pitch}'>{full_text_with_pause}</pitch></rate>"
-            
-            # 8 = SVSF_IS_XML, 1 = SVSF_ASYNC
-            speaker.Speak(xml_text, 1 | 8) 
-            
-            # SAPI Speak 是异步的，我们需要等待它完成
-            # 通过循环检查 Status.RunningState 来等待
-            # 2 = SRS_DONE
-            while speaker.Status.RunningState != 2:
-                if not self.running:
-                    # 如果程序被要求退出，则停止播报
-                    speaker.Speak("", 3) # 3 = SVSFPurgeBeforeSpeak
-                    break
-                time.sleep(0.1)
+            for i in range(repeat_count):
+                if self.stop_playback_flag.is_set(): self.log("语音播报被手动停止。"); break
+                
+                self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
+                speaker.Speak(xml_text, 1 | 8) # 1=Async, 8=XML
+                
+                while speaker.Status.RunningState != 2: # 2=SRS_DONE
+                    if self.stop_playback_flag.is_set():
+                        speaker.Speak("", 3) # 3 = SVSFPurgeBeforeSpeak, 立即中断
+                        break
+                    time.sleep(0.1)
+                
+                if i < repeat_count - 1:
+                    time.sleep(0.5)
 
         except Exception as e:
             self.log(f"播报错误: {e}")
@@ -1077,7 +1076,6 @@ class TimedBroadcastApp:
                 self.log("背景音乐已停止。")
             pythoncom.CoUninitialize()
             self.root.after(0, self.on_playback_finished)
-
 
     def on_playback_finished(self):
         self.update_playing_text("等待下一个任务..."); self.status_labels[2].config(text="播放状态: 待机"); self.log("播放结束")
@@ -1171,7 +1169,6 @@ class TimedBroadcastApp:
         
         menu = (item('显示', self.show_from_tray, default=True), item('退出', self.quit_app))
         self.tray_icon = Icon("boyin", image, "定时播音", menu)
-        # 绑定的方法需要接受 icon 和 item 两个参数
         self.tray_icon.activations['left'] = self.show_from_tray
 
 def main():
