@@ -28,18 +28,9 @@ jobs:
           pip install pyinstaller
           pywin32_postinstall.py -install
 
-      # --- 最终修复：在 YML 中直接生成 COM 缓存并打包 ---
-      - name: Build application with PyInstaller
-        run: |
-          # 步骤 1: 强制生成 SAPI 的 COM 缓存
-          python -c "from win32com.client import gencache; gencache.EnsureDispatch('SAPI.SpVoice')"
-          
-          # 步骤 2: 找到 gen_py 路径并用 .Trim() 方法移除末尾的换行符
-          $gen_py_path = (python -c "import os, win32com; print(os.path.join(os.path.dirname(win32com.__file__), 'gen_py'))").Trim()
-          
-          # 步骤 3: 执行 PyInstaller 命令
-          pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico --add-data "icon.ico;." --add-data "$gen_py_path;win32com/gen_py" --hidden-import=win32com.gen_py --hidden-import=win32timezone boyin.py
-        shell: pwsh # 必须使用 PowerShell (pwsh) 来支持此语法
+      # --- 最终修复：直接运行 .spec 文件，这是最稳定可靠的方式 ---
+      - name: Build application with PyInstaller spec file
+        run: pyinstaller boyin.spec
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
