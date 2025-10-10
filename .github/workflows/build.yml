@@ -1,44 +1,94 @@
-# 工作流名称
-name: Build Python Application
+name: Build Boyin Executable
 
-# 触发工作流的事件
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build-windows:
-    # 指定运行此任务的虚拟机环境
     runs-on: windows-latest
 
     steps:
-      # 1. 检出代码
-      - name: Check out repository code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      # 2. 设置 Python 环境，并强制使用 64 位架构
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          architecture: 'x64' # <-- 关键修复：强制使用 64 位 Python
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
 
-      # 3. 安装项目依赖和打包工具
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyttsx3 pygame pywin32 pyinstaller
 
-      # 4. 使用 PyInstaller 打包应用程序
-      - name: Build application with PyInstaller
-        run: |
-          pyinstaller --noconfirm --onefile --windowed --name boyin boyin.py
+    - name: Verify Python syntax
+      run: |
+        python -m py_compile boyin.py
 
-      # 5. 上传构建好的可执行文件
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: boyin-Windows-x64
-          path: dist/boyin.exe
+    - name: Test imports
+      run: |
+        python -c "import tkinter; import pyttsx3; import pygame; import win32com.client; print('All imports OK')"
+
+    - name: Build with PyInstaller
+      run: |
+        pyinstaller --onefile --windowed --name=boyin boyin.py
+      continue-on-error: false
+
+    - name: Verify build output
+      run: |
+        if (Test-Path "dist\boyin.exe") {
+          Write-Host "Build successful! EXE created."
+          Get-Item "dist\boyin.exe" | Format-List
+        } else {
+          Write-Error "Build failed! EXE not found."
+          exit 1
+        }
+      shell: pwsh
+
+    - name: Create folders and README
+      run: |
+        New-Item -ItemType Directory -Force -Path "dist\提示音"
+        New-Item -ItemType Directory -Force -Path "dist\音频文件"
+        $readme = @"
+定时播音系统 v1.0
+
+使用说明:
+1. 将提示音文件放入"提示音"文件夹
+2. 将音频文件放入"音频文件"文件夹  
+3. 双击 boyin.exe 运行
+
+功能特点:
+- 定时语音播报 (支持微软自然语音)
+- 音频文件播放
+- 灵活的时间调度
+- 周/月循环播放
+
+支持格式: MP3, WAV, OGG, FLAC
+
+依赖:
+- Python TTS (pyttsx3)
+- pygame 音频库
+- Windows SAPI5 语音引擎
+"@
+        $readme | Out-File -FilePath "dist\README.txt" -Encoding UTF8
+      shell: pwsh
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: boyin-windows-${{ github.sha }}
+        path: dist/
+
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/boyin.exe
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
