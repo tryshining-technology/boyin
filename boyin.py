@@ -21,7 +21,6 @@ WIN32COM_AVAILABLE = False
 try:
     import win32com.client
     import pythoncom
-    # 导入 pywintypes 以便捕获 com_error
     from pywintypes import com_error
     WIN32COM_AVAILABLE = True
 except ImportError:
@@ -1040,7 +1039,8 @@ class TimedBroadcastApp:
                             if self.stop_playback_flag.is_set():
                                 channel.stop()
                                 break
-                            time.sleep(0.1)
+                            pythoncom.PumpWaitingMessages()
+                            time.sleep(0.05)
                 else:
                     self.log(f"警告: 提示音文件不存在 - {prompt_path}")
             
@@ -1075,13 +1075,14 @@ class TimedBroadcastApp:
                     break
                 
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
-                speaker.Speak(xml_text, 1 | 8) 
+                speaker.Speak(xml_text, 1 | 8)
                 
                 while speaker.Status.RunningState != 2:
                     if self.stop_playback_flag.is_set():
                         speaker.Speak("", 3)
                         break
-                    time.sleep(0.1)
+                    pythoncom.PumpWaitingMessages()
+                    time.sleep(0.05)
                 
                 if i < repeat_count - 1 and not self.stop_playback_flag.is_set():
                     time.sleep(0.5)
