@@ -176,10 +176,6 @@ class TimedBroadcastApp:
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.task_tree.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.task_tree.configure(yscrollcommand=scrollbar.set)
-        
-        # --- 新增功能：创建右键菜单 ---
-        self.create_context_menu()
-        self.task_tree.bind("<Button-3>", self.show_context_menu)
 
         playing_frame = tk.LabelFrame(self.main_frame, text="正在播：", font=('Microsoft YaHei', 10),
                                      bg='white', fg='#2C5F7C', padx=10, pady=5)
@@ -212,79 +208,6 @@ class TimedBroadcastApp:
 
         self.update_status_bar()
         self.log("定时播音软件已启动")
-
-    def create_context_menu(self):
-        """创建并配置右键上下文菜单"""
-        self.context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 10))
-        self.context_menu.add_command(label="➕ 添加节目", command=self.add_task)
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="✏️ 修改选中", command=self.edit_task)
-        self.context_menu.add_command(label="❌ 删除选中", command=self.delete_task)
-        self.context_menu.add_command(label="📋 复制选中", command=self.copy_task)
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="🔼 上移", command=lambda: self.move_task(-1))
-        self.context_menu.add_command(label="🔽 下移", command=lambda: self.move_task(1))
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="▶️ 启用选中", command=self.enable_task)
-        self.context_menu.add_command(label="⏸️ 禁用选中", command=self.disable_task)
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="⏹️ 停止当前播放", command=self.stop_current_playback)
-
-    def show_context_menu(self, event):
-        """根据选择状态智能显示右键菜单"""
-        selection = self.task_tree.selection()
-        
-        # 如果右击的位置不在任何已选项上，则清除现有选择
-        iid = self.task_tree.identify_row(event.y)
-        if iid not in selection:
-            self.task_tree.selection_set(iid)
-            selection = self.task_tree.selection()
-
-        num_selected = len(selection)
-
-        if num_selected == 0:
-            self.context_menu.entryconfig("修改选中", state="disabled")
-            self.context_menu.entryconfig("删除选中", state="disabled")
-            self.context_menu.entryconfig("复制选中", state="disabled")
-            self.context_menu.entryconfig("上移", state="disabled")
-            self.context_menu.entryconfig("下移", state="disabled")
-            self.context_menu.entryconfig("启用选中", state="disabled")
-            self.context_menu.entryconfig("禁用选中", state="disabled")
-        elif num_selected == 1:
-            self.context_menu.entryconfig("修改选中", state="normal")
-            self.context_menu.entryconfig("删除选中", state="normal")
-            self.context_menu.entryconfig("复制选中", state="normal")
-            self.context_menu.entryconfig("上移", state="normal")
-            self.context_menu.entryconfig("下移", state="normal")
-            self.context_menu.entryconfig("启用选中", state="normal")
-            self.context_menu.entryconfig("禁用选中", state="normal")
-        else: # 多选
-            self.context_menu.entryconfig("修改选中", state="disabled")
-            self.context_menu.entryconfig("删除选中", state="normal")
-            self.context_menu.entryconfig("复制选中", state="normal")
-            self.context_menu.entryconfig("上移", state="disabled")
-            self.context_menu.entryconfig("下移", state="disabled")
-            self.context_menu.entryconfig("启用选中", state="normal")
-            self.context_menu.entryconfig("禁用选中", state="normal")
-
-        # 检查是否有音频或语音正在播放
-        is_playing = (AUDIO_AVAILABLE and pygame.mixer.music.get_busy()) or \
-                     (self.engine and self.engine.isBusy())
-        self.context_menu.entryconfig("停止当前播放", state="normal" if is_playing else "disabled")
-
-        self.context_menu.post(event.x_root, event.y_root)
-
-    def stop_current_playback(self):
-        """停止当前正在播放的音频或语音"""
-        if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
-            pygame.mixer.music.stop()
-            self.log("手动停止音频播放。")
-        
-        if self.engine and self.engine.isBusy():
-            self.engine.stop()
-            self.log("手动停止语音播报。")
-
-        self.on_playback_finished() # 更新UI状态
 
     def add_task(self):
         choice_dialog = tk.Toplevel(self.root)
@@ -501,9 +424,10 @@ class TimedBroadcastApp:
                 self.log("成功通过 win32com 刷新语音列表。")
             except Exception as e:
                 self.log(f"警告: 使用 win32com 获取语音列表失败 - {e}")
+                # 标记失败，以便回退
                 available_voices = []
 
-        if not available_voices:
+        if not available_voices: # 如果 win32com 失败或不可用，则回退到 pyttsx3
             self.log("win32com 未能获取语音，回退到 pyttsx3 方法。")
             if self.engine:
                 try:
@@ -876,7 +800,6 @@ class TimedBroadcastApp:
         if not self.engine: self.log("错误：语音引擎未初始化"); self.root.after(0, self.on_playback_finished); return
         try:
             selected_voice_desc = task.get('voice')
-            
             if WIN32COM_AVAILABLE:
                 try:
                     speaker = win32com.client.Dispatch("SAPI.SpVoice")
