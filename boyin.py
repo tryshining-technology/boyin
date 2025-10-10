@@ -1032,13 +1032,15 @@ class TimedBroadcastApp:
                     prompt_volume = float(task.get('prompt_volume', 80)) / 100.0
                     sound.set_volume(prompt_volume)
                     
-                    # --- BUG修复代码 ---
+                    # --- 最终修复代码 ---
                     channel = sound.play()
-                    while channel.get_busy():
-                        if self.stop_playback_flag.is_set():
-                            channel.stop()
-                            break
-                        time.sleep(0.1)
+                    # 检查channel是否有效，在无声卡环境(如GitHub Actions)中，channel会是None
+                    if channel:
+                        while channel.get_busy():
+                            if self.stop_playback_flag.is_set():
+                                channel.stop()
+                                break
+                            time.sleep(0.1)
                     # --- 修复结束 ---
                 else:
                     self.log(f"警告: 提示音文件不存在 - {prompt_path}")
@@ -1070,21 +1072,16 @@ class TimedBroadcastApp:
                     break
                 
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
-                # SVSF_ASYNC(1) | SVSF_XML(8)
                 speaker.Speak(xml_text, 1 | 8) 
                 
-                # 等待播报完成
-                while speaker.Status.RunningState != 2: # 2 = SRS_DONE
+                while speaker.Status.RunningState != 2:
                     if self.stop_playback_flag.is_set():
-                        # SVSFPurgeBeforeSpeak(2) | SVSFIsXML(8) = 10，这里应该是直接停止
-                        # SVSFPurgeBeforeSpeak (值为2) 可以清除队列，但更直接的是使用 Speak("", 3)
-                        # 3 = SVSF_ASYNC(1) | SVSFPurgeBeforeSpeak(2)
                         speaker.Speak("", 3)
                         break
                     time.sleep(0.1)
                 
                 if i < repeat_count - 1 and not self.stop_playback_flag.is_set():
-                    time.sleep(0.5) # 两遍之间的间隔
+                    time.sleep(0.5)
 
         except InterruptedError as e:
             self.log(f"播报中断: {e}")
@@ -1200,4 +1197,4 @@ def main():
     root.mainloop()
 
 if __name__ == "__main__":
-    main()```
+    main()
