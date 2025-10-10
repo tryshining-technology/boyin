@@ -9,18 +9,27 @@ import os
 import random
 import sys
 
-# 尝试导入 win32com，这是获取语音列表的最佳方式
+# 尝试导入托盘图标库
+TRAY_AVAILABLE = False
+try:
+    from pystray import MenuItem as item, Icon
+    from PIL import Image
+    TRAY_AVAILABLE = True
+except ImportError:
+    print("警告: 未安装 pystray 或 Pillow 库 (pip install pystray Pillow)，最小化到托盘功能将不可用。")
+
+# 尝试导入 win32com
+WIN32COM_AVAILABLE = False
 try:
     import win32com.client
     WIN32COM_AVAILABLE = True
 except ImportError:
-    WIN32COM_AVAILABLE = False
+    print("警告: 未安装 pywin32 库 (pip install pywin32)，将使用备用方法获取语音列表。")
+
 
 # --- 关键修复：确定程序运行的基础路径 ---
-# 如果是打包后的 .exe 文件，则获取 .exe 所在的目录
 if getattr(sys, 'frozen', False):
     application_path = os.path.dirname(sys.executable)
-# 如果是直接运行 .py 脚本，则获取脚本所在的目录
 else:
     application_path = os.path.dirname(os.path.abspath(__file__))
 
@@ -28,7 +37,8 @@ else:
 TASK_FILE = os.path.join(application_path, "broadcast_tasks.json")
 PROMPT_FOLDER = os.path.join(application_path, "提示音")
 AUDIO_FOLDER = os.path.join(application_path, "音频文件")
-BGM_FOLDER = os.path.join(application_path, "文稿背景") # 新增背景音乐文件夹
+BGM_FOLDER = os.path.join(application_path, "文稿背景")
+ICON_FILE = os.path.join(application_path, "icon.png") # 图标文件路径
 
 # 音频播放库
 AUDIO_AVAILABLE = False
@@ -47,6 +57,13 @@ class TimedBroadcastApp:
         self.root.title("定时播音")
         self.root.geometry("1400x800")
         self.root.configure(bg='#E8F4F8')
+        
+        # 设置窗口图标
+        if os.path.exists(ICON_FILE):
+            try:
+                self.root.iconphoto(True, tk.PhotoImage(file=ICON_FILE))
+            except Exception as e:
+                print(f"加载图标失败: {e}")
 
         # 任务列表
         self.tasks = []
@@ -67,7 +84,9 @@ class TimedBroadcastApp:
         self.start_background_thread()
         
         # 绑定关闭事件
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
+        
+        self.tray_icon = None
 
     def create_folder_structure(self):
         """创建必要的文件夹结构"""
@@ -170,6 +189,7 @@ class TimedBroadcastApp:
         self.task_tree.configure(yscrollcommand=scrollbar.set)
         
         self.task_tree.bind("<Button-3>", self.show_context_menu)
+        self.task_tree.bind("<Double-1>", self.on_double_click_edit)
 
         playing_frame = tk.LabelFrame(self.main_frame, text="正在播：", font=('Microsoft YaHei', 10),
                                      bg='white', fg='#2C5F7C', padx=10, pady=5)
@@ -203,6 +223,11 @@ class TimedBroadcastApp:
         self.update_status_bar()
         self.log("定时播音软件已启动")
 
+    def on_double_click_edit(self, event):
+        """处理双击事件以进行编辑"""
+        if self.task_tree.selection():
+            self.edit_task()
+
     def show_context_menu(self, event):
         """根据右击位置动态创建并显示上下文菜单"""
         iid = self.task_tree.identify_row(event.y)
@@ -235,7 +260,7 @@ class TimedBroadcastApp:
         context_menu.post(event.x_root, event.y_root)
 
     def stop_current_playback(self):
-        """停止当前正在播放的音频或语音"""
+        """停止当前正在播放的音频"""
         if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
             pygame.mixer.music.stop()
             self.log("手动停止播放。")
@@ -265,9 +290,7 @@ class TimedBroadcastApp:
         voice_btn.pack(pady=8)
 
     def open_audio_dialog(self, parent_dialog, task_to_edit=None, index=None):
-        """打开音频节目添加或修改对话框"""
         parent_dialog.destroy()
-        
         is_edit_mode = task_to_edit is not None
 
         dialog = tk.Toplevel(self.root)
@@ -400,25 +423,26 @@ class TimedBroadcastApp:
                       font=('Microsoft YaHei', 10)).pack(anchor='w')
 
         if is_edit_mode:
-            name_entry.insert(0, task_to_edit.get('name', ''))
-            start_time_entry.insert(0, task_to_edit.get('time', ''))
-            audio_type_var.set(task_to_edit.get('audio_type', 'single'))
-            if task_to_edit.get('audio_type') == 'single':
+            task = task_to_edit
+            name_entry.insert(0, task.get('name', ''))
+            start_time_entry.insert(0, task.get('time', ''))
+            audio_type_var.set(task.get('audio_type', 'single'))
+            if task.get('audio_type') == 'single':
                 audio_single_entry.config(state='normal')
-                audio_single_entry.insert(0, task_to_edit.get('content', ''))
+                audio_single_entry.insert(0, task.get('content', ''))
                 audio_single_entry.config(state='readonly')
             else:
                 audio_folder_entry.config(state='normal')
-                audio_folder_entry.insert(0, task_to_edit.get('content', ''))
+                audio_folder_entry.insert(0, task.get('content', ''))
                 audio_folder_entry.config(state='readonly')
-            play_order_var.set(task_to_edit.get('play_order', 'sequential'))
-            volume_entry.insert(0, task_to_edit.get('volume', '80'))
-            interval_var.set(task_to_edit.get('interval_type', 'first'))
-            interval_first_entry.insert(0, task_to_edit.get('interval_first', '1'))
-            interval_seconds_entry.insert(0, task_to_edit.get('interval_seconds', '600'))
-            weekday_entry.insert(0, task_to_edit.get('weekday', '每周:1234567'))
-            date_range_entry.insert(0, task_to_edit.get('date_range', '2000-01-01 ~ 2099-12-31'))
-            delay_var.set(task_to_edit.get('delay', 'ontime'))
+            play_order_var.set(task.get('play_order', 'sequential'))
+            volume_entry.insert(0, task.get('volume', '80'))
+            interval_var.set(task.get('interval_type', 'first'))
+            interval_first_entry.insert(0, task.get('interval_first', '1'))
+            interval_seconds_entry.insert(0, task.get('interval_seconds', '600'))
+            weekday_entry.insert(0, task.get('weekday', '每周:1234567'))
+            date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            delay_var.set(task.get('delay', 'ontime'))
         else:
             volume_entry.insert(0, "80")
             interval_first_entry.insert(0, "1")
@@ -469,7 +493,8 @@ class TimedBroadcastApp:
 
         dialog = tk.Toplevel(self.root)
         dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
-        dialog.geometry("800x750")
+        # --- Bug修复 3: 增加语音对话框高度 ---
+        dialog.geometry("800x800") 
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#E8E8E8')
         
@@ -492,7 +517,6 @@ class TimedBroadcastApp:
         content_text.pack(fill=tk.BOTH, expand=True)
 
         # --- 功能3: 语音节目UI重构 ---
-        # 行 2: 播音员
         tk.Label(content_frame, text="播音员:", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
             row=2, column=0, sticky='w', padx=5, pady=8)
         voice_frame = tk.Frame(content_frame, bg='#E8E8E8')
@@ -503,7 +527,6 @@ class TimedBroadcastApp:
                                    font=('Microsoft YaHei', 10), width=50, state='readonly')
         voice_combo.pack(side=tk.LEFT)
 
-        # 行 3: 语速/语调/音量
         speech_params_frame = tk.Frame(content_frame, bg='#E8E8E8')
         speech_params_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=5)
         tk.Label(speech_params_frame, text="语速(-10~10):", font=('Microsoft YaHei', 10), bg='#E8E8E8').pack(side=tk.LEFT, padx=(0,5))
@@ -516,7 +539,6 @@ class TimedBroadcastApp:
         volume_entry = tk.Entry(speech_params_frame, font=('Microsoft YaHei', 10), width=8)
         volume_entry.pack(side=tk.LEFT, padx=5)
 
-        # 行 4: 提示音
         prompt_var = tk.IntVar()
         prompt_frame = tk.Frame(content_frame, bg='#E8E8E8')
         prompt_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=5)
@@ -528,7 +550,6 @@ class TimedBroadcastApp:
         tk.Label(prompt_frame, text="音量(0-100):", font=('Microsoft YaHei', 10), bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
         tk.Entry(prompt_frame, textvariable=prompt_volume_var, font=('Microsoft YaHei', 10), width=8).pack(side=tk.LEFT, padx=5)
 
-        # 行 5: 背景音乐
         bgm_var = tk.IntVar()
         bgm_frame = tk.Frame(content_frame, bg='#E8E8E8')
         bgm_frame.grid(row=5, column=1, columnspan=3, sticky='w', padx=5, pady=5)
@@ -586,7 +607,6 @@ class TimedBroadcastApp:
                       variable=delay_var, value="delay", bg='#E8E8E8',
                       font=('Microsoft YaHei', 10)).pack(anchor='w', pady=2)
 
-        # 默认值 & 填充修改数据
         if is_edit_mode:
             task = task_to_edit
             name_entry.insert(0, task.get('name', ''))
@@ -607,7 +627,6 @@ class TimedBroadcastApp:
             date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31'))
             delay_var.set(task.get('delay', 'delay'))
         else:
-            # 新建时的默认值
             speed_entry.insert(0, "0")
             pitch_entry.insert(0, "0")
             volume_entry.insert(0, "80")
@@ -719,18 +738,23 @@ class TimedBroadcastApp:
         index = self.task_tree.index(selection[0])
         task = self.tasks[index]
         
-        # 创建一个临时的父窗口，用完即毁，避免影响主窗口
         dummy_parent = tk.Toplevel(self.root)
         dummy_parent.withdraw()
 
         if task.get('type') == 'audio':
             self.open_audio_dialog(dummy_parent, task_to_edit=task, index=index)
-        else: # voice
+        else:
             self.open_voice_dialog(dummy_parent, task_to_edit=task, index=index)
         
-        # 确保在对话框关闭后销毁临时父窗口
-        dialog_closed_check = lambda: dummy_parent.destroy() if not dummy_parent.winfo_children() else self.root.after(100, dialog_closed_check)
-        self.root.after(100, dialog_closed_check)
+        def check_dialog_closed():
+            try:
+                if not dummy_parent.winfo_children():
+                    dummy_parent.destroy()
+                else:
+                    self.root.after(100, check_dialog_closed)
+            except tk.TclError:
+                pass 
+        self.root.after(100, check_dialog_closed)
 
     def copy_task(self):
         selections = self.task_tree.selection()
@@ -981,7 +1005,7 @@ class TimedBroadcastApp:
             if task.get('audio_type') == 'single':
                 if os.path.exists(task['content']):
                     playlist = [task['content']] * repeat_count
-            else: # folder
+            else:
                 folder_path = task['content']
                 if os.path.isdir(folder_path):
                     all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.ogg'))]
@@ -1017,10 +1041,9 @@ class TimedBroadcastApp:
         finally:
             self.root.after(0, self.on_playback_finished)
 
-
     def _speak(self, text, task):
-        """执行语音播报的核心函数，每次都创建一个新的引擎实例以保证稳定性"""
         try:
+            # 背景音乐
             if task.get('bgm', 0) and AUDIO_AVAILABLE:
                 bgm_file = task.get('bgm_file', '')
                 bgm_path = os.path.join(BGM_FOLDER, bgm_file)
@@ -1029,10 +1052,11 @@ class TimedBroadcastApp:
                     pygame.mixer.music.load(bgm_path)
                     bgm_volume = float(task.get('bgm_volume', 40)) / 100.0
                     pygame.mixer.music.set_volume(bgm_volume)
-                    pygame.mixer.music.play(-1) # -1 表示无限循环
+                    pygame.mixer.music.play(-1)
                 else:
                     self.log(f"警告: 背景音乐文件不存在 - {bgm_path}")
 
+            # 提示音
             if task.get('prompt', 0) and AUDIO_AVAILABLE:
                 prompt_file = task.get('prompt_file', '')
                 prompt_path = os.path.join(PROMPT_FOLDER, prompt_file)
@@ -1046,8 +1070,9 @@ class TimedBroadcastApp:
                 else:
                     self.log(f"警告: 提示音文件不存在 - {prompt_path}")
             
-            # --- 关键修复：每次播报都创建一个新引擎 ---
+            # 每次都创建一个新的、干净的引擎实例
             engine = pyttsx3.init(driverName='sapi5')
+            
             selected_voice_desc = task.get('voice')
             if WIN32COM_AVAILABLE:
                 try:
@@ -1062,13 +1087,18 @@ class TimedBroadcastApp:
                 for v in engine.getProperty('voices'):
                     if v.name == selected_voice_desc: engine.setProperty('voice', v.id); break
             
-            # 设置语速（-10到10映射到pyttsx3的范围，假设基础速率为150）
-            base_rate = 150
-            rate_adj = int(task.get('speed', '0'))
-            engine.setProperty('rate', base_rate + rate_adj * 10) # 调整幅度可以按需修改
+            # SAPI5 支持 Rate 和 Pitch 属性，范围是 -10 到 10
+            # pyttsx3 的 rate 是 词/分钟，我们不再使用它
+            # engine.setProperty('rate', base_rate + rate_adj * 10) 
+            # 我们需要直接与 SAPI5 voice 对象交互来设置这些
+            if WIN32COM_AVAILABLE:
+                try:
+                    sapi_voice = engine.driver.voice
+                    sapi_voice.Rate = int(task.get('speed', '0'))
+                    sapi_voice.Pitch = int(task.get('pitch', '0'))
+                except Exception as e:
+                    self.log(f"警告: 设置语速/音调失败 - {e}")
 
-            # pyttsx3不直接支持音调(pitch)调整，这是一个SAPI5的功能
-            # 我们直接设置音量
             volume = float(task.get('volume', 80)) / 100.0
             engine.setProperty('volume', volume)
             
@@ -1081,7 +1111,7 @@ class TimedBroadcastApp:
                 if i < repeat_count - 1:
                     time.sleep(0.5)
             
-            engine.stop() # 释放引擎
+            engine.stop()
 
         except Exception as e: self.log(f"播报错误: {e}")
         finally:
@@ -1089,7 +1119,6 @@ class TimedBroadcastApp:
                 pygame.mixer.music.stop()
                 self.log("背景音乐已停止。")
             self.root.after(0, self.on_playback_finished)
-
 
     def on_playback_finished(self):
         self.update_playing_text("等待下一个任务..."); self.status_labels[2].config(text="播放状态: 待机"); self.log("播放结束")
@@ -1131,11 +1160,59 @@ class TimedBroadcastApp:
         y = (win.winfo_screenheight() // 2) - (height // 2)
         win.geometry(f'{width}x{height}+{x}+{y}')
 
-    def on_closing(self):
-        if messagebox.askokcancel("退出", "确定要退出定时播音软件吗？"):
-            self.running = False; self.save_tasks()
-            if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
-            self.root.destroy()
+    def show_quit_dialog(self):
+        """显示自定义的退出对话框"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("确认")
+        dialog.geometry("350x150")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        self.center_window(dialog, 350, 150)
+        
+        tk.Label(dialog, text="您想要如何操作？", font=('Microsoft YaHei', 12), pady=20).pack()
+        
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(pady=10)
+        
+        tk.Button(btn_frame, text="退出程序", command=lambda: [dialog.destroy(), self.quit_app()]).pack(side=tk.LEFT, padx=10)
+        
+        if TRAY_AVAILABLE:
+            tk.Button(btn_frame, text="最小化到托盘", command=lambda: [dialog.destroy(), self.hide_to_tray()]).pack(side=tk.LEFT, padx=10)
+            
+        tk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=tk.LEFT, padx=10)
+
+    def hide_to_tray(self):
+        """隐藏主窗口并显示托盘图标"""
+        self.root.withdraw()
+        if not self.tray_icon:
+            self.setup_tray_icon()
+        threading.Thread(target=self.tray_icon.run, daemon=True).start()
+        self.log("程序已最小化到系统托盘。")
+
+    def show_from_tray(self):
+        """从托盘恢复主窗口"""
+        self.tray_icon.stop()
+        self.tray_icon = None
+        self.root.after(0, self.root.deiconify)
+        self.log("程序已从托盘恢复。")
+
+    def quit_app(self, from_tray=False):
+        """完全退出应用程序"""
+        if from_tray and self.tray_icon:
+            self.tray_icon.stop()
+        self.running = False
+        self.save_tasks()
+        if AUDIO_AVAILABLE and pygame.mixer.get_init():
+            pygame.mixer.quit()
+        self.root.destroy()
+        sys.exit()
+
+    def setup_tray_icon(self):
+        """设置托盘图标和菜单"""
+        image = Image.open(ICON_FILE) if os.path.exists(ICON_FILE) else Image.new('RGB', (64, 64), 'white')
+        menu = (item('显示', self.show_from_tray, default=True), item('退出', lambda: self.quit_app(from_tray=True)))
+        self.tray_icon = Icon("TimedBroadcastApp", image, "定时播音", menu)
 
 def main():
     root = tk.Tk()
