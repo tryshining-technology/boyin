@@ -20,7 +20,7 @@ except ImportError:
 WIN32COM_AVAILABLE = False
 try:
     import win32com.client
-    import pythoncom # 导入 pythoncom 用于 CoInitialize
+    import pythoncom
     WIN32COM_AVAILABLE = True
 except ImportError:
     print("警告: pywin32 未安装，语音功能将受限。")
@@ -42,7 +42,6 @@ def resource_path(relative_path):
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
-
     return os.path.join(base_path, relative_path)
 
 # --- 全局路径设置 ---
@@ -100,16 +99,13 @@ class TimedBroadcastApp:
             ("语音广告 制作", ""),
             ("设置", ""),
         ]
-
         for i, (title, subtitle) in enumerate(nav_buttons):
             btn_frame = tk.Frame(self.nav_frame, bg='#5DADE2' if i == 0 else '#A8D8E8')
             btn_frame.pack(fill=tk.X, pady=1)
-            
             btn = tk.Button(btn_frame, text=title, bg='#5DADE2' if i == 0 else '#A8D8E8',
                           fg='white' if i == 0 else 'black', font=('Microsoft YaHei', 13, 'bold'),
                           bd=0, padx=10, pady=8, anchor='w', command=lambda t=title: self.switch_page(t))
             btn.pack(fill=tk.X)
-
             if subtitle:
                 sub_label = tk.Label(btn_frame, text=subtitle, bg='#5DADE2' if i == 0 else '#A8D8E8',
                                    fg='#555' if i == 0 else '#666',
@@ -299,7 +295,7 @@ class TimedBroadcastApp:
         tk.Label(audio_single_frame, text="00:00", font=('Microsoft YaHei', 10), bg='#E8E8E8').pack(side=tk.LEFT, padx=10)
         def select_single_audio():
             filename = filedialog.askopenfilename(title="选择音频文件", initialdir=AUDIO_FOLDER,
-                filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac"), ("所有文件", "*.*")])
+                filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")])
             if filename:
                 audio_single_entry.config(state='normal'); audio_single_entry.delete(0, tk.END)
                 audio_single_entry.insert(0, filename); audio_single_entry.config(state='readonly')
@@ -661,10 +657,12 @@ class TimedBroadcastApp:
         available_voices = []
         if WIN32COM_AVAILABLE:
             try:
+                pythoncom.CoInitialize()
                 speaker = win32com.client.Dispatch("SAPI.SpVoice")
                 voices = speaker.GetVoices()
                 available_voices = [v.GetDescription() for v in voices]
                 self.log("成功通过 win32com 刷新语音列表。")
+                pythoncom.CoUninitialize()
             except Exception as e:
                 self.log(f"警告: 使用 win32com 获取语音列表失败 - {e}")
                 available_voices = []
@@ -676,7 +674,7 @@ class TimedBroadcastApp:
         filename = filedialog.askopenfilename(
             title="选择文件",
             initialdir=initial_dir,
-            filetypes=[("音频文件", "*.mp3 *.wav *.ogg"), ("所有文件", "*.*")]
+            filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")]
         )
         if filename:
             string_var.set(os.path.basename(filename))
@@ -972,7 +970,7 @@ class TimedBroadcastApp:
             else:
                 folder_path = task['content']
                 if os.path.isdir(folder_path):
-                    all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.ogg'))]
+                    all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
                     if task.get('play_order') == 'random':
                         random.shuffle(all_files)
                     playlist = all_files[:repeat_count]
@@ -1049,19 +1047,27 @@ class TimedBroadcastApp:
             rate = task.get('speed', '0')
             pitch = task.get('pitch', '0')
             
-            # --- 关键修复：使用 SAPI XML ---
-            xml_text = f"<rate absspeed='{rate}'><pitch middle='{pitch}'>{text}</pitch></rate>"
-            
             repeat_count = int(task.get('repeat', 1))
             self.log(f"准备播报 {repeat_count} 遍...")
 
-            for i in range(repeat_count):
-                if not self.running: break
-                self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
-                # 8 = SVSF_IS_XML
-                speaker.Speak(xml_text, 8)
-                if i < repeat_count - 1:
-                    time.sleep(0.5)
+            # 使用 XML 来包含重复的文本和属性
+            # 注意：XML标签内的文本不能包含特殊字符如 < > & ' "，需要转义
+            escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("'", "&apos;").replace('"', "&quot;")
+            full_text_with_pause = (escaped_text + " <silence msec='500'/>") * repeat_count
+            xml_text = f"<rate absspeed='{rate}'><pitch middle='{pitch}'>{full_text_with_pause}</pitch></rate>"
+            
+            # 8 = SVSF_IS_XML, 1 = SVSF_ASYNC
+            speaker.Speak(xml_text, 1 | 8) 
+            
+            # SAPI Speak 是异步的，我们需要等待它完成
+            # 通过循环检查 Status.RunningState 来等待
+            # 2 = SRS_DONE
+            while speaker.Status.RunningState != 2:
+                if not self.running:
+                    # 如果程序被要求退出，则停止播报
+                    speaker.Speak("", 3) # 3 = SVSFPurgeBeforeSpeak
+                    break
+                time.sleep(0.1)
 
         except Exception as e:
             self.log(f"播报错误: {e}")
@@ -1165,8 +1171,8 @@ class TimedBroadcastApp:
         
         menu = (item('显示', self.show_from_tray, default=True), item('退出', self.quit_app))
         self.tray_icon = Icon("boyin", image, "定时播音", menu)
-        # pystray 的 left_click_action 在某些系统上可能不稳定，default=True 是更可靠的方式
-        # self.tray_icon.left_click_action = self.show_from_tray
+        # 绑定的方法需要接受 icon 和 item 两个参数
+        self.tray_icon.activations['left'] = self.show_from_tray
 
 def main():
     root = tk.Tk()
