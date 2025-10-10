@@ -74,7 +74,7 @@ class TimedBroadcastApp:
         self.running = True
         self.task_file = TASK_FILE
         self.tray_icon = None
-        self.stop_playback_flag = threading.Event()
+        # self.stop_playback_flag = threading.Event() # 暂时禁用
 
         self.create_folder_structure()
         self.create_widgets()
@@ -192,7 +192,6 @@ class TimedBroadcastApp:
 
     def show_context_menu(self, event):
         iid = self.task_tree.identify_row(event.y)
-        is_playing = (AUDIO_AVAILABLE and pygame.mixer.music.get_busy())
         
         context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 10))
 
@@ -217,8 +216,8 @@ class TimedBroadcastApp:
             context_menu.add_command(label="➕ 添加节目", command=self.add_task)
         
         context_menu.add_separator()
-        stop_state = "normal" if is_playing else "disabled"
-        context_menu.add_command(label="⏹️ 停止当前播放", command=self.stop_current_playback, state=stop_state)
+        # 停止播放功能已禁用
+        context_menu.add_command(label="⏹️ 停止当前播放", command=self.stop_current_playback, state="disabled")
         
         context_menu.post(event.x_root, event.y_root)
 
@@ -233,11 +232,9 @@ class TimedBroadcastApp:
         self._execute_broadcast(task, "manual_play")
 
     def stop_current_playback(self):
-        self.stop_playback_flag.set()
-        if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
-            pygame.mixer.music.stop()
-            self.log("手动停止播放。")
-        self.on_playback_finished()
+        # 停止功能已暂时移除以进行调试
+        self.log("注意：停止播放功能已暂时禁用。")
+        pass
 
     def add_task(self):
         choice_dialog = tk.Toplevel(self.root)
@@ -941,7 +938,7 @@ class TimedBroadcastApp:
             time.sleep(1)
 
     def _execute_broadcast(self, task, trigger_time):
-        self.stop_playback_flag.clear()
+        # self.stop_playback_flag.clear() # 禁用
         self.update_playing_text(f"[{task['name']}] 正在准备播放...")
         self.status_labels[2].config(text="播放状态: 播放中")
         
@@ -981,7 +978,7 @@ class TimedBroadcastApp:
 
             start_time = time.time()
             for audio_path in playlist:
-                if self.stop_playback_flag.is_set(): self.log("播放被手动停止。"); break
+                # if self.stop_playback_flag.is_set(): self.log("播放被手动停止。"); break # 禁用
                 
                 self.log(f"正在播放: {os.path.basename(audio_path)}")
                 self.update_playing_text(f"[{task['name']}] 正在播放: {os.path.basename(audio_path)}")
@@ -990,7 +987,7 @@ class TimedBroadcastApp:
                 pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
                 pygame.mixer.music.play()
 
-                while pygame.mixer.music.get_busy() and not self.stop_playback_flag.is_set():
+                while pygame.mixer.music.get_busy(): # 移除 and not self.stop_playback_flag.is_set()
                     if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds:
                         pygame.mixer.music.stop()
                         self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
@@ -1036,21 +1033,14 @@ class TimedBroadcastApp:
                     channel = sound.play()
                     if channel:
                         while channel.get_busy():
-                            if self.stop_playback_flag.is_set():
-                                channel.stop()
-                                break
-                            pythoncom.PumpWaitingMessages()
                             time.sleep(0.05)
                 else:
                     self.log(f"警告: 提示音文件不存在 - {prompt_path}")
             
-            if self.stop_playback_flag.is_set():
-                raise InterruptedError("Playback stopped during prompt sound")
-
             try:
                 speaker = win32com.client.Dispatch("SAPI.SpVoice")
             except com_error as e:
-                self.log(f"严重错误: 无法初始化语音引擎! PyInstaller打包可能缺少组件。错误: {e}")
+                self.log(f"严重错误: 无法初始化语音引擎! 错误: {e}")
                 raise
 
             all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
@@ -1070,25 +1060,13 @@ class TimedBroadcastApp:
             self.log(f"准备播报 {repeat_count} 遍...")
 
             for i in range(repeat_count):
-                if self.stop_playback_flag.is_set(): 
-                    self.log("语音播报被手动停止。")
-                    break
-                
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
-                speaker.Speak(xml_text, 1 | 8)
+                # 使用阻塞模式 (0) + XML (8) = 8
+                speaker.Speak(xml_text, 8)
                 
-                while speaker.Status.RunningState != 2:
-                    if self.stop_playback_flag.is_set():
-                        speaker.Speak("", 3)
-                        break
-                    pythoncom.PumpWaitingMessages()
-                    time.sleep(0.05)
-                
-                if i < repeat_count - 1 and not self.stop_playback_flag.is_set():
+                if i < repeat_count - 1:
                     time.sleep(0.5)
 
-        except InterruptedError as e:
-            self.log(f"播报中断: {e}")
         except Exception as e:
             self.log(f"播报错误: {e}")
         finally:
@@ -1099,7 +1077,7 @@ class TimedBroadcastApp:
             self.root.after(0, self.on_playback_finished)
 
     def on_playback_finished(self):
-        self.stop_playback_flag.clear()
+        # self.stop_playback_flag.clear() # 禁用
         self.update_playing_text("等待下一个任务...")
         self.status_labels[2].config(text="播放状态: 待机")
         self.log("播放结束")
