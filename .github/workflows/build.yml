@@ -53,28 +53,27 @@ jobs:
       run: |
         New-Item -ItemType Directory -Force -Path "dist\提示音"
         New-Item -ItemType Directory -Force -Path "dist\音频文件"
-        $readme = @"
-定时播音系统 v1.0
-
-使用说明:
-1. 将提示音文件放入"提示音"文件夹
-2. 将音频文件放入"音频文件"文件夹  
-3. 双击 boyin.exe 运行
-
-功能特点:
-- 定时语音播报 (支持微软自然语音)
-- 音频文件播放
-- 灵活的时间调度
-- 周/月循环播放
-
-支持格式: MP3, WAV, OGG, FLAC
-
-依赖:
-- Python TTS (pyttsx3)
-- pygame 音频库
-- Windows SAPI5 语音引擎
-"@
-        $readme | Out-File -FilePath "dist\README.txt" -Encoding UTF8
+        @"
+        定时播音系统 v1.0
+        
+        使用说明:
+        1. 将提示音文件放入"提示音"文件夹
+        2. 将音频文件放入"音频文件"文件夹  
+        3. 双击 boyin.exe 运行
+        
+        功能特点:
+        - 定时语音播报 (支持微软自然语音)
+        - 音频文件播放
+        - 灵活的时间调度
+        - 周/月循环播放
+        
+        支持格式: MP3, WAV, OGG, FLAC
+        
+        依赖:
+        - Python TTS (pyttsx3)
+        - pygame 音频库
+        - Windows SAPI5 语音引擎
+        "@ | Out-File -FilePath "dist\README.txt" -Encoding UTF8
       shell: pwsh
 
     - name: Upload Artifact
