@@ -21,6 +21,8 @@ WIN32COM_AVAILABLE = False
 try:
     import win32com.client
     import pythoncom
+    # 导入 pywintypes 以便捕获 com_error
+    from pywintypes import com_error
     WIN32COM_AVAILABLE = True
 except ImportError:
     print("警告: pywin32 未安装，语音功能将受限。")
@@ -1032,24 +1034,25 @@ class TimedBroadcastApp:
                     prompt_volume = float(task.get('prompt_volume', 80)) / 100.0
                     sound.set_volume(prompt_volume)
                     
-                    # --- 最终修复代码 ---
                     channel = sound.play()
-                    # 检查channel是否有效，在无声卡环境(如GitHub Actions)中，channel会是None
                     if channel:
                         while channel.get_busy():
                             if self.stop_playback_flag.is_set():
                                 channel.stop()
                                 break
                             time.sleep(0.1)
-                    # --- 修复结束 ---
                 else:
                     self.log(f"警告: 提示音文件不存在 - {prompt_path}")
             
-            # 增加一个检查，如果播放提示音时被停止，则直接退出
             if self.stop_playback_flag.is_set():
                 raise InterruptedError("Playback stopped during prompt sound")
 
-            speaker = win32com.client.Dispatch("SAPI.SpVoice")
+            try:
+                speaker = win32com.client.Dispatch("SAPI.SpVoice")
+            except com_error as e:
+                self.log(f"严重错误: 无法初始化语音引擎! PyInstaller打包可能缺少组件。错误: {e}")
+                raise
+
             all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
             selected_voice_desc = task.get('voice')
             if selected_voice_desc in all_voices:
