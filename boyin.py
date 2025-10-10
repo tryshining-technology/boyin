@@ -20,6 +20,7 @@ except ImportError:
 WIN32COM_AVAILABLE = False
 try:
     import win32com.client
+    import pythoncom # 导入 pythoncom 用于 CoInitialize
     WIN32COM_AVAILABLE = True
 except ImportError:
     print("警告: pywin32 未安装，语音功能将受限。")
@@ -35,7 +36,18 @@ except Exception as e:
     print(f"警告: pygame 初始化失败 - {e}，音频播放功能将不可用。")
 
 
+def resource_path(relative_path):
+    """ 获取资源的绝对路径，无论是开发环境还是打包后 """
+    try:
+        # PyInstaller 创建一个临时文件夹，并将路径存储在 _MEIPASS 中
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
 # --- 全局路径设置 ---
+# 如果是打包后的 .exe 文件，则获取 .exe 所在的目录
 if getattr(sys, 'frozen', False):
     application_path = os.path.dirname(sys.executable)
 else:
@@ -45,7 +57,9 @@ TASK_FILE = os.path.join(application_path, "broadcast_tasks.json")
 PROMPT_FOLDER = os.path.join(application_path, "提示音")
 AUDIO_FOLDER = os.path.join(application_path, "音频文件")
 BGM_FOLDER = os.path.join(application_path, "文稿背景")
-ICON_FILE = os.path.join(application_path, "icon.ico")
+# --- 关键修复：使用 resource_path 获取图标 ---
+ICON_FILE = resource_path("icon.ico")
+
 
 class TimedBroadcastApp:
     def __init__(self, root):
@@ -83,7 +97,6 @@ class TimedBroadcastApp:
         self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
 
-        # --- UI调整：修改侧边栏按钮文本和顺序 ---
         nav_buttons = [
             ("定时广播", ""),
             ("立即插播", ""),
@@ -659,17 +672,6 @@ class TimedBroadcastApp:
             except Exception as e:
                 self.log(f"警告: 使用 win32com 获取语音列表失败 - {e}")
                 available_voices = []
-
-        if not available_voices:
-            self.log("win32com 未能获取语音，回退到 pyttsx3 方法。")
-            try:
-                temp_engine = pyttsx3.init(driverName='sapi5')
-                available_voices = [v.name for v in temp_engine.getProperty('voices')]
-                temp_engine.stop()
-            except Exception as e:
-                self.log(f"警告: 备用方法 pyttsx3 获取语音列表也失败 - {e}")
-            if not available_voices:
-                 messagebox.showerror("严重错误", "无法获取任何系统语音，请检查语音引擎设置。")
         
         return available_voices
     
@@ -1013,6 +1015,7 @@ class TimedBroadcastApp:
             self.root.after(0, self.on_playback_finished)
             return
         
+        pythoncom.CoInitialize() # --- 关键修复：初始化COM库 ---
         try:
             if task.get('bgm', 0) and AUDIO_AVAILABLE:
                 bgm_file = task.get('bgm_file', '')
@@ -1040,35 +1043,26 @@ class TimedBroadcastApp:
                     self.log(f"警告: 提示音文件不存在 - {prompt_path}")
             
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
-            all_voices = speaker.GetVoices()
+            all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
             selected_voice_desc = task.get('voice')
-            for voice in all_voices:
-                if voice.GetDescription() == selected_voice_desc:
-                    speaker.Voice = voice
-                    break
+            if selected_voice_desc in all_voices:
+                speaker.Voice = all_voices[selected_voice_desc]
             
             speaker.Rate = int(task.get('speed', '0'))
-            # Pitch 属性在 SAPI5 中是可选的，一些语音可能不支持
             try:
                 speaker.Pitch = int(task.get('pitch', '0'))
             except Exception:
                 self.log("警告: 当前语音不支持音调(Pitch)调整。")
-            
             speaker.Volume = int(task.get('volume', 80))
             
             repeat_count = int(task.get('repeat', 1))
             self.log(f"准备播报 {repeat_count} 遍...")
 
-            event = threading.Event()
-            
-            # 这个回调函数现在不再需要，因为 Speak 方法会阻塞直到完成
-            # speaker.EventInterests = 1 << 1 
-            # speaker.SetNotifyCallback(...)
-
+            # --- 关键修复：循环调用同步的 Speak 方法 ---
             for i in range(repeat_count):
                 if not self.running: break
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
-                speaker.Speak(text, 0) # 0 = SVSF_DEFAULT, 同步阻塞模式
+                speaker.Speak(text, 0) # 0 = SVSF_DEFAULT (同步/阻塞)
                 if i < repeat_count - 1:
                     time.sleep(0.5)
 
@@ -1078,7 +1072,9 @@ class TimedBroadcastApp:
             if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
                 pygame.mixer.music.stop()
                 self.log("背景音乐已停止。")
+            pythoncom.CoUninitialize() # --- 关键修复：释放COM库 ---
             self.root.after(0, self.on_playback_finished)
+
 
     def on_playback_finished(self):
         self.update_playing_text("等待下一个任务..."); self.status_labels[2].config(text="播放状态: 待机"); self.log("播放结束")
@@ -1172,8 +1168,8 @@ class TimedBroadcastApp:
         
         menu = (item('显示', self.show_from_tray, default=True), item('退出', self.quit_app))
         self.tray_icon = Icon("boyin", image, "定时播音", menu)
-        # 绑定双击事件
-        self.tray_icon.left_click_action = self.show_from_tray
+        # pystray 的 left_click_action 在某些系统上可能不稳定，default=True 是更可靠的方式
+        # self.tray_icon.left_click_action = self.show_from_tray
 
 def main():
     root = tk.Tk()
