@@ -262,7 +262,6 @@ class TimedBroadcastApp:
         voice_btn.pack(pady=8)
 
     def _open_task_dialog(self, parent_dialog, task_type, task_to_edit=None, index=None):
-        """统一的添加/修改对话框入口"""
         if parent_dialog:
             parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
@@ -327,23 +326,13 @@ class TimedBroadcastApp:
                  font=('Microsoft YaHei', 10, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
         tk.Button(button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0',
                  font=('Microsoft YaHei', 10), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
-        
-    def _create_common_dialog_frames(self, parent):
-        """创建通用的时间、计划、其它框架"""
-        time_frame = tk.LabelFrame(parent, text="时间", font=('Microsoft YaHei', 11, 'bold'), bg='#E8E8E8', padx=10, pady=10)
-        time_frame.grid(row=1, column=0, sticky='ew', pady=5)
-        
-        other_frame = tk.LabelFrame(parent, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=15, pady=15)
-        other_frame.grid(row=2, column=0, sticky='ew', pady=10)
-        
-        return time_frame, other_frame
 
     def _build_audio_dialog_ui(self, parent):
-        # ... (Implementation is in the full code below)
+        # ... (Implementation of audio dialog UI)
         pass
 
     def _build_voice_dialog_ui(self, parent):
-        # ... (Implementation is in the full code below)
+        # ... (Implementation of voice dialog UI)
         pass
 
     def delete_task(self):
@@ -371,7 +360,7 @@ class TimedBroadcastApp:
                 else: self.root.after(100, check_dialog_closed)
             except tk.TclError: pass 
         self.root.after(100, check_dialog_closed)
-
+    
     def copy_task(self):
         selections = self.task_tree.selection()
         if not selections: messagebox.showwarning("警告", "请先选择要复制的节目"); return
@@ -707,14 +696,16 @@ class TimedBroadcastApp:
             self.log(f"准备播报 {repeat_count} 遍...")
 
             for i in range(repeat_count):
-                if self.stop_playback_flag.is_set(): self.log("语音播报被手动停止。"); break
+                if self.stop_playback_flag.is_set():
+                    self.log("语音播报被手动停止。")
+                    break
                 
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
-                speaker.Speak(xml_text, 1 | 8)
+                speaker.Speak(xml_text, 1 | 8) # 1=Async, 8=XML
                 
-                while speaker.Status.RunningState != 2:
+                while speaker.Status.RunningState != 2: # 2=SRS_DONE
                     if self.stop_playback_flag.is_set():
-                        speaker.Speak("", 3)
+                        speaker.Speak("", 3) # 3 = SVSFPurgeBeforeSpeak, 立即中断
                         break
                     time.sleep(0.1)
                 
@@ -730,20 +721,23 @@ class TimedBroadcastApp:
             pythoncom.CoUninitialize()
             self.root.after(0, self.on_playback_finished)
 
-
     def on_playback_finished(self):
         self.stop_playback_flag.clear()
         self.update_playing_text("等待下一个任务...")
         self.status_labels[2].config(text="播放状态: 待机")
         self.log("播放结束")
 
-    def log(self, message): self.root.after(0, lambda: self._log_threadsafe(message))
+    def log(self, message):
+        self.root.after(0, lambda: self._log_threadsafe(message))
+
     def _log_threadsafe(self, message):
         self.log_text.config(state='normal')
         self.log_text.insert(tk.END, f"{datetime.now().strftime('%H:%M:%S')} -> {message}\n")
         self.log_text.see(tk.END); self.log_text.config(state='disabled')
 
-    def update_playing_text(self, message): self.root.after(0, lambda: self._update_playing_text_threadsafe(message))
+    def update_playing_text(self, message):
+        self.root.after(0, lambda: self._update_playing_text_threadsafe(message))
+
     def _update_playing_text_threadsafe(self, message):
         self.playing_text.config(state='normal')
         self.playing_text.delete('1.0', tk.END); self.playing_text.insert('1.0', message)
@@ -826,7 +820,8 @@ class TimedBroadcastApp:
         
         menu = (item('显示', self.show_from_tray, default=True), item('退出', self.quit_app))
         self.tray_icon = Icon("boyin", image, "定时播音", menu)
-        self.tray_icon.left_click_action = self.show_from_tray
+        # 绑定的方法需要接受 icon 和 item 两个参数
+        self.tray_icon.activations['left'] = self.show_from_tray
 
 def main():
     root = tk.Tk()
