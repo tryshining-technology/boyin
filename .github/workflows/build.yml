@@ -28,12 +28,11 @@ jobs:
           pip install pyinstaller
           pywin32_postinstall.py -install
 
-      # --- 关键修复：打包时加入图标资源 ---
+      # --- 关键修复：打包时强制包含 pywin32 的隐藏模块 ---
       - name: Build application with PyInstaller
         run: |
-          # --add-data "源文件;目标文件夹" (分号是Windows路径分隔符)
-          # '.' 表示打包后放在根目录
-          pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico --add-data "icon.ico;." boyin.py
+          # 增加了 --hidden-import=win32com.gen_py 和 --hidden-import=win32timezone 来解决语音功能打包后失效的问题
+          pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico --add-data "icon.ico;." --hidden-import=win32com.gen_py --hidden-import=win32timezone boyin.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
