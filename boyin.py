@@ -28,6 +28,7 @@ else:
 TASK_FILE = os.path.join(application_path, "broadcast_tasks.json")
 PROMPT_FOLDER = os.path.join(application_path, "提示音")
 AUDIO_FOLDER = os.path.join(application_path, "音频文件")
+BGM_FOLDER = os.path.join(application_path, "文稿背景") # 新增背景音乐文件夹
 
 # 音频播放库
 AUDIO_AVAILABLE = False
@@ -46,14 +47,6 @@ class TimedBroadcastApp:
         self.root.title("定时播音")
         self.root.geometry("1400x800")
         self.root.configure(bg='#E8F4F8')
-
-        # 初始化语音引擎
-        self.engine = None
-        try:
-            self.engine = pyttsx3.init(driverName='sapi5')
-        except Exception as e:
-            print(f"严重错误：主语音引擎 pyttsx3 初始化失败 - {e}。语音播报功能将不可用。")
-            messagebox.showerror("严重错误", f"主语音引擎初始化失败: {e}\n语音播报功能将不可用。")
 
         # 任务列表
         self.tasks = []
@@ -78,7 +71,7 @@ class TimedBroadcastApp:
 
     def create_folder_structure(self):
         """创建必要的文件夹结构"""
-        folders = [PROMPT_FOLDER, AUDIO_FOLDER]
+        folders = [PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER]
         for folder in folders:
             if not os.path.exists(folder):
                 os.makedirs(folder)
@@ -142,7 +135,6 @@ class TimedBroadcastApp:
         btn_frame = tk.Frame(top_frame, bg='white')
         btn_frame.pack(side=tk.RIGHT)
         
-        # --- 功能1：精简右上角按钮 ---
         buttons = [
             ("导入节目单", self.import_tasks, '#1ABC9C'),
             ("导出节目单", self.export_tasks, '#1ABC9C')
@@ -214,8 +206,7 @@ class TimedBroadcastApp:
     def show_context_menu(self, event):
         """根据右击位置动态创建并显示上下文菜单"""
         iid = self.task_tree.identify_row(event.y)
-        is_playing = (AUDIO_AVAILABLE and pygame.mixer.music.get_busy()) or \
-                     (self.engine and self.engine.isBusy())
+        is_playing = (AUDIO_AVAILABLE and pygame.mixer.music.get_busy())
         
         context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 10))
 
@@ -247,12 +238,7 @@ class TimedBroadcastApp:
         """停止当前正在播放的音频或语音"""
         if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
             pygame.mixer.music.stop()
-            self.log("手动停止音频播放。")
-        
-        if self.engine and self.engine.isBusy():
-            self.engine.stop()
-            self.log("手动停止语音播报。")
-
+            self.log("手动停止播放。")
         self.on_playback_finished()
 
     def add_task(self):
@@ -286,7 +272,6 @@ class TimedBroadcastApp:
 
         dialog = tk.Toplevel(self.root)
         dialog.title("修改音频节目" if is_edit_mode else "添加音频节目")
-        # --- Bug修复 5: 增加对话框高度 ---
         dialog.geometry("850x750")
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#E8E8E8')
@@ -413,17 +398,8 @@ class TimedBroadcastApp:
         tk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候",
                       variable=delay_var, value="delay", bg='#E8E8E8',
                       font=('Microsoft YaHei', 10)).pack(anchor='w')
-        
-        # --- 功能3：留空默认值 ---
-        # 默认值
-        volume_entry.insert(0, "80")
-        interval_first_entry.insert(0, "1")
-        interval_seconds_entry.insert(0, "600")
-        weekday_entry.insert(0, "每周:1234567")
-        date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
 
         if is_edit_mode:
-            # --- 功能2：填充修改数据 ---
             name_entry.insert(0, task_to_edit.get('name', ''))
             start_time_entry.insert(0, task_to_edit.get('time', ''))
             audio_type_var.set(task_to_edit.get('audio_type', 'single'))
@@ -436,13 +412,19 @@ class TimedBroadcastApp:
                 audio_folder_entry.insert(0, task_to_edit.get('content', ''))
                 audio_folder_entry.config(state='readonly')
             play_order_var.set(task_to_edit.get('play_order', 'sequential'))
-            volume_entry.delete(0, tk.END); volume_entry.insert(0, task_to_edit.get('volume', '80'))
+            volume_entry.insert(0, task_to_edit.get('volume', '80'))
             interval_var.set(task_to_edit.get('interval_type', 'first'))
-            interval_first_entry.delete(0, tk.END); interval_first_entry.insert(0, task_to_edit.get('interval_first', '1'))
-            interval_seconds_entry.delete(0, tk.END); interval_seconds_entry.insert(0, task_to_edit.get('interval_seconds', '600'))
-            weekday_entry.delete(0, tk.END); weekday_entry.insert(0, task_to_edit.get('weekday', '每周:1234567'))
-            date_range_entry.delete(0, tk.END); date_range_entry.insert(0, task_to_edit.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            interval_first_entry.insert(0, task_to_edit.get('interval_first', '1'))
+            interval_seconds_entry.insert(0, task_to_edit.get('interval_seconds', '600'))
+            weekday_entry.insert(0, task_to_edit.get('weekday', '每周:1234567'))
+            date_range_entry.insert(0, task_to_edit.get('date_range', '2000-01-01 ~ 2099-12-31'))
             delay_var.set(task_to_edit.get('delay', 'ontime'))
+        else:
+            volume_entry.insert(0, "80")
+            interval_first_entry.insert(0, "1")
+            interval_seconds_entry.insert(0, "600")
+            weekday_entry.insert(0, "每周:1234567")
+            date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
 
         button_frame = tk.Frame(main_frame, bg='#E8E8E8')
         button_frame.grid(row=3, column=0, pady=20)
@@ -456,7 +438,9 @@ class TimedBroadcastApp:
                              'volume': volume_entry.get().strip() or "80", 'interval_type': interval_var.get(),
                              'interval_first': interval_first_entry.get().strip(), 'interval_seconds': interval_seconds_entry.get().strip(),
                              'weekday': weekday_entry.get().strip(), 'date_range': date_range_entry.get().strip(),
-                             'delay': delay_var.get(), 'status': '启用', 'last_run': {}}
+                             'delay': delay_var.get(), 
+                             'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 
+                             'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {})}
             
             if not new_task_data['name'] or not new_task_data['time']:
                 messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
@@ -481,7 +465,6 @@ class TimedBroadcastApp:
 
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
-        
         is_edit_mode = task_to_edit is not None
 
         dialog = tk.Toplevel(self.root)
@@ -497,83 +480,66 @@ class TimedBroadcastApp:
         content_frame.grid(row=0, column=0, sticky='ew', pady=5)
         
         tk.Label(content_frame, text="节目名称:", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
-            row=0, column=0, sticky='e', padx=5, pady=5)
+            row=0, column=0, sticky='w', padx=5, pady=5)
         name_entry = tk.Entry(content_frame, font=('Microsoft YaHei', 10), width=65)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=5)
         
         tk.Label(content_frame, text="播音文字:", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
-            row=1, column=0, sticky='ne', padx=5, pady=5)
+            row=1, column=0, sticky='nw', padx=5, pady=5)
         text_frame = tk.Frame(content_frame, bg='#E8E8E8')
         text_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=5)
         content_text = scrolledtext.ScrolledText(text_frame, height=5, font=('Microsoft YaHei', 10), width=65, wrap=tk.WORD)
         content_text.pack(fill=tk.BOTH, expand=True)
-        
+
+        # --- 功能3: 语音节目UI重构 ---
+        # 行 2: 播音员
         tk.Label(content_frame, text="播音员:", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
-            row=2, column=0, sticky='e', padx=5, pady=8)
+            row=2, column=0, sticky='w', padx=5, pady=8)
         voice_frame = tk.Frame(content_frame, bg='#E8E8E8')
         voice_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=8)
-        
-        available_voices = []
-        if WIN32COM_AVAILABLE:
-            try:
-                speaker = win32com.client.Dispatch("SAPI.SpVoice")
-                voices = speaker.GetVoices()
-                available_voices = [v.GetDescription() for v in voices]
-                self.log("成功通过 win32com 刷新语音列表。")
-            except Exception as e:
-                self.log(f"警告: 使用 win32com 获取语音列表失败 - {e}")
-                available_voices = []
-
-        if not available_voices:
-            self.log("win32com 未能获取语音，回退到 pyttsx3 方法。")
-            if self.engine:
-                try:
-                    available_voices = [v.name for v in self.engine.getProperty('voices')]
-                except Exception as e:
-                    self.log(f"警告: 备用方法 pyttsx3 获取语音列表也失败 - {e}")
-            if not available_voices:
-                 messagebox.showerror("严重错误", "无法获取任何系统语音，请检查语音引擎设置。")
-
+        available_voices = self.get_available_voices()
         voice_var = tk.StringVar()
         voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, values=available_voices,
-                                   font=('Microsoft YaHei', 10), width=35, state='readonly')
+                                   font=('Microsoft YaHei', 10), width=50, state='readonly')
         voice_combo.pack(side=tk.LEFT)
+
+        # 行 3: 语速/语调/音量
+        speech_params_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        speech_params_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=5)
+        tk.Label(speech_params_frame, text="语速(-10~10):", font=('Microsoft YaHei', 10), bg='#E8E8E8').pack(side=tk.LEFT, padx=(0,5))
+        speed_entry = tk.Entry(speech_params_frame, font=('Microsoft YaHei', 10), width=8)
+        speed_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(speech_params_frame, text="音调(-10~10):", font=('Microsoft YaHei', 10), bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
+        pitch_entry = tk.Entry(speech_params_frame, font=('Microsoft YaHei', 10), width=8)
+        pitch_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(speech_params_frame, text="音量(0-100):", font=('Microsoft YaHei', 10), bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
+        volume_entry = tk.Entry(speech_params_frame, font=('Microsoft YaHei', 10), width=8)
+        volume_entry.pack(side=tk.LEFT, padx=5)
+
+        # 行 4: 提示音
         prompt_var = tk.IntVar()
-        tk.Checkbutton(voice_frame, text="提示音", variable=prompt_var, bg='#E8E8E8',
-                      font=('Microsoft YaHei', 10)).pack(side=tk.LEFT, padx=20)
-        
-        settings_frame = tk.Frame(content_frame, bg='#E8E8E8')
-        settings_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=5)
-        tk.Label(settings_frame, text="音  量:", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
-            row=0, column=0, sticky='e', padx=5, pady=3)
-        volume_entry = tk.Entry(settings_frame, font=('Microsoft YaHei', 10), width=12)
-        volume_entry.grid(row=0, column=1, padx=5, pady=3)
-        tk.Label(settings_frame, text="0.0-1.0", font=('Microsoft YaHei', 10),
-                bg='#E8E8E8', fg='#666').grid(row=0, column=2, sticky='w', padx=5)
-        
+        prompt_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        prompt_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=5)
+        tk.Checkbutton(prompt_frame, text="提示音:", variable=prompt_var, bg='#E8E8E8', font=('Microsoft YaHei', 10)).pack(side=tk.LEFT)
         prompt_file_var, prompt_volume_var = tk.StringVar(), tk.StringVar()
-        prompt_file_frame = tk.Frame(settings_frame, bg='#E8E8E8')
-        prompt_file_frame.grid(row=0, column=3, columnspan=2, sticky='w', padx=10)
-        tk.Entry(prompt_file_frame, textvariable=prompt_file_var,
-                 font=('Microsoft YaHei', 10), width=15, state='readonly').pack(side=tk.LEFT)
-        tk.Label(prompt_file_frame, text=", 音量", font=('Microsoft YaHei', 10),
-                bg='#E8E8E8').pack(side=tk.LEFT, padx=2)
-        tk.Entry(prompt_file_frame, textvariable=prompt_volume_var,
-                 font=('Microsoft YaHei', 10), width=5).pack(side=tk.LEFT, padx=2)
-        def select_prompt_file():
-            filename = filedialog.askopenfilename(title="选择提示音文件", initialdir=PROMPT_FOLDER,
-                filetypes=[("音频文件", "*.mp3 *.wav *.ogg"), ("所有文件", "*.*")])
-            if filename: prompt_file_var.set(os.path.basename(filename))
-        tk.Button(prompt_file_frame, text="...", command=select_prompt_file, bg='#D0D0D0',
-                 font=('Microsoft YaHei', 10), bd=1, padx=8, pady=1).pack(side=tk.LEFT, padx=2)
-        
-        tk.Label(settings_frame, text="语  速:", font=('Microsoft YaHei', 10), bg='#E8E8E8').grid(
-            row=1, column=0, sticky='e', padx=5, pady=3)
-        speed_entry = tk.Entry(settings_frame, font=('Microsoft YaHei', 10), width=12)
-        speed_entry.grid(row=1, column=1, padx=5, pady=3)
-        tk.Label(settings_frame, text="数字越大越快", font=('Microsoft YaHei', 10),
-                bg='#E8E8E8', fg='#666').grid(row=1, column=2, sticky='w', padx=5)
-        
+        prompt_file_entry = tk.Entry(prompt_frame, textvariable=prompt_file_var, font=('Microsoft YaHei', 10), width=20, state='readonly')
+        prompt_file_entry.pack(side=tk.LEFT, padx=5)
+        tk.Button(prompt_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var)).pack(side=tk.LEFT)
+        tk.Label(prompt_frame, text="音量(0-100):", font=('Microsoft YaHei', 10), bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
+        tk.Entry(prompt_frame, textvariable=prompt_volume_var, font=('Microsoft YaHei', 10), width=8).pack(side=tk.LEFT, padx=5)
+
+        # 行 5: 背景音乐
+        bgm_var = tk.IntVar()
+        bgm_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        bgm_frame.grid(row=5, column=1, columnspan=3, sticky='w', padx=5, pady=5)
+        tk.Checkbutton(bgm_frame, text="背景音乐:", variable=bgm_var, bg='#E8E8E8', font=('Microsoft YaHei', 10)).pack(side=tk.LEFT)
+        bgm_file_var, bgm_volume_var = tk.StringVar(), tk.StringVar()
+        bgm_file_entry = tk.Entry(bgm_frame, textvariable=bgm_file_var, font=('Microsoft YaHei', 10), width=20, state='readonly')
+        bgm_file_entry.pack(side=tk.LEFT, padx=5)
+        tk.Button(bgm_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var)).pack(side=tk.LEFT)
+        tk.Label(bgm_frame, text="音量(0-100):", font=('Microsoft YaHei', 10), bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
+        tk.Entry(bgm_frame, textvariable=bgm_volume_var, font=('Microsoft YaHei', 10), width=8).pack(side=tk.LEFT, padx=5)
+
         time_frame = tk.LabelFrame(main_frame, text="时间", font=('Microsoft YaHei', 11, 'bold'),
                                    bg='#E8E8E8', padx=10, pady=10)
         time_frame.grid(row=1, column=0, sticky='ew', pady=5)
@@ -622,25 +588,34 @@ class TimedBroadcastApp:
 
         # 默认值 & 填充修改数据
         if is_edit_mode:
-            name_entry.insert(0, task_to_edit.get('name', ''))
-            content_text.insert('1.0', task_to_edit.get('content', ''))
-            voice_var.set(task_to_edit.get('voice', ''))
-            prompt_var.set(task_to_edit.get('prompt', 1))
-            prompt_file_var.set(task_to_edit.get('prompt_file', 'tone-b.mp3'))
-            prompt_volume_var.set(task_to_edit.get('prompt_volume', '100'))
-            volume_entry.insert(0, task_to_edit.get('volume', '1.0'))
-            speed_entry.insert(0, task_to_edit.get('speed', '150'))
-            start_time_entry.insert(0, task_to_edit.get('time', ''))
-            repeat_entry.insert(0, task_to_edit.get('repeat', '1'))
-            weekday_entry.insert(0, task_to_edit.get('weekday', '每周:1234567'))
-            date_range_entry.insert(0, task_to_edit.get('date_range', '2000-01-01 ~ 2099-12-31'))
-            delay_var.set(task_to_edit.get('delay', 'delay'))
+            task = task_to_edit
+            name_entry.insert(0, task.get('name', ''))
+            content_text.insert('1.0', task.get('content', ''))
+            voice_var.set(task.get('voice', ''))
+            speed_entry.insert(0, task.get('speed', '0'))
+            pitch_entry.insert(0, task.get('pitch', '0'))
+            volume_entry.insert(0, task.get('volume', '80'))
+            prompt_var.set(task.get('prompt', 0))
+            prompt_file_var.set(task.get('prompt_file', ''))
+            prompt_volume_var.set(task.get('prompt_volume', '80'))
+            bgm_var.set(task.get('bgm', 0))
+            bgm_file_var.set(task.get('bgm_file', ''))
+            bgm_volume_var.set(task.get('bgm_volume', '40'))
+            start_time_entry.insert(0, task.get('time', ''))
+            repeat_entry.insert(0, task.get('repeat', '1'))
+            weekday_entry.insert(0, task.get('weekday', '每周:1234567'))
+            date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            delay_var.set(task.get('delay', 'delay'))
         else:
+            # 新建时的默认值
+            speed_entry.insert(0, "0")
+            pitch_entry.insert(0, "0")
+            volume_entry.insert(0, "80")
             prompt_var.set(1)
             prompt_file_var.set("tone-b.mp3")
-            prompt_volume_var.set("100")
-            volume_entry.insert(0, "1.0")
-            speed_entry.insert(0, "150")
+            prompt_volume_var.set("80")
+            bgm_var.set(0)
+            bgm_volume_var.set("40")
             repeat_entry.insert(0, "1")
             weekday_entry.insert(0, "每周:1234567")
             date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
@@ -653,11 +628,19 @@ class TimedBroadcastApp:
             if not content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
             
             new_task_data = {'name': name_entry.get().strip(), 'time': start_time_entry.get().strip(), 'content': content,
-                             'type': 'voice', 'voice': voice_var.get(), 'prompt': prompt_var.get(), 'prompt_file': prompt_file_var.get(),
-                             'prompt_volume': prompt_volume_var.get(), 'volume': volume_entry.get().strip() or "1.0",
-                             'speed': speed_entry.get().strip() or "150", 'repeat': repeat_entry.get().strip() or "1",
+                             'type': 'voice', 'voice': voice_var.get(), 
+                             'speed': speed_entry.get().strip() or "0",
+                             'pitch': pitch_entry.get().strip() or "0",
+                             'volume': volume_entry.get().strip() or "80",
+                             'prompt': prompt_var.get(), 'prompt_file': prompt_file_var.get(),
+                             'prompt_volume': prompt_volume_var.get(),
+                             'bgm': bgm_var.get(), 'bgm_file': bgm_file_var.get(),
+                             'bgm_volume': bgm_volume_var.get(),
+                             'repeat': repeat_entry.get().strip() or "1",
                              'weekday': weekday_entry.get().strip(), 'date_range': date_range_entry.get().strip(),
-                             'delay': delay_var.get(), 'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 'last_run': {}}
+                             'delay': delay_var.get(), 
+                             'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 
+                             'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {})}
             
             if not new_task_data['name'] or not new_task_data['time']:
                 messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
@@ -680,6 +663,42 @@ class TimedBroadcastApp:
         content_frame.columnconfigure(1, weight=1)
         time_frame.columnconfigure(1, weight=1)
 
+    def get_available_voices(self):
+        """获取系统可用语音列表的最终方法"""
+        available_voices = []
+        if WIN32COM_AVAILABLE:
+            try:
+                speaker = win32com.client.Dispatch("SAPI.SpVoice")
+                voices = speaker.GetVoices()
+                available_voices = [v.GetDescription() for v in voices]
+                self.log("成功通过 win32com 刷新语音列表。")
+            except Exception as e:
+                self.log(f"警告: 使用 win32com 获取语音列表失败 - {e}")
+                available_voices = []
+
+        if not available_voices:
+            self.log("win32com 未能获取语音，回退到 pyttsx3 方法。")
+            try:
+                temp_engine = pyttsx3.init(driverName='sapi5')
+                available_voices = [v.name for v in temp_engine.getProperty('voices')]
+                temp_engine.stop()
+            except Exception as e:
+                self.log(f"警告: 备用方法 pyttsx3 获取语音列表也失败 - {e}")
+            if not available_voices:
+                 messagebox.showerror("严重错误", "无法获取任何系统语音，请检查语音引擎设置。")
+        
+        return available_voices
+    
+    def select_file_for_entry(self, initial_dir, string_var):
+        """通用文件选择对话框"""
+        filename = filedialog.askopenfilename(
+            title="选择文件",
+            initialdir=initial_dir,
+            filetypes=[("音频文件", "*.mp3 *.wav *.ogg"), ("所有文件", "*.*")]
+        )
+        if filename:
+            string_var.set(os.path.basename(filename))
+
     def delete_task(self):
         selections = self.task_tree.selection()
         if not selections: messagebox.showwarning("警告", "请先选择要删除的节目"); return
@@ -700,7 +719,8 @@ class TimedBroadcastApp:
         index = self.task_tree.index(selection[0])
         task = self.tasks[index]
         
-        dummy_parent = tk.Toplevel()
+        # 创建一个临时的父窗口，用完即毁，避免影响主窗口
+        dummy_parent = tk.Toplevel(self.root)
         dummy_parent.withdraw()
 
         if task.get('type') == 'audio':
@@ -708,7 +728,9 @@ class TimedBroadcastApp:
         else: # voice
             self.open_voice_dialog(dummy_parent, task_to_edit=task, index=index)
         
-        dummy_parent.destroy()
+        # 确保在对话框关闭后销毁临时父窗口
+        dialog_closed_check = lambda: dummy_parent.destroy() if not dummy_parent.winfo_children() else self.root.after(100, dialog_closed_check)
+        self.root.after(100, dialog_closed_check)
 
     def copy_task(self):
         selections = self.task_tree.selection()
@@ -997,21 +1019,35 @@ class TimedBroadcastApp:
 
 
     def _speak(self, text, task):
-        if not self.engine: self.log("错误：语音引擎未初始化"); self.root.after(0, self.on_playback_finished); return
+        """执行语音播报的核心函数，每次都创建一个新的引擎实例以保证稳定性"""
         try:
+            if task.get('bgm', 0) and AUDIO_AVAILABLE:
+                bgm_file = task.get('bgm_file', '')
+                bgm_path = os.path.join(BGM_FOLDER, bgm_file)
+                if os.path.exists(bgm_path):
+                    self.log(f"播放背景音乐: {bgm_file}")
+                    pygame.mixer.music.load(bgm_path)
+                    bgm_volume = float(task.get('bgm_volume', 40)) / 100.0
+                    pygame.mixer.music.set_volume(bgm_volume)
+                    pygame.mixer.music.play(-1) # -1 表示无限循环
+                else:
+                    self.log(f"警告: 背景音乐文件不存在 - {bgm_path}")
+
             if task.get('prompt', 0) and AUDIO_AVAILABLE:
                 prompt_file = task.get('prompt_file', '')
                 prompt_path = os.path.join(PROMPT_FOLDER, prompt_file)
                 if os.path.exists(prompt_path):
                     self.log(f"播放提示音: {prompt_file}")
                     sound = pygame.mixer.Sound(prompt_path)
-                    prompt_volume = float(task.get('prompt_volume', 100)) / 100.0
+                    prompt_volume = float(task.get('prompt_volume', 80)) / 100.0
                     sound.set_volume(prompt_volume)
                     sound.play()
                     time.sleep(sound.get_length())
                 else:
                     self.log(f"警告: 提示音文件不存在 - {prompt_path}")
-
+            
+            # --- 关键修复：每次播报都创建一个新引擎 ---
+            engine = pyttsx3.init(driverName='sapi5')
             selected_voice_desc = task.get('voice')
             if WIN32COM_AVAILABLE:
                 try:
@@ -1019,30 +1055,41 @@ class TimedBroadcastApp:
                     all_voices = speaker.GetVoices()
                     for voice in all_voices:
                         if voice.GetDescription() == selected_voice_desc:
-                            self.engine.setProperty('voice', voice.Id)
+                            engine.setProperty('voice', voice.Id)
                             break
-                except Exception as e:
-                    self.log(f"警告: 播报时查找语音 ID 失败 - {e}")
+                except Exception as e: self.log(f"警告: 播报时查找语音 ID 失败 - {e}")
             else:
-                for v in self.engine.getProperty('voices'):
-                    if v.name == selected_voice_desc:
-                        self.engine.setProperty('voice', v.id)
-                        break
+                for v in engine.getProperty('voices'):
+                    if v.name == selected_voice_desc: engine.setProperty('voice', v.id); break
             
-            self.engine.setProperty('volume', float(task.get('volume', 1.0)))
-            self.engine.setProperty('rate', int(task.get('speed', 150)))
+            # 设置语速（-10到10映射到pyttsx3的范围，假设基础速率为150）
+            base_rate = 150
+            rate_adj = int(task.get('speed', '0'))
+            engine.setProperty('rate', base_rate + rate_adj * 10) # 调整幅度可以按需修改
+
+            # pyttsx3不直接支持音调(pitch)调整，这是一个SAPI5的功能
+            # 我们直接设置音量
+            volume = float(task.get('volume', 80)) / 100.0
+            engine.setProperty('volume', volume)
             
             repeat_count = int(task.get('repeat', 1))
             for i in range(repeat_count):
                 if not self.running: break
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
-                self.engine.say(text)
-                self.engine.runAndWait()
+                engine.say(text)
+                engine.runAndWait()
                 if i < repeat_count - 1:
                     time.sleep(0.5)
+            
+            engine.stop() # 释放引擎
 
         except Exception as e: self.log(f"播报错误: {e}")
-        finally: self.root.after(0, self.on_playback_finished)
+        finally:
+            if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
+                pygame.mixer.music.stop()
+                self.log("背景音乐已停止。")
+            self.root.after(0, self.on_playback_finished)
+
 
     def on_playback_finished(self):
         self.update_playing_text("等待下一个任务..."); self.status_labels[2].config(text="播放状态: 待机"); self.log("播放结束")
@@ -1088,7 +1135,6 @@ class TimedBroadcastApp:
         if messagebox.askokcancel("退出", "确定要退出定时播音软件吗？"):
             self.running = False; self.save_tasks()
             if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
-            if self.engine and self.engine.isBusy(): self.engine.stop()
             self.root.destroy()
 
 def main():
