@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import datetime
 import os
+import random
 
 # 尝试导入 win32com，这是获取语音列表的最佳方式
 try:
@@ -177,7 +178,6 @@ class TimedBroadcastApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.task_tree.configure(yscrollcommand=scrollbar.set)
         
-        # --- 新增功能：创建右键菜单 ---
         self.create_context_menu()
         self.task_tree.bind("<Button-3>", self.show_context_menu)
 
@@ -232,45 +232,29 @@ class TimedBroadcastApp:
 
     def show_context_menu(self, event):
         """根据选择状态智能显示右键菜单"""
-        selection = self.task_tree.selection()
-        
-        # 如果右击的位置不在任何已选项上，则清除现有选择
         iid = self.task_tree.identify_row(event.y)
-        if iid not in selection:
+        if iid and iid not in self.task_tree.selection():
             self.task_tree.selection_set(iid)
-            selection = self.task_tree.selection()
-
+        
+        selection = self.task_tree.selection()
         num_selected = len(selection)
 
-        if num_selected == 0:
-            self.context_menu.entryconfig("修改选中", state="disabled")
-            self.context_menu.entryconfig("删除选中", state="disabled")
-            self.context_menu.entryconfig("复制选中", state="disabled")
-            self.context_menu.entryconfig("上移", state="disabled")
-            self.context_menu.entryconfig("下移", state="disabled")
-            self.context_menu.entryconfig("启用选中", state="disabled")
-            self.context_menu.entryconfig("禁用选中", state="disabled")
-        elif num_selected == 1:
-            self.context_menu.entryconfig("修改选中", state="normal")
-            self.context_menu.entryconfig("删除选中", state="normal")
-            self.context_menu.entryconfig("复制选中", state="normal")
-            self.context_menu.entryconfig("上移", state="normal")
-            self.context_menu.entryconfig("下移", state="normal")
-            self.context_menu.entryconfig("启用选中", state="normal")
-            self.context_menu.entryconfig("禁用选中", state="normal")
-        else: # 多选
-            self.context_menu.entryconfig("修改选中", state="disabled")
-            self.context_menu.entryconfig("删除选中", state="normal")
-            self.context_menu.entryconfig("复制选中", state="normal")
-            self.context_menu.entryconfig("上移", state="disabled")
-            self.context_menu.entryconfig("下移", state="disabled")
-            self.context_menu.entryconfig("启用选中", state="normal")
-            self.context_menu.entryconfig("禁用选中", state="normal")
-
-        # 检查是否有音频或语音正在播放
         is_playing = (AUDIO_AVAILABLE and pygame.mixer.music.get_busy()) or \
                      (self.engine and self.engine.isBusy())
+        
         self.context_menu.entryconfig("停止当前播放", state="normal" if is_playing else "disabled")
+
+        if num_selected == 0:
+            for label in ["修改选中", "删除选中", "复制选中", "上移", "下移", "启用选中", "禁用选中"]:
+                self.context_menu.entryconfig(label, state="disabled")
+        elif num_selected == 1:
+            for label in ["修改选中", "删除选中", "复制选中", "上移", "下移", "启用选中", "禁用选中"]:
+                self.context_menu.entryconfig(label, state="normal")
+        else: # 多选
+            for label in ["删除选中", "复制选中", "启用选中", "禁用选中"]:
+                self.context_menu.entryconfig(label, state="normal")
+            for label in ["修改选中", "上移", "下移"]:
+                self.context_menu.entryconfig(label, state="disabled")
 
         self.context_menu.post(event.x_root, event.y_root)
 
@@ -284,7 +268,7 @@ class TimedBroadcastApp:
             self.engine.stop()
             self.log("手动停止语音播报。")
 
-        self.on_playback_finished() # 更新UI状态
+        self.on_playback_finished()
 
     def add_task(self):
         choice_dialog = tk.Toplevel(self.root)
@@ -832,51 +816,108 @@ class TimedBroadcastApp:
     def _check_tasks(self):
         while self.running:
             now = datetime.now()
+            current_date_str = now.strftime("%Y-%m-%d")
+            current_time_str = now.strftime("%H:%M:%S")
+
             for task in self.tasks:
                 if task.get('status') != '启用': continue
                 try:
                     start, end = [d.strip() for d in task.get('date_range', '').split('~')]
                     if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()): continue
                 except (ValueError, IndexError): pass
+                
                 schedule = task.get('weekday', '每周:1234567')
                 run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or \
                             (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
                 if not run_today: continue
+                
                 for trigger_time in [t.strip() for t in task.get('time', '').split(',')]:
-                    if trigger_time == now.strftime("%H:%M:%S") and task.get('last_run', {}).get(trigger_time) != now.strftime("%Y-%m-%d"):
+                    if trigger_time == current_time_str and task.get('last_run', {}).get(trigger_time) != current_date_str:
                         self.root.after(0, self._execute_broadcast, task, trigger_time)
-                        break
+                        # 这里不需要 break，以便检查同一秒内是否有其他任务
+
             time.sleep(1)
 
     def _execute_broadcast(self, task, trigger_time):
         self.update_playing_text(f"[{task['name']}] 正在准备播放...")
         self.status_labels[2].config(text="播放状态: 播放中")
-        if task.get('type') == 'audio':
-            audio_path = task.get('content', '')
-            if not os.path.exists(audio_path):
-                self.log(f"错误：文件不存在 - {audio_path}"); self.update_playing_text("错误：文件不存在"); self.status_labels[2].config(text="播放状态: 错误"); return
-            self.log(f"播放音频: {os.path.basename(audio_path)}")
-            if AUDIO_AVAILABLE: threading.Thread(target=self._play_audio, args=(audio_path, task), daemon=True).start()
-        else:
-            self.log(f"开始播报: {task['name']} (共 {task.get('repeat', 1)} 遍)")
-            threading.Thread(target=self._speak, args=(task.get('content', ''), task), daemon=True).start()
-        if not isinstance(task.get('last_run'), dict): task['last_run'] = {}
-        task['last_run'][trigger_time] = datetime.now().strftime("%Y-%m-%d"); self.save_tasks()
+        
+        if not isinstance(task.get('last_run'), dict):
+            task['last_run'] = {}
+        task['last_run'][trigger_time] = datetime.now().strftime("%Y-%m-%d")
+        self.save_tasks()
 
-    def _play_audio(self, audio_path, task):
+        if task.get('type') == 'audio':
+            self.log(f"开始音频任务: {task['name']}")
+            threading.Thread(target=self._play_audio, args=(task,), daemon=True).start()
+        else:
+            self.log(f"开始语音任务: {task['name']} (共 {task.get('repeat', 1)} 遍)")
+            threading.Thread(target=self._speak, args=(task.get('content', ''), task), daemon=True).start()
+
+    def _play_audio(self, task):
         try:
-            pygame.mixer.music.load(audio_path)
-            pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
-            pygame.mixer.music.play()
-            while pygame.mixer.music.get_busy() and self.running: time.sleep(0.1)
-        except Exception as e: self.log(f"音频播放错误: {e}")
-        finally: self.root.after(0, self.on_playback_finished)
+            interval_type = task.get('interval_type')
+            duration_seconds = int(task.get('interval_seconds', 0))
+            repeat_count = int(task.get('interval_first', 1))
+            
+            playlist = []
+            if task.get('audio_type') == 'single':
+                if os.path.exists(task['content']):
+                    playlist = [task['content']] * repeat_count
+            else: # folder
+                folder_path = task['content']
+                if os.path.isdir(folder_path):
+                    all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.ogg'))]
+                    if task.get('play_order') == 'random':
+                        random.shuffle(all_files)
+                    playlist = all_files[:repeat_count]
+
+            if not playlist:
+                self.log(f"错误: 音频列表为空，任务 '{task['name']}' 无法播放。"); return
+
+            start_time = time.time()
+            for audio_path in playlist:
+                if not self.running: break
+                
+                self.log(f"正在播放: {os.path.basename(audio_path)}")
+                self.update_playing_text(f"[{task['name']}] 正在播放: {os.path.basename(audio_path)}")
+                
+                pygame.mixer.music.load(audio_path)
+                pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
+                pygame.mixer.music.play()
+
+                while pygame.mixer.music.get_busy() and self.running:
+                    if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds:
+                        pygame.mixer.music.stop()
+                        self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
+                        break
+                    time.sleep(0.1)
+                
+                if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds:
+                    break
+        except Exception as e:
+            self.log(f"音频播放错误: {e}")
+        finally:
+            self.root.after(0, self.on_playback_finished)
+
 
     def _speak(self, text, task):
         if not self.engine: self.log("错误：语音引擎未初始化"); self.root.after(0, self.on_playback_finished); return
         try:
+            if task.get('prompt', 0) and AUDIO_AVAILABLE:
+                prompt_file = task.get('prompt_file', '')
+                prompt_path = os.path.join(PROMPT_FOLDER, prompt_file)
+                if os.path.exists(prompt_path):
+                    self.log(f"播放提示音: {prompt_file}")
+                    sound = pygame.mixer.Sound(prompt_path)
+                    prompt_volume = float(task.get('prompt_volume', 100)) / 100.0
+                    sound.set_volume(prompt_volume)
+                    sound.play()
+                    time.sleep(sound.get_length())
+                else:
+                    self.log(f"警告: 提示音文件不存在 - {prompt_path}")
+
             selected_voice_desc = task.get('voice')
-            
             if WIN32COM_AVAILABLE:
                 try:
                     speaker = win32com.client.Dispatch("SAPI.SpVoice")
@@ -892,15 +933,19 @@ class TimedBroadcastApp:
                     if v.name == selected_voice_desc:
                         self.engine.setProperty('voice', v.id)
                         break
-
-            if task.get('prompt', 0) and AUDIO_AVAILABLE and os.path.exists(p := os.path.join(PROMPT_FOLDER, task.get('prompt_file', ''))):
-                s = pygame.mixer.Sound(p); s.play(); time.sleep(s.get_length())
+            
             self.engine.setProperty('volume', float(task.get('volume', 1.0)))
             self.engine.setProperty('rate', int(task.get('speed', 150)))
-
-            for i in range(int(task.get('repeat', 1))):
+            
+            repeat_count = int(task.get('repeat', 1))
+            for i in range(repeat_count):
                 if not self.running: break
-                self.log(f"正在播报第 {i+1} 遍"); self.engine.say(text); self.engine.runAndWait()
+                self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
+                self.engine.say(text)
+                self.engine.runAndWait()
+                if i < repeat_count - 1:
+                    time.sleep(0.5) # 每遍之间短暂间隔，听起来更自然
+
         except Exception as e: self.log(f"播报错误: {e}")
         finally: self.root.after(0, self.on_playback_finished)
 
@@ -928,9 +973,14 @@ class TimedBroadcastApp:
         if not os.path.exists(self.task_file): return
         try:
             with open(self.task_file, 'r', encoding='utf-8') as f: self.tasks = json.load(f)
-            if any(not isinstance(t.get('last_run'), dict) for t in self.tasks):
-                for task in self.tasks: task['last_run'] = {}
-                self.log("旧版任务数据已迁移"); self.save_tasks()
+            migrated = False
+            for task in self.tasks:
+                if not isinstance(task.get('last_run'), dict):
+                    task['last_run'] = {}
+                    migrated = True
+            if migrated:
+                self.log("旧版任务数据已迁移，以支持每日多次播报。")
+                self.save_tasks()
             self.update_task_list(); self.log(f"已加载 {len(self.tasks)} 个节目")
         except Exception as e: self.log(f"加载任务失败: {e}")
 
