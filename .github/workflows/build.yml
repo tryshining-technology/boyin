@@ -28,11 +28,9 @@ jobs:
           pip install pyinstaller
           pywin32_postinstall.py -install
 
-      # --- 使用简洁且正确的 PyInstaller 命令 ---
       - name: Build application with PyInstaller
         run: |
-          # 我们不再需要复杂的脚本，只保留一个 hidden-import 作为最佳实践和安全保障
-          pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico --add-data "icon.ico;." --hidden-import=win32timezone boyin.py
+          pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico --add-data "icon.ico;." boyin.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
