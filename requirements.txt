@@ -1,4 +1,4 @@
 pyttsx3>=2.90
 pygame>=2.5.0
-pywin32
+pywin32>=306
 pyinstaller>=6.0.0
