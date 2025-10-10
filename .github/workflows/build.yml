@@ -28,7 +28,7 @@ jobs:
           pip install pyinstaller
           pywin32_postinstall.py -install
 
-      # 关键修复：在打包命令中添加 --icon 参数
+      # 使用您指定的文件名
       - name: Build application with PyInstaller
         run: |
           pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico boyin.py
