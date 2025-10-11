@@ -1,10 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from win32com.client import gencache
+# 这是一个修复了执行顺序问题的 .spec 文件
+
 import os
+from win32com.client import gencache
 import win32com
 
-# --- 核心修复：在打包前，强制生成 SAPI.SpVoice 的缓存 ---
+# --- Block-based vars ---
+# 将所有变量定义和预处理操作都放在 Analysis 块之前
+# 这样 PyInstaller 在解析 Analysis 时就能找到它们
+
+# --- 核心修复：在这里预先生成 COM 缓存 ---
 print("--- Forcing generation of win32com cache for SAPI.SpVoice ---")
 gencache.EnsureDispatch('SAPI.SpVoice')
 print("--- COM Cache generated successfully. ---")
@@ -13,16 +19,18 @@ print("--- COM Cache generated successfully. ---")
 gen_py_path = os.path.join(os.path.dirname(win32com.__file__), 'gen_py')
 print(f"--- Found gen_py cache path: {gen_py_path} ---")
 
+# --- 定义要打包的数据 ---
+datas_to_bundle = [
+    ('icon.ico', '.'),
+    (gen_py_path, 'win32com/gen_py')
+]
 
 # --- PyInstaller 分析块 ---
 a = Analysis(
     ['boyin.py'],
     pathex=[],
     binaries=[],
-    datas=[
-        ('icon.ico', '.'),
-        (gen_py_path, 'win32com/gen_py')  # 将整个缓存文件夹打包
-    ],
+    datas=datas_to_bundle, # 使用上面定义好的变量
     hiddenimports=['win32com.gen_py', 'win32timezone'],
     hookspath=[],
     hooksconfig={},
