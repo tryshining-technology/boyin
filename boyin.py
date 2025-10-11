@@ -80,7 +80,7 @@ class TimedBroadcastApp:
         self.is_playing = False
         self.wait_queue = deque()
         self.state_lock = threading.Lock()
-        self.stop_playback_flag = threading.Event()
+        # self.stop_playback_flag = threading.Event() # 禁用
         self.current_task_thread = None
 
         self.create_folder_structure()
@@ -99,7 +99,6 @@ class TimedBroadcastApp:
         self.nav_frame = tk.Frame(self.root, bg='#A8D8E8', width=160)
         self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
-
         nav_buttons = [("定时广播", ""), ("立即插播", ""), ("节假日", ""),
                        ("语音广告 制作", ""), ("设置", "")]
         for i, (title, subtitle) in enumerate(nav_buttons):
@@ -111,10 +110,8 @@ class TimedBroadcastApp:
             btn.pack(fill=tk.X)
             if subtitle:
                 sub_label = tk.Label(btn_frame, text=subtitle, bg='#5DADE2' if i == 0 else '#A8D8E8',
-                                   fg='#555' if i == 0 else '#666',
-                                   font=('Microsoft YaHei', 10), anchor='w', padx=10)
+                                   fg='#555' if i == 0 else '#666', font=('Microsoft YaHei', 10), anchor='w', padx=10)
                 sub_label.pack(fill=tk.X)
-
         self.main_frame = tk.Frame(self.root, bg='white')
         self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.create_scheduled_broadcast_page()
@@ -127,24 +124,20 @@ class TimedBroadcastApp:
     def create_scheduled_broadcast_page(self):
         top_frame = tk.Frame(self.main_frame, bg='white')
         top_frame.pack(fill=tk.X, padx=10, pady=10)
-        title_label = tk.Label(top_frame, text="定时广播", font=('Microsoft YaHei', 14, 'bold'),
-                              bg='white', fg='#2C5F7C')
+        title_label = tk.Label(top_frame, text="定时广播", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#2C5F7C')
         title_label.pack(side=tk.LEFT)
         btn_frame = tk.Frame(top_frame, bg='white')
         btn_frame.pack(side=tk.RIGHT)
-        
         buttons = [("导入节目单", self.import_tasks, '#1ABC9C'), ("导出节目单", self.export_tasks, '#1ABC9C')]
         for text, cmd, color in buttons:
             btn = tk.Button(btn_frame, text=text, command=cmd, bg=color, fg='white',
                           font=('Microsoft YaHei', 9), bd=0, padx=12, pady=5, cursor='hand2')
             btn.pack(side=tk.LEFT, padx=3)
-
         stats_frame = tk.Frame(self.main_frame, bg='#F0F8FF')
         stats_frame.pack(fill=tk.X, padx=10, pady=5)
         self.stats_label = tk.Label(stats_frame, text="节目单：0", font=('Microsoft YaHei', 10),
                                    bg='#F0F8FF', fg='#2C5F7C', anchor='w', padx=10)
         self.stats_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
         table_frame = tk.Frame(self.main_frame, bg='white')
         table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         columns = ('节目名称', '状态', '开始时间', '模式', '音频或文字', '音量', '周几/几号', '日期范围')
@@ -157,10 +150,8 @@ class TimedBroadcastApp:
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.task_tree.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.task_tree.configure(yscrollcommand=scrollbar.set)
-        
         self.task_tree.bind("<Button-3>", self.show_context_menu)
         self.task_tree.bind("<Double-1>", self.on_double_click_edit)
-
         playing_frame = tk.LabelFrame(self.main_frame, text="正在播：", font=('Microsoft YaHei', 10),
                                      bg='white', fg='#2C5F7C', padx=10, pady=5)
         playing_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -168,23 +159,17 @@ class TimedBroadcastApp:
                                                      bg='#FFFEF0', wrap=tk.WORD, state='disabled')
         self.playing_text.pack(fill=tk.BOTH, expand=True)
         self.update_playing_text("等待播放...")
-        
         log_outer_frame = tk.Frame(self.main_frame, bg='white')
         log_outer_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
         log_label_frame = tk.Frame(log_outer_frame, bg='white')
         log_label_frame.pack(fill=tk.X)
-        
         tk.Label(log_label_frame, text="日志：", font=('Microsoft YaHei', 10),
                  bg='white', fg='#2C5F7C').pack(side=tk.LEFT)
-        
         tk.Button(log_label_frame, text="清除日志", command=self.clear_log, bg='#EAEAEA',
                   font=('Microsoft YaHei', 8), bd=1, padx=6, pady=0).pack(side=tk.LEFT, padx=10)
-
         self.log_text = scrolledtext.ScrolledText(log_outer_frame, height=6, font=('Microsoft YaHei', 9),
                                                  bg='#F9F9F9', wrap=tk.WORD, state='disabled', bd=1, relief='solid')
         self.log_text.pack(fill=tk.BOTH, expand=True)
-
         status_frame = tk.Frame(self.main_frame, bg='#E8F4F8', height=30)
         status_frame.pack(fill=tk.X, side=tk.BOTTOM)
         status_frame.pack_propagate(False)
@@ -195,18 +180,15 @@ class TimedBroadcastApp:
                            bg='#5DADE2' if i % 2 == 0 else '#7EC8E3', fg='white', padx=15, pady=5)
             label.pack(side=tk.LEFT, padx=2)
             self.status_labels.append(label)
-
         self.update_status_bar()
         self.log("定时播音软件已启动")
 
     def on_double_click_edit(self, event):
-        if self.task_tree.identify_row(event.y):
-            self.edit_task()
+        if self.task_tree.identify_row(event.y): self.edit_task()
 
     def show_context_menu(self, event):
         iid = self.task_tree.identify_row(event.y)
         context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 10))
-
         if iid:
             if iid not in self.task_tree.selection(): self.task_tree.selection_set(iid)
             context_menu.add_command(label="▶️ 立即播放", command=self.play_now)
@@ -223,16 +205,13 @@ class TimedBroadcastApp:
         else:
             self.task_tree.selection_set()
             context_menu.add_command(label="➕ 添加节目", command=self.add_task)
-        
         context_menu.add_separator()
-        stop_state = "normal" if self.is_playing else "disabled"
-        context_menu.add_command(label="⏹️ 停止当前播放", command=self.stop_current_playback, state=stop_state)
+        context_menu.add_command(label="⏹️ 停止当前播放 (已禁用)", state="disabled")
         context_menu.post(event.x_root, event.y_root)
 
     def play_now(self):
         selection = self.task_tree.selection()
         if not selection: return
-        
         index = self.task_tree.index(selection[0])
         task = self.tasks[index].copy()
         task['manual_play'] = True 
@@ -240,22 +219,10 @@ class TimedBroadcastApp:
         self.root.after(0, self._execute_broadcast, task, "manual_play")
 
     def stop_current_playback(self):
-        self.log("收到手动停止命令...")
-        self.stop_playback_flag.set()
-        
-        if AUDIO_AVAILABLE:
-            pygame.mixer.music.stop()
-            pygame.mixer.stop()
-        
-        with self.state_lock:
-            if self.wait_queue:
-                self.log(f"清空了等待队列中的 {len(self.wait_queue)} 个任务。")
-                self.wait_queue.clear()
+        # 功能已禁用
+        pass
     
-    # --- UI & Core Logic Functions ---
-    # ... (Rest of the functions) ...
-    # ... The following is the complete set of functions ...
-
+    # ... 所有UI函数（add_task, open_..._dialog, 等）保持不变 ...
     def add_task(self):
         choice_dialog = tk.Toplevel(self.root)
         choice_dialog.title("选择节目类型")
@@ -669,19 +636,6 @@ class TimedBroadcastApp:
         content_frame.columnconfigure(1, weight=1)
         time_frame.columnconfigure(1, weight=1)
 
-    # All other helper functions (get_available_voices, show_..._dialog, etc.) remain unchanged
-    # ...
-    # ...
-
-    def clear_log(self):
-        self.log_text.config(state='normal')
-        self.log_text.delete('1.0', tk.END)
-        self.log_text.config(state='disabled')
-        self.log("日志已清除。")
-
-    # The rest of the functions from previous correct version
-    # (update_task_list, update_status_bar, log, save_tasks, etc.)
-    # are included below...
     def get_available_voices(self):
         available_voices = []
         if WIN32COM_AVAILABLE:
@@ -943,6 +897,12 @@ class TimedBroadcastApp:
         self.log_text.config(state='normal')
         self.log_text.insert(tk.END, f"{datetime.now().strftime('%H:%M:%S')} -> {message}\n")
         self.log_text.see(tk.END); self.log_text.config(state='disabled')
+
+    def clear_log(self):
+        self.log_text.config(state='normal')
+        self.log_text.delete('1.0', tk.END)
+        self.log_text.config(state='disabled')
+        self.log("日志已清除。")
 
     def update_playing_text(self, message): self.root.after(0, lambda: self._update_playing_text_threadsafe(message))
     def _update_playing_text_threadsafe(self, message):
