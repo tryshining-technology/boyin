@@ -74,6 +74,9 @@ class TimedBroadcastApp:
         self.running = True
         self.task_file = TASK_FILE
         self.tray_icon = None
+        
+        # --- 新增：锁定状态变量 ---
+        self.is_locked = False
 
         self.is_playing = threading.Event()
         self.playback_queue = []
@@ -119,6 +122,10 @@ class TimedBroadcastApp:
         self.create_scheduled_broadcast_page()
 
     def switch_page(self, page_name):
+        if self.is_locked:
+            self.log("界面已锁定，请先解锁。")
+            return
+            
         if page_name != "定时广播":
             messagebox.showinfo("提示", f"页面 [{page_name}] 正在开发中...")
             self.log(f"功能开发中: {page_name}")
@@ -129,12 +136,19 @@ class TimedBroadcastApp:
         title_label = tk.Label(top_frame, text="定时广播", font=('Microsoft YaHei', 14, 'bold'),
                               bg='white', fg='#2C5F7C')
         title_label.pack(side=tk.LEFT)
-        btn_frame = tk.Frame(top_frame, bg='white')
-        btn_frame.pack(side=tk.RIGHT)
         
+        # --- 修改：将按钮框保存为实例变量，以便后续禁用/启用 ---
+        self.top_right_btn_frame = tk.Frame(top_frame, bg='white')
+        self.top_right_btn_frame.pack(side=tk.RIGHT)
+        
+        # --- 新增：创建锁定/解锁按钮 ---
+        self.lock_button = tk.Button(self.top_right_btn_frame, text="锁定", command=self.toggle_lock_state, bg='#E74C3C', fg='white',
+                                     font=('Microsoft YaHei', 9), bd=0, padx=12, pady=5, cursor='hand2')
+        self.lock_button.pack(side=tk.LEFT, padx=3)
+
         buttons = [("导入节目单", self.import_tasks, '#1ABC9C'), ("导出节目单", self.export_tasks, '#1ABC9C')]
         for text, cmd, color in buttons:
-            btn = tk.Button(btn_frame, text=text, command=cmd, bg=color, fg='white',
+            btn = tk.Button(self.top_right_btn_frame, text=text, command=cmd, bg=color, fg='white',
                           font=('Microsoft YaHei', 9), bd=0, padx=12, pady=5, cursor='hand2')
             btn.pack(side=tk.LEFT, padx=3)
 
@@ -179,10 +193,11 @@ class TimedBroadcastApp:
                              bg='white', fg='#2C5F7C')
         log_label.pack(side=tk.LEFT)
 
-        clear_log_btn = tk.Button(log_header_frame, text="清除日志", command=self.clear_log,
-                                  font=('Microsoft YaHei', 8), bd=0, bg='#EAEAEA',
-                                  fg='#333', cursor='hand2', padx=5, pady=0)
-        clear_log_btn.pack(side=tk.LEFT, padx=10)
+        # --- 修改：将清除日志按钮保存为实例变量 ---
+        self.clear_log_btn = tk.Button(log_header_frame, text="清除日志", command=self.clear_log,
+                                       font=('Microsoft YaHei', 8), bd=0, bg='#EAEAEA',
+                                       fg='#333', cursor='hand2', padx=5, pady=0)
+        self.clear_log_btn.pack(side=tk.LEFT, padx=10)
 
         self.log_text = scrolledtext.ScrolledText(log_frame, height=6, font=('Microsoft YaHei', 9),
                                                  bg='#F9F9F9', wrap=tk.WORD, state='disabled')
@@ -201,6 +216,46 @@ class TimedBroadcastApp:
 
         self.update_status_bar()
         self.log("定时播音软件已启动")
+
+    # --- 新增：锁定功能相关函数 ---
+    def toggle_lock_state(self):
+        """切换界面的锁定与解锁状态"""
+        self.is_locked = not self.is_locked
+        if self.is_locked:
+            self.lock_button.config(text="解锁", bg='#2ECC71') # 绿色
+            self._set_ui_lock_state(tk.DISABLED)
+            self.log("界面已锁定。")
+        else:
+            self.lock_button.config(text="锁定", bg='#E74C3C') # 红色
+            self._set_ui_lock_state(tk.NORMAL)
+            self.log("界面已解锁。")
+
+    def _set_ui_lock_state(self, state):
+        """启用或禁用界面上的特定控件"""
+        # 禁用/启用左侧导航栏
+        self._set_widget_state_recursively(self.nav_frame, state)
+        # 禁用/启用右上角按钮区域 (除了锁定按钮本身)
+        self._set_widget_state_recursively(self.top_right_btn_frame, state)
+        # 禁用/启用清除日志按钮
+        self.clear_log_btn.config(state=state)
+
+    def _set_widget_state_recursively(self, parent_widget, state):
+        """递归地设置一个父控件下所有子控件的状态"""
+        for child in parent_widget.winfo_children():
+            # 永远不要禁用锁定按钮本身
+            if child == self.lock_button:
+                continue
+            
+            try:
+                # 尝试设置状态，如果控件支持'state'属性
+                child.config(state=state)
+            except tk.TclError:
+                # 忽略不支持'state'属性的控件 (如 Frame, Label)
+                pass
+            
+            # 如果子控件还有自己的子控件，则继续递归
+            if child.winfo_children():
+                self._set_widget_state_recursively(child, state)
     
     def clear_log(self):
         """清除日志文本框中的所有内容"""
@@ -211,12 +266,16 @@ class TimedBroadcastApp:
             self.log("日志已清空。")
 
     def on_double_click_edit(self, event):
+        # --- 修改：增加锁定判断 ---
+        if self.is_locked: return
         if self.task_tree.identify_row(event.y):
             self.edit_task()
 
     def show_context_menu(self, event):
-        iid = self.task_tree.identify_row(event.y)
+        # --- 修改：增加锁定判断 ---
+        if self.is_locked: return
         
+        iid = self.task_tree.identify_row(event.y)
         context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 10))
 
         if iid:
@@ -304,6 +363,7 @@ class TimedBroadcastApp:
                              bd=0, padx=30, pady=12, cursor='hand2', width=15)
         voice_btn.pack(pady=8)
 
+    # ... (从 open_audio_dialog 到 quit_app 的所有函数保持不变) ...
     def open_audio_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
@@ -472,7 +532,6 @@ class TimedBroadcastApp:
             audio_path = audio_single_entry.get().strip() if audio_type_var.get() == "single" else audio_folder_entry.get().strip()
             if not audio_path: messagebox.showwarning("警告", "请选择音频文件或文件夹", parent=dialog); return
             
-            # --- 新增的校验和格式化逻辑 ---
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
             if not is_valid_time:
                 messagebox.showwarning("格式错误", time_msg, parent=dialog)
@@ -482,7 +541,6 @@ class TimedBroadcastApp:
             if not is_valid_date:
                 messagebox.showwarning("格式错误", date_msg, parent=dialog)
                 return
-            # --- 新增的校验和格式化逻辑结束 ---
 
             new_task_data = {'name': name_entry.get().strip(), 'time': time_msg, 'content': audio_path,
                              'type': 'audio', 'audio_type': audio_type_var.get(), 'play_order': play_order_var.get(),
@@ -670,7 +728,6 @@ class TimedBroadcastApp:
             content = content_text.get('1.0', tk.END).strip()
             if not content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
             
-            # --- 新增的校验和格式化逻辑 ---
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
             if not is_valid_time:
                 messagebox.showwarning("格式错误", time_msg, parent=dialog)
@@ -680,7 +737,6 @@ class TimedBroadcastApp:
             if not is_valid_date:
                 messagebox.showwarning("格式错误", date_msg, parent=dialog)
                 return
-            # --- 新增的校验和格式化逻辑结束 ---
 
             new_task_data = {'name': name_entry.get().strip(), 'time': time_msg, 'content': content,
                              'type': 'voice', 'voice': voice_var.get(), 
@@ -1031,7 +1087,6 @@ class TimedBroadcastApp:
             time.sleep(1)
 
     def _process_queue(self):
-        """处理播放队列中的下一个任务"""
         if self.is_playing.is_set():
             return
 
@@ -1223,9 +1278,7 @@ class TimedBroadcastApp:
         y = (win.winfo_screenheight() // 2) - (height // 2)
         win.geometry(f'{width}x{height}+{x}+{y}')
 
-    # --- 新增的格式化与校验工具函数 ---
     def _normalize_time_string(self, time_str):
-        """将单个时间字符串 'H:M:S' 格式化为 'HH:MM:SS'"""
         try:
             parts = str(time_str).split(':')
             if len(parts) != 3: return None
@@ -1237,13 +1290,11 @@ class TimedBroadcastApp:
             return None
 
     def _normalize_multiple_times_string(self, times_input_str):
-        """格式化逗号分隔的多个时间字符串，并返回处理结果"""
         if not times_input_str.strip():
-            return True, "" # 允许为空
+            return True, ""
         
         original_times = [t.strip() for t in times_input_str.split(',') if t.strip()]
-        normalized_times = []
-        invalid_times = []
+        normalized_times, invalid_times = [], []
 
         for t in original_times:
             normalized = self._normalize_time_string(t)
@@ -1258,17 +1309,14 @@ class TimedBroadcastApp:
         return True, ", ".join(normalized_times)
 
     def _normalize_date_string(self, date_str):
-        """将 'YYYY-M-D' 格式的日期字符串格式化为 'YYYY-MM-DD'"""
         try:
-            dt = datetime.strptime(date_str, "%Y-%m-%d")
-            return dt.strftime("%Y-%m-%d")
+            return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d")
         except ValueError:
             return None
             
     def _normalize_date_range_string(self, date_range_input_str):
-        """格式化日期范围字符串"""
         if not date_range_input_str.strip():
-            return True, "" # 允许为空
+            return True, ""
 
         try:
             start_str, end_str = [d.strip() for d in date_range_input_str.split('~')]
@@ -1278,9 +1326,7 @@ class TimedBroadcastApp:
             if norm_start and norm_end:
                 return True, f"{norm_start} ~ {norm_end}"
             else:
-                invalid_parts = []
-                if not norm_start: invalid_parts.append(start_str)
-                if not norm_end: invalid_parts.append(end_str)
+                invalid_parts = [p for p, n in [(start_str, norm_start), (end_str, norm_end)] if not n]
                 return False, f"以下日期格式无效 (应为 YYYY-MM-DD): {', '.join(invalid_parts)}"
         except (ValueError, IndexError):
             return False, "日期范围格式无效，应为 'YYYY-MM-DD ~ YYYY-MM-DD'"
@@ -1345,4 +1391,4 @@ def main():
     root.mainloop()
 
 if __name__ == "__main__":
-    main()
+    main()```
