@@ -160,7 +160,10 @@ class TimedBroadcastApp:
         table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         columns = ('节目名称', '状态', '开始时间', '模式', '音频或文字', '音量', '周几/几号', '日期范围')
         self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12)
-        col_widths =
+        
+        # --- 这是修复的地方 ---
+        col_widths = [200, 60, 140, 70, 300, 60, 100, 120]
+        
         for col, width in zip(columns, col_widths):
             self.task_tree.heading(col, text=col)
             self.task_tree.column(col, width=width, anchor='w' if col in ['节目名称', '音频或文字'] else 'center')
@@ -218,11 +221,11 @@ class TimedBroadcastApp:
         """切换界面的锁定与解锁状态"""
         self.is_locked = not self.is_locked
         if self.is_locked:
-            self.lock_button.config(text="解锁", bg='#2ECC71') # 绿色
+            self.lock_button.config(text="解锁", bg='#2ECC71')
             self._set_ui_lock_state(tk.DISABLED)
             self.log("界面已锁定。")
         else:
-            self.lock_button.config(text="锁定", bg='#E74C3C') # 红色
+            self.lock_button.config(text="锁定", bg='#E74C3C')
             self._set_ui_lock_state(tk.NORMAL)
             self.log("界面已解锁。")
 
@@ -305,7 +308,7 @@ class TimedBroadcastApp:
             messagebox.showwarning("提示", "请先选择一个要立即播放的节目。")
             return
         
-        index = self.task_tree.index(selection)
+        index = self.task_tree.index(selection[0])
         task = self.tasks[index]
 
         self.log(f"手动触发高优先级播放: {task['name']}")
@@ -803,7 +806,7 @@ class TimedBroadcastApp:
             messagebox.showwarning("警告", "一次只能修改一个节目")
             return
         
-        index = self.task_tree.index(selection)
+        index = self.task_tree.index(selection[0])
         task = self.tasks[index]
         
         dummy_parent = tk.Toplevel(self.root)
@@ -838,7 +841,7 @@ class TimedBroadcastApp:
     def move_task(self, direction):
         sel = self.task_tree.selection()
         if not sel or len(sel) > 1: return
-        index = self.task_tree.index(sel)
+        index = self.task_tree.index(sel[0])
         new_index = index + direction
         if 0 <= new_index < len(self.tasks):
             self.tasks.insert(new_index, self.tasks.pop(index))
@@ -910,7 +913,8 @@ class TimedBroadcastApp:
                 messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog)
 
         def del_time():
-            if listbox.curselection(): listbox.delete(listbox.curselection())
+            if listbox.curselection():
+                listbox.delete(listbox.curselection()[0])
         tk.Button(btn_frame, text="添加 ↑", command=add_time).pack(pady=3, fill=tk.X)
         tk.Button(btn_frame, text="删除", command=del_time).pack(pady=3, fill=tk.X)
         tk.Button(btn_frame, text="清空", command=lambda: listbox.delete(0, tk.END)).pack(pady=3, fill=tk.X)
@@ -1025,12 +1029,12 @@ class TimedBroadcastApp:
             try: self.task_tree.selection_set(selection)
             except tk.TclError: pass
         self.stats_label.config(text=f"节目单：{len(self.tasks)}")
-        if hasattr(self, 'status_labels'): self.status_labels.config(text=f"任务数量: {len(self.tasks)}")
+        if hasattr(self, 'status_labels'): self.status_labels[3].config(text=f"任务数量: {len(self.tasks)}")
 
     def update_status_bar(self):
         if not self.running: return
-        self.status_labels.config(text=f"当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        self.status_labels.config(text="系统状态: 运行中")
+        self.status_labels[0].config(text=f"当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.status_labels[1].config(text="系统状态: 运行中")
         self.root.after(1000, self.update_status_bar)
 
     def start_background_thread(self):
@@ -1086,7 +1090,7 @@ class TimedBroadcastApp:
     def _execute_broadcast(self, task, trigger_time):
         self.is_playing.set()
         self.update_playing_text(f"[{task['name']}] 正在准备播放...")
-        self.status_labels.config(text="播放状态: 播放中")
+        self.status_labels[2].config(text="播放状态: 播放中")
         
         if trigger_time != "manual_play":
             if not isinstance(task.get('last_run'), dict):
@@ -1221,7 +1225,7 @@ class TimedBroadcastApp:
     def on_playback_finished(self):
         self.is_playing.clear()
         self.update_playing_text("等待下一个任务...")
-        self.status_labels.config(text="播放状态: 待机")
+        self.status_labels[2].config(text="播放状态: 待机")
         self.log("播放结束")
         self.root.after(100, self._process_queue)
 
@@ -1269,7 +1273,7 @@ class TimedBroadcastApp:
         try:
             parts = str(time_str).split(':')
             if len(parts) != 3: return None
-            h, m, s = int(parts), int(parts), int(parts)
+            h, m, s = int(parts[0]), int(parts[1]), int(parts[2])
             if not (0 <= h <= 23 and 0 <= m <= 59 and 0 <= s <= 59):
                 return None
             return f"{h:02d}:{m:02d}:{s:02d}"
