@@ -75,18 +75,20 @@ class TimedBroadcastApp:
         self.task_file = TASK_FILE
         self.tray_icon = None
         
-        # --- 新增：锁定状态变量 ---
         self.is_locked = False
 
         self.is_playing = threading.Event()
         self.playback_queue = []
         self.queue_lock = threading.Lock()
+        self.stop_speech_event = threading.Event() # 用于安全地停止语音播报
 
         self.create_folder_structure()
         self.create_widgets()
         self.load_tasks()
         self.start_background_thread()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
+
+        self.start_tray_icon_thread()
 
     def create_folder_structure(self):
         """创建所有必要的文件夹"""
@@ -161,7 +163,6 @@ class TimedBroadcastApp:
         columns = ('节目名称', '状态', '开始时间', '模式', '音频或文字', '音量', '周几/几号', '日期范围')
         self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12)
         
-        # --- 这是修复的地方 ---
         col_widths = [200, 60, 140, 70, 300, 60, 100, 120]
         
         for col, width in zip(columns, col_widths):
@@ -218,7 +219,6 @@ class TimedBroadcastApp:
         self.log("定时播音软件已启动")
     
     def toggle_lock_state(self):
-        """切换界面的锁定与解锁状态"""
         self.is_locked = not self.is_locked
         if self.is_locked:
             self.lock_button.config(text="解锁", bg='#2ECC71')
@@ -230,13 +230,11 @@ class TimedBroadcastApp:
             self.log("界面已解锁。")
 
     def _set_ui_lock_state(self, state):
-        """启用或禁用界面上的特定控件"""
         self._set_widget_state_recursively(self.nav_frame, state)
         self._set_widget_state_recursively(self.top_right_btn_frame, state)
         self.clear_log_btn.config(state=state)
 
     def _set_widget_state_recursively(self, parent_widget, state):
-        """递归地设置一个父控件下所有子控件的状态"""
         for child in parent_widget.winfo_children():
             if child == self.lock_button:
                 continue
@@ -250,7 +248,6 @@ class TimedBroadcastApp:
                 self._set_widget_state_recursively(child, state)
     
     def clear_log(self):
-        """清除日志文本框中的所有内容"""
         if messagebox.askyesno("确认操作", "您确定要清空所有日志记录吗？\n此操作不可恢复。"):
             self.log_text.config(state='normal')
             self.log_text.delete('1.0', tk.END)
@@ -283,7 +280,6 @@ class TimedBroadcastApp:
             context_menu.add_separator()
             context_menu.add_command(label="▶️ 启用", command=self.enable_task)
             context_menu.add_command(label="⏸️ 禁用", command=self.disable_task)
-
         else:
             self.task_tree.selection_set()
             context_menu.add_command(label="➕ 添加节目", command=self.add_task)
@@ -294,15 +290,15 @@ class TimedBroadcastApp:
         context_menu.post(event.x_root, event.y_root)
     
     def _force_stop_playback(self):
-        """强制停止当前所有播放活动"""
         if self.is_playing.is_set():
             self.log("接收到中断指令，正在停止当前播放...")
-            if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
+            
+            if AUDIO_AVAILABLE and pygame.mixer.get_busy():
                 pygame.mixer.music.stop()
-            self.on_playback_finished()
-    
+            
+            self.stop_speech_event.set()
+
     def play_now(self):
-        """立即中断并播放选定的任务"""
         selection = self.task_tree.selection()
         if not selection: 
             messagebox.showwarning("提示", "请先选择一个要立即播放的节目。")
@@ -764,7 +760,6 @@ class TimedBroadcastApp:
         time_frame.columnconfigure(1, weight=1)
 
     def get_available_voices(self):
-        """获取系统可用语音列表的最终方法"""
         available_voices = []
         if WIN32COM_AVAILABLE:
             try:
@@ -780,7 +775,6 @@ class TimedBroadcastApp:
         return available_voices
     
     def select_file_for_entry(self, initial_dir, string_var):
-        """通用文件选择对话框"""
         filename = filedialog.askopenfilename(
             title="选择文件",
             initialdir=initial_dir,
@@ -1128,6 +1122,10 @@ class TimedBroadcastApp:
 
             start_time = time.time()
             for audio_path in playlist:
+                if not self.is_playing.is_set():
+                    self.log(f"音频任务 '{task['name']}' 被外部中断。")
+                    break
+
                 self.log(f"正在播放: {os.path.basename(audio_path)}")
                 self.update_playing_text(f"[{task['name']}] 正在播放: {os.path.basename(audio_path)}")
                 
@@ -1136,13 +1134,17 @@ class TimedBroadcastApp:
                 pygame.mixer.music.play()
 
                 while pygame.mixer.music.get_busy():
+                    if not self.is_playing.is_set():
+                        pygame.mixer.music.stop()
+                        break
+                    
                     if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds:
                         pygame.mixer.music.stop()
                         self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
                         break
                     time.sleep(0.1)
                 
-                if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds:
+                if (interval_type == 'seconds' and (time.time() - start_time) > duration_seconds) or not self.is_playing.is_set():
                     break
         except Exception as e:
             self.log(f"音频播放错误: {e}")
@@ -1154,8 +1156,15 @@ class TimedBroadcastApp:
             self.log("错误: pywin32库不可用，无法执行语音播报。")
             self.root.after(0, self.on_playback_finished)
             return
+
+        SVSF_ASYNC = 1
+        SVSF_PURGEBEFORESPEAK = 2
+        SVSF_XML = 8
+
+        self.stop_speech_event.clear()
         
         pythoncom.CoInitialize()
+        speaker = None
         try:
             if task.get('bgm', 0) and AUDIO_AVAILABLE:
                 bgm_file = task.get('bgm_file', '')
@@ -1181,10 +1190,18 @@ class TimedBroadcastApp:
                     channel = sound.play()
                     if channel:
                         while channel.get_busy():
+                            if self.stop_speech_event.is_set():
+                                channel.stop()
+                                self.log("提示音播放被中断。")
+                                return
                             time.sleep(0.05)
                 else:
                     self.log(f"警告: 提示音文件不存在 - {prompt_path}")
             
+            if self.stop_speech_event.is_set():
+                self.log("任务在开始播报前被中断。")
+                return
+
             try:
                 speaker = win32com.client.Dispatch("SAPI.SpVoice")
             except com_error as e:
@@ -1208,8 +1225,24 @@ class TimedBroadcastApp:
             self.log(f"准备播报 {repeat_count} 遍...")
 
             for i in range(repeat_count):
+                if self.stop_speech_event.is_set():
+                    self.log("播报在循环开始前被中断。")
+                    break
+
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
-                speaker.Speak(xml_text, 8)
+                
+                speaker.Speak(xml_text, SVSF_ASYNC | SVSF_XML)
+                
+                while speaker.Status.RunningState == 2:
+                    if self.stop_speech_event.is_set():
+                        self.log("接收到停止信号，正在中断语音...")
+                        speaker.Speak("", SVSF_PURGEBEFORESPEAK)
+                        break
+                    time.sleep(0.1)
+                
+                if self.stop_speech_event.is_set():
+                    break
+
                 if i < repeat_count - 1:
                     time.sleep(0.5)
 
@@ -1219,6 +1252,8 @@ class TimedBroadcastApp:
             if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
                 pygame.mixer.music.stop()
                 self.log("背景音乐已停止。")
+            
+            speaker = None
             pythoncom.CoUninitialize()
             self.root.after(0, self.on_playback_finished)
 
@@ -1269,7 +1304,6 @@ class TimedBroadcastApp:
         win.geometry(f'{width}x{height}+{x}+{y}')
 
     def _normalize_time_string(self, time_str):
-        """将单个时间字符串 'H:M:S' 格式化为 'HH:MM:SS'"""
         try:
             parts = str(time_str).split(':')
             if len(parts) != 3: return None
@@ -1281,7 +1315,6 @@ class TimedBroadcastApp:
             return None
 
     def _normalize_multiple_times_string(self, times_input_str):
-        """格式化逗号分隔的多个时间字符串，并返回处理结果"""
         if not times_input_str.strip():
             return True, ""
         
@@ -1302,7 +1335,6 @@ class TimedBroadcastApp:
         return True, ", ".join(normalized_times)
 
     def _normalize_date_string(self, date_str):
-        """将 'YYYY-M-D' 格式的日期字符串格式化为 'YYYY-MM-DD'"""
         try:
             dt = datetime.strptime(date_str, "%Y-%m-%d")
             return dt.strftime("%Y-%m-%d")
@@ -1310,7 +1342,6 @@ class TimedBroadcastApp:
             return None
             
     def _normalize_date_range_string(self, date_range_input_str):
-        """格式化日期范围字符串"""
         if not date_range_input_str.strip():
             return True, ""
 
@@ -1351,14 +1382,14 @@ class TimedBroadcastApp:
         tk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=tk.LEFT, padx=10)
 
     def hide_to_tray(self):
+        if not TRAY_AVAILABLE:
+            messagebox.showwarning("功能不可用", "pystray 或 Pillow 库未安装，无法最小化到托盘。")
+            return
+            
         self.root.withdraw()
-        if not self.tray_icon and TRAY_AVAILABLE:
-            self.setup_tray_icon()
-            threading.Thread(target=self.tray_icon.run, daemon=True).start()
-            self.log("程序已最小化到系统托盘。")
+        self.log("程序已最小化到系统托盘。")
 
     def show_from_tray(self, icon, item):
-        icon.stop()
         self.root.after(0, self.root.deiconify)
         self.log("程序已从托盘恢复。")
 
@@ -1381,7 +1412,13 @@ class TimedBroadcastApp:
         
         menu = (item('显示', self.show_from_tray, default=True), item('退出', self.quit_app))
         self.tray_icon = Icon("boyin", image, "定时播音", menu)
-        self.tray_icon.activations['left'] = self.show_from_tray
+
+    def start_tray_icon_thread(self):
+        if TRAY_AVAILABLE and self.tray_icon is None:
+            self.setup_tray_icon()
+            thread = threading.Thread(target=self.tray_icon.run, daemon=True)
+            thread.start()
+            self.log("系统托盘图标已启动。")
 
 def main():
     root = tk.Tk()
