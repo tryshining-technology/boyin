@@ -1,8 +1,4 @@
-# ===============================================================
-#  诊断专用 build.yml (版本 1)
-#  目的：只运行最基本的 PyInstaller 命令，捕获原始错误日志
-# ===============================================================
-name: Diagnostic Build
+name: Build Python Application
 
 on:
   push:
@@ -10,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-windows-diagnostic:
+  build-windows:
     runs-on: windows-latest
 
     steps:
@@ -30,6 +26,12 @@ jobs:
           pip install pyinstaller
           pywin32_postinstall.py -install
 
-      # --- 使用最简单的命令来执行打包 ---
-      - name: Build application with bare minimum PyInstaller
-        run: pyinstaller --noconfirm --onefile --console boyin.py
+      # --- 最终修复：直接运行 .spec 文件，这是最稳定可靠的方式 ---
+      - name: Build application with PyInstaller spec file
+        run: pyinstaller boyin.spec
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: boyin-Windows-x64
+          path: dist/boyin.exe
