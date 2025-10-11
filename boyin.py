@@ -80,7 +80,7 @@ class TimedBroadcastApp:
         self.is_playing = threading.Event()
         self.playback_queue = []
         self.queue_lock = threading.Lock()
-        self.stop_speech_event = threading.Event() # 用于安全地停止语音播报
+        # 【Bug修复】: 移除了 self.stop_speech_event
 
         self.create_folder_structure()
         self.create_widgets()
@@ -102,8 +102,9 @@ class TimedBroadcastApp:
         self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
 
+        # 【界面调整】: 已从下方列表中移除 "立即插播"
         nav_buttons = [
-            ("定时广播", ""), ("立即插播", ""), ("节假日", ""),
+            ("定时广播", ""), ("节假日", ""),
             ("语音广告 制作", ""), ("设置", "")
         ]
         for i, (title, subtitle) in enumerate(nav_buttons):
@@ -269,17 +270,22 @@ class TimedBroadcastApp:
             if iid not in self.task_tree.selection():
                 self.task_tree.selection_set(iid)
             
+            # 【界面对齐】: 为所有菜单项添加图标以实现对齐
             context_menu.add_command(label="▶️ 立即播放", command=self.play_now)
             context_menu.add_separator()
             context_menu.add_command(label="✏️ 修改", command=self.edit_task)
             context_menu.add_command(label="❌ 删除", command=self.delete_task)
             context_menu.add_command(label="📋 复制", command=self.copy_task)
             context_menu.add_separator()
+            # 【新功能】: 增加置顶和置末
+            context_menu.add_command(label="🔼 置顶", command=self.move_task_to_top)
             context_menu.add_command(label="🔼 上移", command=lambda: self.move_task(-1))
             context_menu.add_command(label="🔽 下移", command=lambda: self.move_task(1))
+            context_menu.add_command(label="🔽 置末", command=self.move_task_to_bottom)
             context_menu.add_separator()
             context_menu.add_command(label="▶️ 启用", command=self.enable_task)
             context_menu.add_command(label="⏸️ 禁用", command=self.disable_task)
+
         else:
             self.task_tree.selection_set()
             context_menu.add_command(label="➕ 添加节目", command=self.add_task)
@@ -289,15 +295,19 @@ class TimedBroadcastApp:
         
         context_menu.post(event.x_root, event.y_root)
     
+    # 【Bug修复】: 恢复到简单、稳定的版本
     def _force_stop_playback(self):
+        """强制停止当前所有播放活动"""
         if self.is_playing.is_set():
             self.log("接收到中断指令，正在停止当前播放...")
-            
-            if AUDIO_AVAILABLE and pygame.mixer.get_busy():
+            if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
                 pygame.mixer.music.stop()
-            
-            self.stop_speech_event.set()
-
+            # 对于音频任务，循环会自己结束；对于语音任务，它本身是阻塞的，无法从外部停止，
+            # 但高优先级任务会清空队列，使其结束后不会播放下一个排队的任务。
+            # on_playback_finished 会在各自的线程中被调用。
+            # 为了确保状态被重置，可以手动调用一次
+            self.on_playback_finished()
+    
     def play_now(self):
         selection = self.task_tree.selection()
         if not selection: 
@@ -833,15 +843,54 @@ class TimedBroadcastApp:
         self.update_task_list(); self.save_tasks()
 
     def move_task(self, direction):
-        sel = self.task_tree.selection()
-        if not sel or len(sel) > 1: return
-        index = self.task_tree.index(sel[0])
+        selections = self.task_tree.selection()
+        if not selections or len(selections) > 1: return
+        
+        index = self.task_tree.index(selections[0])
         new_index = index + direction
+        
         if 0 <= new_index < len(self.tasks):
-            self.tasks.insert(new_index, self.tasks.pop(index))
-            self.update_task_list(); self.save_tasks()
+            task_to_move = self.tasks.pop(index)
+            self.tasks.insert(new_index, task_to_move)
+            self.update_task_list()
+            self.save_tasks()
+            # 重新选中移动后的项
             items = self.task_tree.get_children()
-            if items: self.task_tree.selection_set(items[new_index])
+            if items: 
+                self.task_tree.selection_set(items[new_index])
+                self.task_tree.focus(items[new_index])
+
+    # 【新功能】: 置顶任务
+    def move_task_to_top(self):
+        selections = self.task_tree.selection()
+        if not selections or len(selections) > 1: return
+        
+        index = self.task_tree.index(selections[0])
+        if index > 0:
+            task_to_move = self.tasks.pop(index)
+            self.tasks.insert(0, task_to_move)
+            self.update_task_list()
+            self.save_tasks()
+            items = self.task_tree.get_children()
+            if items: 
+                self.task_tree.selection_set(items[0])
+                self.task_tree.focus(items[0])
+
+    # 【新功能】: 置末任务
+    def move_task_to_bottom(self):
+        selections = self.task_tree.selection()
+        if not selections or len(selections) > 1: return
+
+        index = self.task_tree.index(selections[0])
+        if index < len(self.tasks) - 1:
+            task_to_move = self.tasks.pop(index)
+            self.tasks.append(task_to_move)
+            self.update_task_list()
+            self.save_tasks()
+            items = self.task_tree.get_children()
+            if items: 
+                self.task_tree.selection_set(items[-1])
+                self.task_tree.focus(items[-1])
 
     def import_tasks(self):
         filename = filedialog.askopenfilename(title="选择导入文件", filetypes=[("JSON文件", "*.json")])
@@ -1020,7 +1069,11 @@ class TimedBroadcastApp:
                 task.get('weekday', ''), task.get('date_range', '')
             ))
         if selection:
-            try: self.task_tree.selection_set(selection)
+            try: 
+                # 确保只选择存在的项目
+                valid_selection = [s for s in selection if self.task_tree.exists(s)]
+                if valid_selection:
+                    self.task_tree.selection_set(valid_selection)
             except tk.TclError: pass
         self.stats_label.config(text=f"节目单：{len(self.tasks)}")
         if hasattr(self, 'status_labels'): self.status_labels[3].config(text=f"任务数量: {len(self.tasks)}")
@@ -1122,10 +1175,6 @@ class TimedBroadcastApp:
 
             start_time = time.time()
             for audio_path in playlist:
-                if not self.is_playing.is_set():
-                    self.log(f"音频任务 '{task['name']}' 被外部中断。")
-                    break
-
                 self.log(f"正在播放: {os.path.basename(audio_path)}")
                 self.update_playing_text(f"[{task['name']}] 正在播放: {os.path.basename(audio_path)}")
                 
@@ -1134,37 +1183,27 @@ class TimedBroadcastApp:
                 pygame.mixer.music.play()
 
                 while pygame.mixer.music.get_busy():
-                    if not self.is_playing.is_set():
-                        pygame.mixer.music.stop()
-                        break
-                    
                     if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds:
                         pygame.mixer.music.stop()
                         self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
                         break
                     time.sleep(0.1)
                 
-                if (interval_type == 'seconds' and (time.time() - start_time) > duration_seconds) or not self.is_playing.is_set():
+                if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds:
                     break
         except Exception as e:
             self.log(f"音频播放错误: {e}")
         finally:
             self.root.after(0, self.on_playback_finished)
 
+    # 【Bug修复】: 恢复到简单、稳定、阻塞式的语音播放方法
     def _speak(self, text, task):
         if not WIN32COM_AVAILABLE:
             self.log("错误: pywin32库不可用，无法执行语音播报。")
             self.root.after(0, self.on_playback_finished)
             return
-
-        SVSF_ASYNC = 1
-        SVSF_PURGEBEFORESPEAK = 2
-        SVSF_XML = 8
-
-        self.stop_speech_event.clear()
         
         pythoncom.CoInitialize()
-        speaker = None
         try:
             if task.get('bgm', 0) and AUDIO_AVAILABLE:
                 bgm_file = task.get('bgm_file', '')
@@ -1190,18 +1229,10 @@ class TimedBroadcastApp:
                     channel = sound.play()
                     if channel:
                         while channel.get_busy():
-                            if self.stop_speech_event.is_set():
-                                channel.stop()
-                                self.log("提示音播放被中断。")
-                                return
                             time.sleep(0.05)
                 else:
                     self.log(f"警告: 提示音文件不存在 - {prompt_path}")
             
-            if self.stop_speech_event.is_set():
-                self.log("任务在开始播报前被中断。")
-                return
-
             try:
                 speaker = win32com.client.Dispatch("SAPI.SpVoice")
             except com_error as e:
@@ -1225,24 +1256,9 @@ class TimedBroadcastApp:
             self.log(f"准备播报 {repeat_count} 遍...")
 
             for i in range(repeat_count):
-                if self.stop_speech_event.is_set():
-                    self.log("播报在循环开始前被中断。")
-                    break
-
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
-                
-                speaker.Speak(xml_text, SVSF_ASYNC | SVSF_XML)
-                
-                while speaker.Status.RunningState == 2:
-                    if self.stop_speech_event.is_set():
-                        self.log("接收到停止信号，正在中断语音...")
-                        speaker.Speak("", SVSF_PURGEBEFORESPEAK)
-                        break
-                    time.sleep(0.1)
-                
-                if self.stop_speech_event.is_set():
-                    break
-
+                # 使用标志 8 (SVSF_XML) 来解析语速和音调标签
+                speaker.Speak(xml_text, 8) 
                 if i < repeat_count - 1:
                     time.sleep(0.5)
 
@@ -1252,17 +1268,17 @@ class TimedBroadcastApp:
             if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
                 pygame.mixer.music.stop()
                 self.log("背景音乐已停止。")
-            
-            speaker = None
             pythoncom.CoUninitialize()
             self.root.after(0, self.on_playback_finished)
 
     def on_playback_finished(self):
-        self.is_playing.clear()
-        self.update_playing_text("等待下一个任务...")
-        self.status_labels[2].config(text="播放状态: 待机")
-        self.log("播放结束")
-        self.root.after(100, self._process_queue)
+        # 确保此方法是线程安全的，并且不会因为重复调用而出错
+        if self.is_playing.is_set():
+            self.is_playing.clear()
+            self.update_playing_text("等待下一个任务...")
+            self.status_labels[2].config(text="播放状态: 待机")
+            self.log("播放结束")
+            self.root.after(100, self._process_queue)
 
     def log(self, message): self.root.after(0, lambda: self._log_threadsafe(message))
     def _log_threadsafe(self, message):
