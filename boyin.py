@@ -109,8 +109,8 @@ class TimedBroadcastApp:
                 os.makedirs(folder)
 
     def create_widgets(self):
-        # 【字体优化】增加导航栏宽度以适应更大的字体
-        self.nav_frame = tk.Frame(self.root, bg='#A8D8E8', width=200)
+        # 【布局调整】导航栏宽度改回160
+        self.nav_frame = tk.Frame(self.root, bg='#A8D8E8', width=160)
         self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
 
@@ -119,7 +119,6 @@ class TimedBroadcastApp:
         for i, title in enumerate(nav_button_titles):
             btn_frame = tk.Frame(self.nav_frame, bg='#A8D8E8')
             btn_frame.pack(fill=tk.X, pady=1)
-            # 【字体优化】加大导航栏字体
             btn = tk.Button(btn_frame, text=title, bg='#A8D8E8',
                           fg='black', font=('Microsoft YaHei', 22, 'bold'),
                           bd=0, padx=10, pady=8, anchor='w', command=lambda t=title: self.switch_page(t))
@@ -134,7 +133,8 @@ class TimedBroadcastApp:
         self.switch_page("定时广播")
 
     def switch_page(self, page_name):
-        if self.is_locked and page_name != "设置":
+        # 【安全修复】锁定后不允许切换到设置页
+        if self.is_locked:
             self.log("界面已锁定，请先解锁。")
             return
             
@@ -196,10 +196,9 @@ class TimedBroadcastApp:
         columns = ('节目名称', '状态', '开始时间', '模式', '音频或文字', '音量', '周几/几号', '日期范围')
         self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12)
         
-        # 【字体优化】Treeview的字体通过style设置
         style = ttk.Style()
         style.configure("Treeview.Heading", font=('Microsoft YaHei', 11, 'bold'))
-        style.configure("Treeview", font=('Microsoft YaHei', 11), rowheight=28) # 增加行高
+        style.configure("Treeview", font=('Microsoft YaHei', 11), rowheight=28)
 
         self.task_tree.heading('节目名称', text='节目名称')
         self.task_tree.column('节目名称', width=200, anchor='w')
@@ -298,7 +297,6 @@ class TimedBroadcastApp:
         
         tk.Label(lock_frame, text="(请先在主界面设置锁定密码)", font=('Microsoft YaHei', 9), bg='white', fg='grey').pack(side=tk.LEFT, padx=5)
 
-        # 【新功能】增加清除密码按钮
         self.clear_password_btn = tk.Button(general_frame, text="清除锁定密码", font=('Microsoft YaHei', 11), command=self.clear_lock_password)
         self.clear_password_btn.pack(pady=10)
         if not self.settings.get("lock_password_b64"):
@@ -382,7 +380,6 @@ class TimedBroadcastApp:
         self._apply_lock()
 
     def _prompt_for_password_set(self):
-        # 【布局优化】调整对话框大小
         dialog = tk.Toplevel(self.root)
         dialog.title("首次锁定，请设置密码")
         dialog.geometry("350x250"); dialog.resizable(False, False)
@@ -422,7 +419,6 @@ class TimedBroadcastApp:
         tk.Button(btn_frame, text="取消", command=dialog.destroy, font=('Microsoft YaHei', 11)).pack(side=tk.LEFT, padx=10)
 
     def _prompt_for_password_unlock(self):
-        # 【布局优化】调整对话框大小
         dialog = tk.Toplevel(self.root)
         dialog.title("解锁界面")
         dialog.geometry("320x180"); dialog.resizable(False, False)
@@ -453,7 +449,7 @@ class TimedBroadcastApp:
     def clear_lock_password(self):
         if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。"):
             self.settings["lock_password_b64"] = ""
-            self.lock_on_start_var.set(False) # 强制关闭启动锁定
+            self.lock_on_start_var.set(False)
             self.save_settings()
             self.clear_password_btn.config(state=tk.DISABLED)
             self.log("锁定密码已清除。")
@@ -474,13 +470,15 @@ class TimedBroadcastApp:
 
     def _set_widget_state_recursively(self, parent_widget, state):
         for child in parent_widget.winfo_children():
-            if child == self.lock_button or child == self.nav_buttons.get("设置"): continue
+            # 【安全修复】锁定后，不再对设置按钮做特殊处理，使其一同被禁用
+            if child == self.lock_button:
+                continue
+            
             try:
-                if child.master in [b.master for b in self.nav_buttons.values()] and child.master != self.nav_buttons.get("设置").master:
-                     child.config(state=state)
-                elif child.master not in [b.master for b in self.nav_buttons.values()]:
-                    child.config(state=state)
-            except tk.TclError: pass
+                child.config(state=state)
+            except tk.TclError:
+                pass
+            
             if child.winfo_children():
                 self._set_widget_state_recursively(child, state)
     
@@ -499,10 +497,8 @@ class TimedBroadcastApp:
     def show_context_menu(self, event):
         if self.is_locked: return
         iid = self.task_tree.identify_row(event.y)
-        # 【字体优化】
         context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 11))
 
-        # 【移除图标】
         if iid:
             if iid not in self.task_tree.selection():
                 self.task_tree.selection_set(iid)
@@ -557,7 +553,6 @@ class TimedBroadcastApp:
                 self.log("等待播放的队列也已清空。")
 
     def add_task(self):
-        # 【布局优化】调整对话框大小
         choice_dialog = tk.Toplevel(self.root)
         choice_dialog.title("选择节目类型")
         choice_dialog.geometry("350x280")
@@ -585,13 +580,11 @@ class TimedBroadcastApp:
         is_edit_mode = task_to_edit is not None
         dialog = tk.Toplevel(self.root)
         dialog.title("修改音频节目" if is_edit_mode else "添加音频节目")
-        # 【布局优化】调整对话框大小
         dialog.geometry("850x800")
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#E8E8E8')
         main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=15)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        # 【字体优化】
         content_frame = tk.LabelFrame(main_frame, text="内容", font=('Microsoft YaHei', 12, 'bold'),
                                      bg='#E8E8E8', padx=10, pady=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=5)
@@ -715,13 +708,11 @@ class TimedBroadcastApp:
         is_edit_mode = task_to_edit is not None
         dialog = tk.Toplevel(self.root)
         dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
-        # 【布局优化】调整对话框大小
         dialog.geometry("850x850")
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#E8E8E8')
         main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=15)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        # 【字体优化】
         content_frame = tk.LabelFrame(main_frame, text="内容", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=5)
         font_spec = ('Microsoft YaHei', 11)
@@ -953,7 +944,6 @@ class TimedBroadcastApp:
         if count > 0: self.update_task_list(); self.save_tasks(); self.log(f"已{status} {count} 个节目")
 
     def show_time_settings_dialog(self, time_entry):
-        # 【布局优化】调整对话框大小
         dialog = tk.Toplevel(self.root)
         dialog.title("开始时间设置"); dialog.geometry("480x450"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
@@ -994,7 +984,6 @@ class TimedBroadcastApp:
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=font_spec, bd=1, padx=25, pady=5).pack(side=tk.LEFT, padx=5)
 
     def show_weekday_settings_dialog(self, weekday_var):
-        # 【布局优化】调整对话框大小
         dialog = tk.Toplevel(self.root); dialog.title("周几或几号")
         dialog.geometry("550x550"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
@@ -1033,7 +1022,6 @@ class TimedBroadcastApp:
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=font_spec, bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
 
     def show_daterange_settings_dialog(self, date_range_entry):
-        # 【布局优化】调整对话框大小
         dialog = tk.Toplevel(self.root)
         dialog.title("日期范围"); dialog.geometry("450x250"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
@@ -1064,7 +1052,6 @@ class TimedBroadcastApp:
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=font_spec, bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
 
     def show_single_time_dialog(self, time_var):
-        # 【布局优化】调整对话框大小
         dialog = tk.Toplevel(self.root)
         dialog.title("设置时间"); dialog.geometry("320x200"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
@@ -1085,7 +1072,6 @@ class TimedBroadcastApp:
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=font_spec).pack(side=tk.LEFT, padx=10)
 
     def show_power_week_time_dialog(self, title, days_var, time_var):
-        # 【布局优化】调整对话框大小
         dialog = tk.Toplevel(self.root); dialog.title(title)
         dialog.geometry("580x330"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
@@ -1118,7 +1104,13 @@ class TimedBroadcastApp:
         self.task_tree.delete(*self.task_tree.get_children())
         for task in self.tasks:
             content = task.get('content', '')
-            content_preview = os.path.basename(content) if task.get('type') == 'audio' else (content[:30] + '...' if len(content) > 30 else content)
+            # 【显示优化】修复语音节目文字换行问题
+            if task.get('type') == 'audio':
+                content_preview = os.path.basename(content)
+            else:
+                clean_content = content.replace('\n', ' ').replace('\r', ' ')
+                content_preview = (clean_content[:30] + '...') if len(clean_content) > 30 else clean_content
+
             display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
             self.task_tree.insert('', tk.END, values=(task.get('name', ''), task.get('status', ''), task.get('time', ''), display_mode, content_preview, task.get('volume', ''), task.get('weekday', ''), task.get('date_range', '')))
         if selection:
@@ -1396,7 +1388,6 @@ class TimedBroadcastApp:
         except (ValueError, IndexError): return False, "日期范围格式无效，应为 'YYYY-MM-DD ~ YYYY-MM-DD'"
 
     def show_quit_dialog(self):
-        # 【布局优化】调整对话框大小
         dialog = tk.Toplevel(self.root)
         dialog.title("确认")
         dialog.geometry("380x170")
