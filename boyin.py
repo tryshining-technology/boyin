@@ -168,7 +168,6 @@ class TimedBroadcastApp:
         self.playing_text.pack(fill=tk.BOTH, expand=True)
         self.update_playing_text("等待播放...")
 
-        # --- 修改：日志区域布局 ---
         log_frame = tk.LabelFrame(self.main_frame, text="", font=('Microsoft YaHei', 10),
                                  bg='white', fg='#2C5F7C', padx=10, pady=5)
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
@@ -184,7 +183,6 @@ class TimedBroadcastApp:
                                   font=('Microsoft YaHei', 8), bd=0, bg='#EAEAEA',
                                   fg='#333', cursor='hand2', padx=5, pady=0)
         clear_log_btn.pack(side=tk.LEFT, padx=10)
-        # --- 修改结束 ---
 
         self.log_text = scrolledtext.ScrolledText(log_frame, height=6, font=('Microsoft YaHei', 9),
                                                  bg='#F9F9F9', wrap=tk.WORD, state='disabled')
@@ -246,20 +244,14 @@ class TimedBroadcastApp:
         
         context_menu.post(event.x_root, event.y_root)
     
-    # --- 新增：强制停止当前播放的方法 ---
     def _force_stop_playback(self):
         """强制停止当前所有播放活动"""
         if self.is_playing.is_set():
             self.log("接收到中断指令，正在停止当前播放...")
             if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
                 pygame.mixer.music.stop()
-            # 注意：强行中断正在进行的 win32com tts 较为复杂且风险高，
-            # 这里主要处理最常见的长时任务——音频播放。
-            # TTS通常较短，让其自然结束是更稳妥的做法。
-            # 如果TTS也需要中断，需要引入更复杂的线程管理。
-            self.on_playback_finished() # 重置状态
+            self.on_playback_finished()
     
-    # --- 修改：立即播放逻辑 ---
     def play_now(self):
         """立即中断并播放选定的任务"""
         selection = self.task_tree.selection()
@@ -272,19 +264,15 @@ class TimedBroadcastApp:
 
         self.log(f"手动触发高优先级播放: {task['name']}")
         
-        # 1. 强制停止当前播放
         self._force_stop_playback()
         
-        # 2. 清空队列，并将当前任务置于队首
         with self.queue_lock:
             self.playback_queue.clear()
             self.playback_queue.insert(0, (task, "manual_play"))
             self.log("播放队列已清空，新任务已置顶。")
         
-        # 3. 立即处理队列
         self.root.after(0, self._process_queue)
 
-    # --- 修改：停止当前播放的功能 ---
     def stop_current_playback(self):
         self.log("手动触发“停止当前播放”...")
         self._force_stop_playback()
@@ -484,11 +472,23 @@ class TimedBroadcastApp:
             audio_path = audio_single_entry.get().strip() if audio_type_var.get() == "single" else audio_folder_entry.get().strip()
             if not audio_path: messagebox.showwarning("警告", "请选择音频文件或文件夹", parent=dialog); return
             
-            new_task_data = {'name': name_entry.get().strip(), 'time': start_time_entry.get().strip(), 'content': audio_path,
+            # --- 新增的校验和格式化逻辑 ---
+            is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
+            if not is_valid_time:
+                messagebox.showwarning("格式错误", time_msg, parent=dialog)
+                return
+                
+            is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
+            if not is_valid_date:
+                messagebox.showwarning("格式错误", date_msg, parent=dialog)
+                return
+            # --- 新增的校验和格式化逻辑结束 ---
+
+            new_task_data = {'name': name_entry.get().strip(), 'time': time_msg, 'content': audio_path,
                              'type': 'audio', 'audio_type': audio_type_var.get(), 'play_order': play_order_var.get(),
                              'volume': volume_entry.get().strip() or "80", 'interval_type': interval_var.get(),
                              'interval_first': interval_first_entry.get().strip(), 'interval_seconds': interval_seconds_entry.get().strip(),
-                             'weekday': weekday_entry.get().strip(), 'date_range': date_range_entry.get().strip(),
+                             'weekday': weekday_entry.get().strip(), 'date_range': date_msg,
                              'delay': delay_var.get(), 
                              'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 
                              'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {})}
@@ -670,7 +670,19 @@ class TimedBroadcastApp:
             content = content_text.get('1.0', tk.END).strip()
             if not content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
             
-            new_task_data = {'name': name_entry.get().strip(), 'time': start_time_entry.get().strip(), 'content': content,
+            # --- 新增的校验和格式化逻辑 ---
+            is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
+            if not is_valid_time:
+                messagebox.showwarning("格式错误", time_msg, parent=dialog)
+                return
+                
+            is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
+            if not is_valid_date:
+                messagebox.showwarning("格式错误", date_msg, parent=dialog)
+                return
+            # --- 新增的校验和格式化逻辑结束 ---
+
+            new_task_data = {'name': name_entry.get().strip(), 'time': time_msg, 'content': content,
                              'type': 'voice', 'voice': voice_var.get(), 
                              'speed': speed_entry.get().strip() or "0",
                              'pitch': pitch_entry.get().strip() or "0",
@@ -680,7 +692,7 @@ class TimedBroadcastApp:
                              'bgm': bgm_var.get(), 'bgm_file': bgm_file_var.get(),
                              'bgm_volume': bgm_volume_var.get(),
                              'repeat': repeat_entry.get().strip() or "1",
-                             'weekday': weekday_entry.get().strip(), 'date_range': date_range_entry.get().strip(),
+                             'weekday': weekday_entry.get().strip(), 'date_range': date_msg,
                              'delay': delay_var.get(), 
                              'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 
                              'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {})}
@@ -715,7 +727,6 @@ class TimedBroadcastApp:
                 speaker = win32com.client.Dispatch("SAPI.SpVoice")
                 voices = speaker.GetVoices()
                 available_voices = [v.GetDescription() for v in voices]
-                # self.log("成功通过 win32com 刷新语音列表。") # 减少不必要的日志
                 pythoncom.CoUninitialize()
             except Exception as e:
                 self.log(f"警告: 使用 win32com 获取语音列表失败 - {e}")
@@ -844,12 +855,18 @@ class TimedBroadcastApp:
         btn_frame.pack(side=tk.RIGHT, padx=10, fill=tk.Y)
         new_entry = tk.Entry(btn_frame, font=('Microsoft YaHei', 10), width=12)
         new_entry.insert(0, datetime.now().strftime("%H:%M:%S")); new_entry.pack(pady=3)
+        
         def add_time():
-            try:
-                val = new_entry.get().strip()
-                time.strptime(val, '%H:%M:%S')
-                if val not in listbox.get(0, tk.END): listbox.insert(tk.END, val)
-            except ValueError: messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog)
+            val = new_entry.get().strip()
+            normalized_time = self._normalize_time_string(val)
+            if normalized_time:
+                if normalized_time not in listbox.get(0, tk.END):
+                    listbox.insert(tk.END, normalized_time)
+                    new_entry.delete(0, tk.END)
+                    new_entry.insert(0, datetime.now().strftime("%H:%M:%S"))
+            else:
+                messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog)
+
         def del_time():
             if listbox.curselection(): listbox.delete(listbox.curselection()[0])
         tk.Button(btn_frame, text="添加 ↑", command=add_time).pack(pady=3, fill=tk.X)
@@ -932,12 +949,19 @@ class TimedBroadcastApp:
                 bg='#D7F3F5', fg='#666').pack(pady=10)
         bottom_frame = tk.Frame(main_frame, bg='#D7F3F5')
         bottom_frame.pack(pady=10)
+        
         def confirm():
-            try:
-                start, end = from_date_entry.get().strip(), to_date_entry.get().strip()
-                datetime.strptime(start, "%Y-%m-%d"); datetime.strptime(end, "%Y-%m-%d")
-                date_range_entry.delete(0, tk.END); date_range_entry.insert(0, f"{start} ~ {end}"); dialog.destroy()
-            except ValueError: messagebox.showerror("格式错误", "日期格式不正确, 应为 YYYY-MM-DD", parent=dialog)
+            start, end = from_date_entry.get().strip(), to_date_entry.get().strip()
+            norm_start = self._normalize_date_string(start)
+            norm_end = self._normalize_date_string(end)
+            
+            if norm_start and norm_end:
+                date_range_entry.delete(0, tk.END)
+                date_range_entry.insert(0, f"{norm_start} ~ {norm_end}")
+                dialog.destroy()
+            else:
+                messagebox.showerror("格式错误", "日期格式不正确, 应为 YYYY-MM-DD", parent=dialog)
+
         tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white',
                  font=('Microsoft YaHei', 9, 'bold'), bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0',
@@ -970,7 +994,6 @@ class TimedBroadcastApp:
     def start_background_thread(self):
         threading.Thread(target=self._check_tasks, daemon=True).start()
 
-    # --- 修改：后台任务检查逻辑 ---
     def _check_tasks(self):
         while self.running:
             now = datetime.now()
@@ -992,9 +1015,7 @@ class TimedBroadcastApp:
                 
                 for trigger_time in [t.strip() for t in task.get('time', '').split(',')]:
                     if trigger_time == current_time_str and task.get('last_run', {}).get(trigger_time) != current_date_str:
-                        # 根据任务模式决定行为
                         if task.get('delay') == 'ontime':
-                            # 准时模式：中断并播放
                             self.log(f"准时任务 '{task['name']}' 已到时间，执行高优先级中断。")
                             self._force_stop_playback()
                             with self.queue_lock:
@@ -1002,7 +1023,6 @@ class TimedBroadcastApp:
                                 self.playback_queue.insert(0, (task, trigger_time))
                             self.root.after(0, self._process_queue)
                         else:
-                            # 延时模式：加入队列
                             with self.queue_lock:
                                 self.playback_queue.append((task, trigger_time))
                             self.log(f"延时任务 '{task['name']}' 已到时间，加入播放队列。")
@@ -1187,7 +1207,7 @@ class TimedBroadcastApp:
             with open(self.task_file, 'r', encoding='utf-8') as f: self.tasks = json.load(f)
             migrated = False
             for task in self.tasks:
-                if 'delay' not in task: # 向下兼容旧的json文件
+                if 'delay' not in task:
                     task['delay'] = 'delay' if task.get('type') == 'voice' else 'ontime'
                 if not isinstance(task.get('last_run'), dict):
                     task['last_run'] = {}
@@ -1202,6 +1222,68 @@ class TimedBroadcastApp:
         x = (win.winfo_screenwidth() // 2) - (width // 2)
         y = (win.winfo_screenheight() // 2) - (height // 2)
         win.geometry(f'{width}x{height}+{x}+{y}')
+
+    # --- 新增的格式化与校验工具函数 ---
+    def _normalize_time_string(self, time_str):
+        """将单个时间字符串 'H:M:S' 格式化为 'HH:MM:SS'"""
+        try:
+            parts = str(time_str).split(':')
+            if len(parts) != 3: return None
+            h, m, s = int(parts[0]), int(parts[1]), int(parts[2])
+            if not (0 <= h <= 23 and 0 <= m <= 59 and 0 <= s <= 59):
+                return None
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        except (ValueError, IndexError):
+            return None
+
+    def _normalize_multiple_times_string(self, times_input_str):
+        """格式化逗号分隔的多个时间字符串，并返回处理结果"""
+        if not times_input_str.strip():
+            return True, "" # 允许为空
+        
+        original_times = [t.strip() for t in times_input_str.split(',') if t.strip()]
+        normalized_times = []
+        invalid_times = []
+
+        for t in original_times:
+            normalized = self._normalize_time_string(t)
+            if normalized:
+                normalized_times.append(normalized)
+            else:
+                invalid_times.append(t)
+        
+        if invalid_times:
+            return False, f"以下时间格式无效: {', '.join(invalid_times)}"
+        
+        return True, ", ".join(normalized_times)
+
+    def _normalize_date_string(self, date_str):
+        """将 'YYYY-M-D' 格式的日期字符串格式化为 'YYYY-MM-DD'"""
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            return None
+            
+    def _normalize_date_range_string(self, date_range_input_str):
+        """格式化日期范围字符串"""
+        if not date_range_input_str.strip():
+            return True, "" # 允许为空
+
+        try:
+            start_str, end_str = [d.strip() for d in date_range_input_str.split('~')]
+            norm_start = self._normalize_date_string(start_str)
+            norm_end = self._normalize_date_string(end_str)
+
+            if norm_start and norm_end:
+                return True, f"{norm_start} ~ {norm_end}"
+            else:
+                invalid_parts = []
+                if not norm_start: invalid_parts.append(start_str)
+                if not norm_end: invalid_parts.append(end_str)
+                return False, f"以下日期格式无效 (应为 YYYY-MM-DD): {', '.join(invalid_parts)}"
+        except (ValueError, IndexError):
+            return False, "日期范围格式无效，应为 'YYYY-MM-DD ~ YYYY-MM-DD'"
 
     def show_quit_dialog(self):
         dialog = tk.Toplevel(self.root)
