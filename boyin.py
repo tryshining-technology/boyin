@@ -74,9 +74,7 @@ class TimedBroadcastApp:
         self.running = True
         self.task_file = TASK_FILE
         self.tray_icon = None
-        
         self.is_locked = False
-
         self.is_playing = threading.Event()
         self.playback_queue = []
         self.queue_lock = threading.Lock()
@@ -84,6 +82,12 @@ class TimedBroadcastApp:
         self.create_folder_structure()
         self.create_widgets()
         self.load_tasks()
+        
+        # --- 托盘逻辑修改 1: 在启动时就创建并运行托盘图标 ---
+        if TRAY_AVAILABLE:
+            self.setup_tray_icon()
+            threading.Thread(target=self.tray_icon.run).start()
+
         self.start_background_thread()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
 
@@ -1375,25 +1379,20 @@ class TimedBroadcastApp:
 
     def hide_to_tray(self):
         self.root.withdraw()
-        if not self.tray_icon and TRAY_AVAILABLE:
-            self.setup_tray_icon()
-            threading.Thread(target=self.tray_icon.run).start()
-            self.log("程序已最小化到系统托盘。")
+        self.log("程序已最小化到系统托盘。")
 
-    def show_from_tray(self, icon, item):
-        icon.stop()
+    def show_from_tray(self, icon=None, item=None):
         self.root.after(0, self.root.deiconify)
-        self.log("程序已从托盘恢复。")
+        self.root.after(10, self.root.lift) # 确保窗口在最前
 
     def quit_app(self, icon=None, item=None):
+        self.running = False
         if self.tray_icon:
             self.tray_icon.stop()
-        self.running = False
         self.save_tasks()
         if AUDIO_AVAILABLE and pygame.mixer.get_init():
             pygame.mixer.quit()
         self.root.destroy()
-        sys.exit()
 
     def setup_tray_icon(self):
         try:
