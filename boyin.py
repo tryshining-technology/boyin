@@ -82,10 +82,13 @@ class TimedBroadcastApp:
         self.playback_queue = []
         self.queue_lock = threading.Lock()
         
-        # --- 页面管理 ---
         self.pages = {}
         self.nav_buttons = {}
         self.current_page = None
+
+        # 【新功能】创建并加载内嵌的菜单图标
+        self.menu_icons = {}
+        self._create_menu_icons()
 
         self.create_folder_structure()
         self.load_settings()
@@ -94,13 +97,29 @@ class TimedBroadcastApp:
         
         self.start_background_thread()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
-
         self.start_tray_icon_thread()
         
-        # 根据设置决定是否启动后最小化
         if self.settings.get("start_minimized", False):
             self.root.after(100, self.hide_to_tray)
 
+    def _create_menu_icons(self):
+        """创建内嵌的Base64编码图标，用于菜单的完美对齐"""
+        icons_b64 = {
+            "play": "R0lGODlhEAAQAPcAAAEBAQMDAxsbGzU1NUNDQ0tLS1hYWGhoaHt7e4SEhIyMjJSUlJycnKWlpaysrL29vc/Pz9/f3+fn5+/v7/f39wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAB8ALAAAAAAQABAAAAjlABEJGEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmTKFOqXMmypcuXMGPKnEmzps2bOHPq3Mmzp8+fQIMKHUq0qNGjSJMqXcq0qtWrWLNq3cq1q9evYMOKHUu2rNmzaNOqXcu2rdu3cOPKnUu3rt27ePPq3cu3r9+/gAMLHky4sOHDiBMrXsy4sePHkCNLnky5suXLmDNr3sy5s+fPoEOLHk26tOnTqFOrXs26tevXsGPLnk27tu3buHPr3s27t+/fwIMLH068uPHjyJMrX868ufPn0KNLn069uvXr2LNr3869u/fv4MOLH0++vPnz6NOrX8++vfv38OPLn0+/vv37+PPr38+/v///AAYo5IADhQAAOw==",
+            "edit": "R0lGODlhEAAQAPcAAAEBAQMDAxsbGzU1NUNDQ0tLS1hYWGhoaHt7e4SEhIyMjJSUlJycnKWlpaysrL29vc/Pz9/f3+fn5+/v7/f39wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAB8ALAAAAAAQABAAAAjRABEJGEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmTKFOqXMmypcuXMGPKnEmzps2bOHPq3Mmzp8+fQIMKHUq0qNGjSJMqXcq0qtWrWLNq3cq1q9evYMOKHUu2rNmzaNOqXcu2rdu3cOPKnUu3rt27ePPq3cu3r9+/gAMLHky4sOHDiBMrXsy4sePHkCNLnky5suXLmDNr3sy5s+fPoEOLHk26tOnTqFOrXs26tevXsGPLnk27tu3buHPr3s27t+/fwIMLH068uPHjyJMrX868ufPn0KNLn069uvXr2LNr3869u/fv4MOLH0+/vPnz6NOrX8++vfv38OPLn0+/vv37+PPr38+/v///AAYo5IADhQAAOw==",
+            "delete": "R0lGODlhEAAQAPcAAAEBAQMDAxsbGzU1NUNDQ0tLS1hYWGhoaHt7e4SEhIyMjJSUlJycnKWlpaysrL29vc/Pz9/f3+fn5+/v7/f39wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAB8ALAAAAAAQABAAAAjlABEJGEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmTKFOqXMmypcuXMGPKnEmzps2bOHPq3Mmzp8+fQIMKHUq0qNGjSJMqXcq0qtWrWLNq3cq1q9evYMOKHUu2rNmzaNOqXcu2rdu3cOPKnUu3rt27ePPq3cu3r9+/gAMLHky4sOHDiBMrXsy4sePHkCNLnky5suXLmDNr3sy5s+fPoEOLHk26tOnTqFOrXs26tevXsGPLnk27tu3buHPr3s27t+/fwIMLH068uPHjyJMrX868ufPn0KNLn069uvXr2LNr3869u/fv4MOLH0+/vPnz6NOrX8++vfv38OPLn0+/vv37+PPr38+/v///AAYo5IADhQAAOw==",
+            "copy": "R0lGODlhEAAQAPcAAAEBAQMDAxsbGzU1NUNDQ0tLS1hYWGhoaHt7e4SEhIyMjJSUlJycnKWlpaysrL29vc/Pz9/f3+fn5+/v7/f39wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAB8ALAAAAAAQABAAAAjRABEJGEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmTKFOqXMmypcuXMGPKnEmzps2bOHPq3Mmzp8+fQIMKHUq0qNGjSJMqXcq0qtWrWLNq3cq1q9evYMOKHUu2rNmzaNOqXcu2rdu3cOPKnUu3rt27ePPq3cu3r9+/gAMLHky4sOHDiBMrXsy4sePHkCNLnky5suXLmDNr3sy5s+fPoEOLHk26tOnTqFOrXs26tevXsGPLnk27tu3buHPr3s27t+/fwIMLH068uPHjyJMrX868ufPn0KNLn069uvXr2LNr3869u/fv4MOLH0+/vPnz6NOrX8++vfv38OPLn0+/vv37+PPr38+/v///AAYo5IADhQAAOw==",
+            "top": "R0lGODlhEAAQAPcAAAEBAQMDAxsbGzU1NUNDQ0tLS1hYWGhoaHt7e4SEhIyMjJSUlJycnKWlpaysrL29vc/Pz9/f3+fn5+/v7/f39wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAB8ALAAAAAAQABAAAAjRABEJGEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmTKFOqXMmypcuXMGPKnEmzps2bOHPq3Mmzp8+fQIMKHUq0qNGjSJMqXcq0qtWrWLNq3cq1q9evYMOKHUu2rNmzaNOqXcu2rdu3cOPKnUu3rt27ePPq3cu3r9+/gAMLHky4sOHDiBMrXsy4sePHkCNLnky5suXLmDNr3sy5s+fPoEOLHk26tOnTqFOrXs26tevXsGPLnk27tu3buHPr3s27t+/fwIMLH068uPHjyJMrX868ufPn0KNLn069uvXr2LNr3869u/fv4MOLH0+/vPnz6NOrX8++vfv38OPLn0+/vv37+PPr38+/v///AAYo5IADhQAAOw==",
+            "up": "R0lGODlhEAAQAPcAAAEBAQMDAxsbGzU1NUNDQ0tLS1hYWGhoaHt7e4SEhIyMjJSUlJycnKWlpaysrL29vc/Pz9/f3+fn5+/v7/f39wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAB8ALAAAAAAQABAAAAjRABEJGEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmTKFOqXMmypcuXMGPKnEmzps2bOHPq3Mmzp8+fQIMKHUq0qNGjSJMqXcq0qtWrWLNq3cq1q9evYMOKHUu2rNmzaNOqXcu2rdu3cOPKnUu3rt27ePPq3cu3r9+/gAMLHky4sOHDiBMrXsy4sePHkCNLnky5suXLmDNr3sy5s+fPoEOLHk26tOnTqFOrXs26tevXsGPLnk27tu3buHPr3s27t+/fwIMLH068uPHjyJMrX868ufPn0KNLn069uvXr2LNr3869u/fv4MOLH0+/vPnz6NOrX8++vfv38OPLn0+/vv37+PPr38+/v///AAYo5IADhQAAOw==",
+            "down": "R0lGODlhEAAQAPcAAAEBAQMDAxsbGzU1NUNDQ0tLS1hYWGhoaHt7e4SEhIyMjJSUlJycnKWlpaysrL29vc/Pz9/f3+fn5+/v7/f39wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAB8ALAAAAAAQABAAAAjRABEJGEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmTKFOqXMmypcuXMGPKnEmzps2bOHPq3Mmzp8+fQIMKHUq0qNGjSJMqXcq0qtWrWLNq3cq1q9evYMOKHUu2rNmzaNOqXcu2rdu3cOPKnUu3rt27ePPq3cu3r9+/gAMLHky4sOHDiBMrXsy4sePHkCNLnky5suXLmDNr3sy5s+fPoEOLHk26tOnTqFOrXs26tevXsGPLnk27tu3buHPr3s27t+/fwIMLH068uPHjyJMrX868ufPn0KNLn069uvXr2LNr3869u/fv4MOLH0+/vPnz6NOrX8++vfv38OPLn0+/vv37+PPr38+/v///AAYo5IADhQAAOw==",
+            "bottom": "R0lGODlhEAAQAPcAAAEBAQMDAxsbGzU1NUNDQ0tLS1hYWGhoaHt7e4SEhIyMjJSUlJycnKWlpaysrL29vc/Pz9/f3+fn5+/v7/f39wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAB8ALAAAAAAQABAAAAjRABEJGEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmTKFOqXMmypcuXMGPKnEmzps2bOHPq3Mmzp8+fQIMKHUq0qNGjSJMqXcq0qtWrWLNq3cq1q9evYMOKHUu2rNmzaNOqXcu2rdu3cOPKnUu3rt27ePPq3cu3r9+/gAMLHky4sOHDiBMrXsy4sePHkCNLnky5suXLmDNr3sy5s+fPoEOLHk26tOnTqFOrXs26tevXsGPLnk27tu3buHPr3s27t+/fwIMLH068uPHjyJMrX868ufPn0KNLn069uvXr2LNr3869u/fv4MOLH0+/vPnz6NOrX8++vfv38OPLn0+/vv37+PPr38+/v///AAYo5IADhQAAOw==",
+            "enable": "R0lGODlhEAAQAPcAAAEBAQMDAxsbGzU1NUNDQ0tLS1hYWGhoaHt7e4SEhIyMjJSUlJycnKWlpaysrL29vc/Pz9/f3+fn5+/v7/f39wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAB8ALAAAAAAQABAAAAjlABEJGEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmTKFOqXMmypcuXMGPKnEmzps2bOHPq3Mmzp8+fQIMKHUq0qNGjSJMqXcq0qtWrWLNq3cq1q9evYMOKHUu2rNmzaNOqXcu2rdu3cOPKnUu3rt27ePPq3cu3r9+/gAMLHky4sOHDiBMrXsy4sePHkCNLnky5suXLmDNr3sy5s+fPoEOLHk26tOnTqFOrXs26tevXsGPLnk27tu3buHPr3s27t+/fwIMLH068uPHjyJMrX868ufPn0KNLn069uvXr2LNr3869u/fv4MOLH0+/vPnz6NOrX8++vfv38OPLn0+/vv37+PPr38+/v///AAYo5IADhQAAOw==",
+            "disable": "R0lGODlhEAAQAPcAAAEBAQMDAxsbGzU1NUNDQ0tLS1hYWGhoaHt7e4SEhIyMjJSUlJycnKWlpaysrL29vc/Pz9/f3+fn5+/v7/f39wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAB8ALAAAAAAQABAAAAjlABEJGEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmTKFOqXMmypcuXMGPKnEmzps2bOHPq3Mmzp8+fQIMKHUq0qNGjSJMqXcq0qtWrWLNq3cq1q9evYMOKHUu2rNmzaNOqXcu2rdu3cOPKnUu3rt27ePPq3cu3r9+/gAMLHky4sOHDiBMrXsy4sePHkCNLnky5suXLmDNr3sy5s+fPoEOLHk26tOnTqFOrXs26tevXsGPLnk27tu3buHPr3s27t+/fwIMLH068uPHjyJMrX868ufPn0KNLn069uvXr2LNr3869u/fv4MOLH0+/vPnz6NOrX8++vfv38OPLn0+/vv37+PPr38+/v///AAYo5IADhQAAOw==",
+            "add": "R0lGODlhEAAQAPcAAAEBAQMDAxsbGzU1NUNDQ0tLS1hYWGhoaHt7e4SEhIyMjJSUlJycnKWlpaysrL29vc/Pz9/f3+fn5+/v7/f39wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAB8ALAAAAAAQABAAAAjRABEJGEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmTKFOqXMmypcuXMGPKnEmzps2bOHPq3Mmzp8+fQIMKHUq0qNGjSJMqXcq0qtWrWLNq3cq1q9evYMOKHUu2rNmzaNOqXcu2rdu3cOPKnUu3rt27ePPq3cu3r9+/gAMLHky4sOHDiBMrXsy4sePHkCNLnky5suXLmDNr3sy5s+fPoEOLHk26tOnTqFOrXs26tevXsGPLnk27tu3buHPr3s27t+/fwIMLH068uPHjyJMrX868ufPn0KNLn069uvXr2LNr3869u/fv4MOLH0+/vPnz6NOrX8++vfv38OPLn0+/vv37+PPr38+/v///AAYo5IADhQAAOw==",
+            "stop": "R0lGODlhEAAQAPcAAAEBAQMDAxsbGzU1NUNDQ0tLS1hYWGhoaHt7e4SEhIyMjJSUlJycnKWlpaysrL29vc/Pz9/f3+fn5+/v7/f39wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAAB8ALAAAAAAQABAAAAjlABEJGEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmTKFOqXMmypcuXMGPKnEmzps2bOHPq3Mmzp8+fQIMKHUq0qNGjSJMqXcq0qtWrWLNq3cq1q9evYMOKHUu2rNmzaNOqXcu2rdu3cOPKnUu3rt27ePPq3cu3r9+/gAMLHky4sOHDiBMrXsy4sePHkCNLnky5suXLmDNr3sy5s+fPoEOLHk26tOnTqFOrXs26tevXsGPLnk27tu3buHPr3s27t+/fwIMLH068uPHjyJMrX868ufPn0KNLn069uvXr2LNr3869u/fv4MOLH0+/vPnz6NOrX8++vfv38OPLn0+/vv37+PPr38+/v///AAYo5IADhQAAOw=="
+        }
+        for name, data in icons_b64.items():
+            self.menu_icons[name] = tk.PhotoImage(data=data)
 
     def create_folder_structure(self):
         """创建所有必要的文件夹"""
@@ -113,7 +132,8 @@ class TimedBroadcastApp:
         self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
 
-        nav_button_titles = ["定时广播", "节假日", "语音广告 制作", "设置"]
+        # 【修改】移除 "语音广告 制作"
+        nav_button_titles = ["定时广播", "节假日", "设置"]
         
         for i, title in enumerate(nav_button_titles):
             btn_frame = tk.Frame(self.nav_frame, bg='#A8D8E8')
@@ -124,12 +144,10 @@ class TimedBroadcastApp:
             btn.pack(fill=tk.X)
             self.nav_buttons[title] = btn
         
-        # --- 创建主页面框架 ---
         self.main_frame = tk.Frame(self.root, bg='white')
         self.pages["定时广播"] = self.main_frame
         self.create_scheduled_broadcast_page()
 
-        # --- 默认显示主页面 ---
         self.current_page = self.main_frame
         self.switch_page("定时广播")
 
@@ -138,11 +156,9 @@ class TimedBroadcastApp:
             self.log("界面已锁定，请先解锁。")
             return
             
-        # 隐藏当前页面
         if self.current_page:
             self.current_page.pack_forget()
 
-        # 取消所有导航按钮的高亮
         for title, btn in self.nav_buttons.items():
             btn.config(bg='#A8D8E8', fg='black')
             btn.master.config(bg='#A8D8E8')
@@ -154,20 +170,16 @@ class TimedBroadcastApp:
             if page_name not in self.pages:
                 self.pages[page_name] = self.create_settings_page()
             target_frame = self.pages[page_name]
-            # 更新锁定复选框的状态
             self.lock_now_var.set(self.is_locked)
         else:
             messagebox.showinfo("提示", f"页面 [{page_name}] 正在开发中...")
             self.log(f"功能开发中: {page_name}")
-            # 如果请求的页面不存在，则返回默认页面
             target_frame = self.pages["定时广播"]
             page_name = "定时广播"
 
-        # 显示目标页面
         target_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.current_page = target_frame
         
-        # 高亮选中的导航按钮
         selected_btn = self.nav_buttons[page_name]
         selected_btn.config(bg='#5DADE2', fg='white')
         selected_btn.master.config(bg='#5DADE2')
@@ -203,28 +215,20 @@ class TimedBroadcastApp:
         columns = ('节目名称', '状态', '开始时间', '模式', '音频或文字', '音量', '周几/几号', '日期范围')
         self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12)
         
-        # --- 【修改】锁定列宽 ---
         self.task_tree.heading('节目名称', text='节目名称')
         self.task_tree.column('节目名称', width=200, anchor='w')
-        
         self.task_tree.heading('状态', text='状态')
         self.task_tree.column('状态', width=70, anchor='center', stretch=tk.NO)
-
         self.task_tree.heading('开始时间', text='开始时间')
         self.task_tree.column('开始时间', width=100, anchor='center', stretch=tk.NO)
-
         self.task_tree.heading('模式', text='模式')
         self.task_tree.column('模式', width=70, anchor='center', stretch=tk.NO)
-
         self.task_tree.heading('音频或文字', text='音频或文字')
         self.task_tree.column('音频或文字', width=300, anchor='w')
-
         self.task_tree.heading('音量', text='音量')
         self.task_tree.column('音量', width=70, anchor='center', stretch=tk.NO)
-        
         self.task_tree.heading('周几/几号', text='周几/几号')
         self.task_tree.column('周几/几号', width=100, anchor='center')
-
         self.task_tree.heading('日期范围', text='日期范围')
         self.task_tree.column('日期范围', width=120, anchor='center')
 
@@ -283,12 +287,10 @@ class TimedBroadcastApp:
                                bg='white', fg='#2C5F7C')
         title_label.pack(anchor='w', padx=20, pady=20)
 
-        # --- 通用设置 ---
         general_frame = tk.LabelFrame(settings_frame, text="通用设置", font=('Microsoft YaHei', 11, 'bold'),
                                       bg='white', padx=15, pady=10)
         general_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        # 定义 Tkinter 变量
         self.autostart_var = tk.BooleanVar(value=self.settings.get("autostart", False))
         self.start_minimized_var = tk.BooleanVar(value=self.settings.get("start_minimized", False))
         self.lock_now_var = tk.BooleanVar(value=self.is_locked)
@@ -303,24 +305,19 @@ class TimedBroadcastApp:
                        font=('Microsoft YaHei', 10), bg='white', anchor='w',
                        command=self.toggle_lock_state).pack(fill=tk.X, pady=5)
         
-        # --- 电源管理 ---
         power_frame = tk.LabelFrame(settings_frame, text="电源管理", font=('Microsoft YaHei', 11, 'bold'),
                                     bg='white', padx=15, pady=10)
         power_frame.pack(fill=tk.X, padx=20, pady=10)
 
-        # 定义 Tkinter 变量
         self.daily_shutdown_enabled_var = tk.BooleanVar(value=self.settings.get("daily_shutdown_enabled", False))
         self.daily_shutdown_time_var = tk.StringVar(value=self.settings.get("daily_shutdown_time", "23:00:00"))
-        
         self.weekly_shutdown_enabled_var = tk.BooleanVar(value=self.settings.get("weekly_shutdown_enabled", False))
         self.weekly_shutdown_time_var = tk.StringVar(value=self.settings.get("weekly_shutdown_time", "23:30:00"))
         self.weekly_shutdown_days_var = tk.StringVar(value=self.settings.get("weekly_shutdown_days", "每周:12345"))
-
         self.weekly_reboot_enabled_var = tk.BooleanVar(value=self.settings.get("weekly_reboot_enabled", False))
         self.weekly_reboot_time_var = tk.StringVar(value=self.settings.get("weekly_reboot_time", "22:00:00"))
         self.weekly_reboot_days_var = tk.StringVar(value=self.settings.get("weekly_reboot_days", "每周:67"))
 
-        # 每日关机
         daily_frame = tk.Frame(power_frame, bg='white')
         daily_frame.pack(fill=tk.X, pady=4)
         tk.Checkbutton(daily_frame, text="每天关机", variable=self.daily_shutdown_enabled_var, 
@@ -331,7 +328,6 @@ class TimedBroadcastApp:
         tk.Button(daily_frame, text="设置", command=lambda: self.show_single_time_dialog(self.daily_shutdown_time_var)
                   ).pack(side=tk.LEFT)
 
-        # 每周关机
         weekly_frame = tk.Frame(power_frame, bg='white')
         weekly_frame.pack(fill=tk.X, pady=4)
         tk.Checkbutton(weekly_frame, text="每周关机", variable=self.weekly_shutdown_enabled_var, 
@@ -345,7 +341,6 @@ class TimedBroadcastApp:
         tk.Button(weekly_frame, text="设置", command=lambda: self.show_power_week_time_dialog(
             "设置每周关机", self.weekly_shutdown_days_var, self.weekly_shutdown_time_var)).pack(side=tk.LEFT)
 
-        # 每周重启
         reboot_frame = tk.Frame(power_frame, bg='white')
         reboot_frame.pack(fill=tk.X, pady=4)
         tk.Checkbutton(reboot_frame, text="每周重启", variable=self.weekly_reboot_enabled_var,
@@ -372,7 +367,6 @@ class TimedBroadcastApp:
             self._set_ui_lock_state(tk.NORMAL)
             self.log("界面已解锁。")
         
-        # 同步设置页面的复选框
         if "设置" in self.pages:
             self.lock_now_var.set(self.is_locked)
 
@@ -383,12 +377,10 @@ class TimedBroadcastApp:
 
     def _set_widget_state_recursively(self, parent_widget, state):
         for child in parent_widget.winfo_children():
-            # 跳过锁定按钮本身和设置导航按钮
             if child == self.lock_button or child == self.nav_buttons.get("设置"):
                 continue
             
             try:
-                # 对导航按钮的父框架（用于高亮）特殊处理
                 if child.master in [b.master for b in self.nav_buttons.values()] and child.master != self.nav_buttons.get("设置").master:
                      child.config(state=state)
                 elif child.master not in [b.master for b in self.nav_buttons.values()]:
@@ -416,40 +408,35 @@ class TimedBroadcastApp:
         
         iid = self.task_tree.identify_row(event.y)
         context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 10))
-        
-        # 定义一个窄空格用于微调
-        thin_space = "\u2009"
 
         if iid:
             if iid not in self.task_tree.selection():
                 self.task_tree.selection_set(iid)
             
-            # 【对齐修正】: 使用窄空格和常规空格组合进行精细对齐
-            context_menu.add_command(label=f"▶️{thin_space}立即播放", command=self.play_now)
+            # 【对齐修正】: 使用统一尺寸的内嵌图标实现完美对齐
+            context_menu.add_command(label="  立即播放", image=self.menu_icons['play'], compound=tk.LEFT, command=self.play_now)
             context_menu.add_separator()
-            context_menu.add_command(label="✏️  修改", command=self.edit_task)
-            context_menu.add_command(label="❌  删除", command=self.delete_task)
-            context_menu.add_command(label="📋  复制", command=self.copy_task)
+            context_menu.add_command(label="  修改", image=self.menu_icons['edit'], compound=tk.LEFT, command=self.edit_task)
+            context_menu.add_command(label="  删除", image=self.menu_icons['delete'], compound=tk.LEFT, command=self.delete_task)
+            context_menu.add_command(label="  复制", image=self.menu_icons['copy'], compound=tk.LEFT, command=self.copy_task)
             context_menu.add_separator()
-            context_menu.add_command(label=f"🔼{thin_space}置顶", command=self.move_task_to_top)
-            context_menu.add_command(label=f"🔼{thin_space}上移", command=lambda: self.move_task(-1))
-            context_menu.add_command(label=f"🔽{thin_space}下移", command=lambda: self.move_task(1))
-            context_menu.add_command(label=f"🔽{thin_space}置末", command=self.move_task_to_bottom)
+            context_menu.add_command(label="  置顶", image=self.menu_icons['top'], compound=tk.LEFT, command=self.move_task_to_top)
+            context_menu.add_command(label="  上移", image=self.menu_icons['up'], compound=tk.LEFT, command=lambda: self.move_task(-1))
+            context_menu.add_command(label="  下移", image=self.menu_icons['down'], compound=tk.LEFT, command=lambda: self.move_task(1))
+            context_menu.add_command(label="  置末", image=self.menu_icons['bottom'], compound=tk.LEFT, command=self.move_task_to_bottom)
             context_menu.add_separator()
-            context_menu.add_command(label=f"▶️{thin_space}启用", command=self.enable_task)
-            context_menu.add_command(label="⏸️  禁用", command=self.disable_task)
-
+            context_menu.add_command(label="  启用", image=self.menu_icons['enable'], compound=tk.LEFT, command=self.enable_task)
+            context_menu.add_command(label="  禁用", image=self.menu_icons['disable'], compound=tk.LEFT, command=self.disable_task)
         else:
             self.task_tree.selection_set()
-            context_menu.add_command(label="➕  添加节目", command=self.add_task)
+            context_menu.add_command(label="  添加节目", image=self.menu_icons['add'], compound=tk.LEFT, command=self.add_task)
         
         context_menu.add_separator()
-        context_menu.add_command(label=f"⏹️{thin_space}停止当前播放", command=self.stop_current_playback, state="normal")
+        context_menu.add_command(label="  停止当前播放", image=self.menu_icons['stop'], compound=tk.LEFT, command=self.stop_current_playback)
         
         context_menu.post(event.x_root, event.y_root)
     
     def _force_stop_playback(self):
-        """强制停止当前所有播放活动"""
         if self.is_playing.is_set():
             self.log("接收到中断指令，正在停止当前播放...")
             if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
@@ -925,7 +912,6 @@ class TimedBroadcastApp:
             except Exception as e:
                 self.log(f"警告: 使用 win32com 获取语音列表失败 - {e}")
                 available_voices = []
-        
         return available_voices
     
     def select_file_for_entry(self, initial_dir, string_var):
@@ -948,15 +934,12 @@ class TimedBroadcastApp:
     def edit_task(self):
         selection = self.task_tree.selection()
         if not selection:
-            messagebox.showwarning("警告", "请先选择要修改的节目")
-            return
+            messagebox.showwarning("警告", "请先选择要修改的节目"); return
         if len(selection) > 1:
-            messagebox.showwarning("警告", "一次只能修改一个节目")
-            return
+            messagebox.showwarning("警告", "一次只能修改一个节目"); return
         
         index = self.task_tree.index(selection[0])
         task = self.tasks[index]
-        
         dummy_parent = tk.Toplevel(self.root)
         dummy_parent.withdraw()
 
@@ -1011,12 +994,9 @@ class TimedBroadcastApp:
         if index > 0:
             task_to_move = self.tasks.pop(index)
             self.tasks.insert(0, task_to_move)
-            self.update_task_list()
-            self.save_tasks()
+            self.update_task_list(); self.save_tasks()
             items = self.task_tree.get_children()
-            if items: 
-                self.task_tree.selection_set(items[0])
-                self.task_tree.focus(items[0])
+            if items: self.task_tree.selection_set(items[0]); self.task_tree.focus(items[0])
 
     def move_task_to_bottom(self):
         selections = self.task_tree.selection()
@@ -1026,12 +1006,9 @@ class TimedBroadcastApp:
         if index < len(self.tasks) - 1:
             task_to_move = self.tasks.pop(index)
             self.tasks.append(task_to_move)
-            self.update_task_list()
-            self.save_tasks()
+            self.update_task_list(); self.save_tasks()
             items = self.task_tree.get_children()
-            if items: 
-                self.task_tree.selection_set(items[-1])
-                self.task_tree.focus(items[-1])
+            if items: self.task_tree.selection_set(items[-1]); self.task_tree.focus(items[-1])
 
     def import_tasks(self):
         filename = filedialog.askopenfilename(title="选择导入文件", filetypes=[("JSON文件", "*.json")])
@@ -1080,7 +1057,7 @@ class TimedBroadcastApp:
         scrollbar = tk.Scrollbar(box_frame, orient=tk.VERTICAL, command=listbox.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y); listbox.configure(yscrollcommand=scrollbar.set)
         
-        current_times = time_entry.get().split(',') if isinstance(time_entry, tk.Entry) else time_entry.get().split(',')
+        current_times = time_entry.get().split(',')
         for t in [t.strip() for t in current_times if t.strip()]:
             listbox.insert(tk.END, t)
 
@@ -1113,8 +1090,6 @@ class TimedBroadcastApp:
             if isinstance(time_entry, tk.Entry):
                 time_entry.delete(0, tk.END)
                 time_entry.insert(0, result)
-            elif isinstance(time_entry, tk.StringVar):
-                time_entry.set(result)
             self.save_settings()
             dialog.destroy()
         tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white',
@@ -1175,9 +1150,6 @@ class TimedBroadcastApp:
             if isinstance(weekday_var, tk.Entry):
                 weekday_var.delete(0, tk.END)
                 weekday_var.insert(0, result if selected else "")
-            elif isinstance(weekday_var, tk.StringVar):
-                weekday_var.set(result if selected else "")
-
             self.save_settings()
             dialog.destroy()
         tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white',
@@ -1214,8 +1186,7 @@ class TimedBroadcastApp:
         
         def confirm():
             start, end = from_date_entry.get().strip(), to_date_entry.get().strip()
-            norm_start = self._normalize_date_string(start)
-            norm_end = self._normalize_date_string(end)
+            norm_start, norm_end = self._normalize_date_string(start), self._normalize_date_string(end)
             
             if norm_start and norm_end:
                 date_range_entry.delete(0, tk.END)
@@ -1230,18 +1201,14 @@ class TimedBroadcastApp:
                  font=('Microsoft YaHei', 9), bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
 
     def show_single_time_dialog(self, time_var):
-        """为设置页面创建的简化版时间设置对话框"""
         dialog = tk.Toplevel(self.root)
         dialog.title("设置时间"); dialog.geometry("300x180"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
         self.center_window(dialog, 300, 180)
-
         main_frame = tk.Frame(dialog, bg='#D7F3F5', padx=15, pady=15)
         main_frame.pack(fill=tk.BOTH, expand=True)
-
         tk.Label(main_frame, text="24小时制 HH:MM:SS", font=('Microsoft YaHei', 10, 'bold'),
                 bg='#D7F3F5').pack(pady=5)
-        
         time_entry = tk.Entry(main_frame, font=('Microsoft YaHei', 12), width=15, justify='center')
         time_entry.insert(0, time_var.get())
         time_entry.pack(pady=10)
@@ -1262,14 +1229,12 @@ class TimedBroadcastApp:
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0').pack(side=tk.LEFT, padx=10)
 
     def show_power_week_time_dialog(self, title, days_var, time_var):
-        """为电源设置创建的周和时间组合对话框"""
         # 【修改】增加窗口宽度
         dialog = tk.Toplevel(self.root); dialog.title(title)
-        dialog.geometry("500x300"); dialog.resizable(False, False)
+        dialog.geometry("550x300"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
-        self.center_window(dialog, 500, 300)
+        self.center_window(dialog, 550, 300)
         
-        # 周选择
         week_frame = tk.LabelFrame(dialog, text="选择周几", font=('Microsoft YaHei', 10, 'bold'),
                                   bg='#D7F3F5', padx=10, pady=10)
         week_frame.pack(fill=tk.X, pady=10, padx=10)
@@ -1285,7 +1250,6 @@ class TimedBroadcastApp:
             tk.Checkbutton(week_frame, text=day, variable=week_vars[num], bg='#D7F3F5',
                           font=('Microsoft YaHei', 10)).grid(row=0, column=i, sticky='w', padx=10, pady=3)
 
-        # 时间选择
         time_frame = tk.LabelFrame(dialog, text="设置时间", font=('Microsoft YaHei', 10, 'bold'),
                                   bg='#D7F3F5', padx=10, pady=10)
         time_frame.pack(fill=tk.X, pady=10, padx=10)
@@ -1393,17 +1357,12 @@ class TimedBroadcastApp:
 
         action_to_take = None
         
-        # 每日关机
         if self.settings.get("daily_shutdown_enabled") and current_time_str == self.settings.get("daily_shutdown_time"):
             action_to_take = ("shutdown /s /t 60", "每日定时关机")
-
-        # 每周关机
         if not action_to_take and self.settings.get("weekly_shutdown_enabled"):
             days = self.settings.get("weekly_shutdown_days", "").replace("每周:", "")
             if str(now.isoweekday()) in days and current_time_str == self.settings.get("weekly_shutdown_time"):
                 action_to_take = ("shutdown /s /t 60", "每周定时关机")
-        
-        # 每周重启
         if not action_to_take and self.settings.get("weekly_reboot_enabled"):
             days = self.settings.get("weekly_reboot_days", "").replace("每周:", "")
             if str(now.isoweekday()) in days and current_time_str == self.settings.get("weekly_reboot_time"):
@@ -1501,27 +1460,22 @@ class TimedBroadcastApp:
             if not self.is_playing.is_set(): return
 
             if task.get('bgm', 0) and AUDIO_AVAILABLE:
-                bgm_file = task.get('bgm_file', '')
-                bgm_path = os.path.join(BGM_FOLDER, bgm_file)
+                bgm_file, bgm_path = task.get('bgm_file', ''), os.path.join(BGM_FOLDER, task.get('bgm_file', ''))
                 if os.path.exists(bgm_path):
                     self.log(f"播放背景音乐: {bgm_file}")
                     pygame.mixer.music.load(bgm_path)
-                    bgm_volume = float(task.get('bgm_volume', 40)) / 100.0
-                    pygame.mixer.music.set_volume(bgm_volume)
+                    pygame.mixer.music.set_volume(float(task.get('bgm_volume', 40)) / 100.0)
                     pygame.mixer.music.play(-1)
                 else:
                     self.log(f"警告: 背景音乐文件不存在 - {bgm_path}")
 
             if task.get('prompt', 0) and AUDIO_AVAILABLE:
-                prompt_file = task.get('prompt_file', '')
-                prompt_path = os.path.join(PROMPT_FOLDER, prompt_file)
+                prompt_file, prompt_path = task.get('prompt_file', ''), os.path.join(PROMPT_FOLDER, task.get('prompt_file', ''))
                 if os.path.exists(prompt_path):
                     if not self.is_playing.is_set(): return
                     self.log(f"播放提示音: {prompt_file}")
                     sound = pygame.mixer.Sound(prompt_path)
-                    prompt_volume = float(task.get('prompt_volume', 80)) / 100.0
-                    sound.set_volume(prompt_volume)
-                    
+                    sound.set_volume(float(task.get('prompt_volume', 80)) / 100.0)
                     channel = sound.play()
                     if channel:
                         while channel.get_busy() and self.is_playing.is_set():
@@ -1537,17 +1491,12 @@ class TimedBroadcastApp:
                 self.log(f"严重错误: 无法初始化语音引擎! 错误: {e}"); raise
 
             all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
-            selected_voice_desc = task.get('voice')
-            if selected_voice_desc in all_voices:
+            if (selected_voice_desc := task.get('voice')) in all_voices:
                 speaker.Voice = all_voices[selected_voice_desc]
             
             speaker.Volume = int(task.get('volume', 80))
-            
-            rate = task.get('speed', '0')
-            pitch = task.get('pitch', '0')
-            
             escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("'", "&apos;").replace('"', "&quot;")
-            xml_text = f"<rate absspeed='{rate}'><pitch middle='{pitch}'>{escaped_text}</pitch></rate>"
+            xml_text = f"<rate absspeed='{task.get('speed', '0')}'><pitch middle='{task.get('pitch', '0')}'>{escaped_text}</pitch></rate>"
             
             repeat_count = int(task.get('repeat', 1))
             self.log(f"准备播报 {repeat_count} 遍...")
@@ -1555,9 +1504,7 @@ class TimedBroadcastApp:
             for i in range(repeat_count):
                 if not self.is_playing.is_set(): break
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
-                
                 speaker.Speak(xml_text, 8) 
-                
                 if i < repeat_count - 1 and self.is_playing.is_set():
                     time.sleep(0.5)
 
@@ -1603,6 +1550,7 @@ class TimedBroadcastApp:
             for task in self.tasks:
                 if 'delay' not in task:
                     task['delay'] = 'delay' if task.get('type') == 'voice' else 'ontime'
+                    migrated = True
                 if not isinstance(task.get('last_run'), dict):
                     task['last_run'] = {}
                     migrated = True
@@ -1631,22 +1579,17 @@ class TimedBroadcastApp:
                 self.settings = defaults
         else:
             self.settings = defaults
-        
         self.log("系统设置已加载。")
 
     def save_settings(self):
         if hasattr(self, 'autostart_var'):
-            self.settings["autostart"] = self.autostart_var.get()
-            self.settings["start_minimized"] = self.start_minimized_var.get()
-            self.settings["daily_shutdown_enabled"] = self.daily_shutdown_enabled_var.get()
-            self.settings["daily_shutdown_time"] = self.daily_shutdown_time_var.get()
-            self.settings["weekly_shutdown_enabled"] = self.weekly_shutdown_enabled_var.get()
-            self.settings["weekly_shutdown_days"] = self.weekly_shutdown_days_var.get()
-            self.settings["weekly_shutdown_time"] = self.weekly_shutdown_time_var.get()
-            self.settings["weekly_reboot_enabled"] = self.weekly_reboot_enabled_var.get()
-            self.settings["weekly_reboot_days"] = self.weekly_reboot_days_var.get()
-            self.settings["weekly_reboot_time"] = self.weekly_reboot_time_var.get()
-        
+            self.settings.update({
+                "autostart": self.autostart_var.get(), "start_minimized": self.start_minimized_var.get(),
+                "daily_shutdown_enabled": self.daily_shutdown_enabled_var.get(), "daily_shutdown_time": self.daily_shutdown_time_var.get(),
+                "weekly_shutdown_enabled": self.weekly_shutdown_enabled_var.get(), "weekly_shutdown_days": self.weekly_shutdown_days_var.get(),
+                "weekly_shutdown_time": self.weekly_shutdown_time_var.get(), "weekly_reboot_enabled": self.weekly_reboot_enabled_var.get(),
+                "weekly_reboot_days": self.weekly_reboot_days_var.get(), "weekly_reboot_time": self.weekly_reboot_time_var.get()
+            })
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, ensure_ascii=False, indent=2)
@@ -1663,10 +1606,8 @@ class TimedBroadcastApp:
             messagebox.showerror("功能受限", "未安装 pywin32 库，无法设置开机启动。")
             return
 
-        shortcut_path = os.path.join(
-            os.environ['APPDATA'], 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', "定时播音.lnk"
-        )
-        target_path = sys.executable if getattr(sys, 'frozen', False) else sys.argv[0]
+        shortcut_path = os.path.join(os.environ['APPDATA'], 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', "定时播音.lnk")
+        target_path = sys.executable
         
         try:
             if enable:
@@ -1674,7 +1615,7 @@ class TimedBroadcastApp:
                 shell = win32com.client.Dispatch("WScript.Shell")
                 shortcut = shell.CreateShortCut(shortcut_path)
                 shortcut.Targetpath = target_path
-                shortcut.WorkingDirectory = os.path.dirname(target_path)
+                shortcut.WorkingDirectory = application_path
                 shortcut.IconLocation = ICON_FILE if os.path.exists(ICON_FILE) else target_path
                 shortcut.save()
                 pythoncom.CoUninitialize()
@@ -1689,8 +1630,8 @@ class TimedBroadcastApp:
             messagebox.showerror("错误", f"操作失败: {e}")
 
     def center_window(self, win, width, height):
-        x = (win.winfo_screenwidth() // 2) - (width // 2)
-        y = (win.winfo_screenheight() // 2) - (height // 2)
+        x = (win.winfo_screenwidth() - width) // 2
+        y = (win.winfo_screenheight() - height) // 2
         win.geometry(f'{width}x{height}+{x}+{y}')
 
     def _normalize_time_string(self, time_str):
@@ -1705,14 +1646,12 @@ class TimedBroadcastApp:
 
     def _normalize_multiple_times_string(self, times_input_str):
         if not times_input_str.strip(): return True, ""
-        
         original_times = [t.strip() for t in times_input_str.split(',') if t.strip()]
         normalized_times, invalid_times = [], []
         for t in original_times:
             normalized = self._normalize_time_string(t)
             if normalized: normalized_times.append(normalized)
             else: invalid_times.append(t)
-        
         if invalid_times: return False, f"以下时间格式无效: {', '.join(invalid_times)}"
         return True, ", ".join(normalized_times)
 
@@ -1727,10 +1666,7 @@ class TimedBroadcastApp:
             start_str, end_str = [d.strip() for d in date_range_input_str.split('~')]
             norm_start, norm_end = self._normalize_date_string(start_str), self._normalize_date_string(end_str)
             if norm_start and norm_end: return True, f"{norm_start} ~ {norm_end}"
-            
-            invalid_parts = []
-            if not norm_start: invalid_parts.append(start_str)
-            if not norm_end: invalid_parts.append(end_str)
+            invalid_parts = [p for p, n in [(start_str, norm_start), (end_str, norm_end)] if not n]
             return False, f"以下日期格式无效 (应为 YYYY-MM-DD): {', '.join(invalid_parts)}"
         except (ValueError, IndexError):
             return False, "日期范围格式无效，应为 'YYYY-MM-DD ~ YYYY-MM-DD'"
@@ -1743,9 +1679,7 @@ class TimedBroadcastApp:
         self.center_window(dialog, 350, 150)
         
         tk.Label(dialog, text="您想要如何操作？", font=('Microsoft YaHei', 12), pady=20).pack()
-        
-        btn_frame = tk.Frame(dialog)
-        btn_frame.pack(pady=10)
+        btn_frame = tk.Frame(dialog); btn_frame.pack(pady=10)
         
         tk.Button(btn_frame, text="退出程序", command=lambda: [dialog.destroy(), self.quit_app()]).pack(side=tk.LEFT, padx=10)
         if TRAY_AVAILABLE:
@@ -1795,3 +1729,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
