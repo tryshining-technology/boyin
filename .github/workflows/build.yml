@@ -26,41 +26,8 @@ jobs:
           pip install pyinstaller
           pywin32_postinstall.py -install
 
-      # --- 最终修复：分步操作，手动修改 PyInstaller 生成的 spec 文件 ---
-      - name: Build application using a robust multi-step process
-        run: |
-          # 步骤 1: 强制生成 COM 缓存，确保 gen_py 文件夹存在
-          echo "Step 1: Forcing generation of win32com cache..."
-          python -c "from win32com.client import gencache; gencache.EnsureDispatch('SAPI.SpVoice')"
-
-          # 步骤 2: 运行 PyInstaller 的分析阶段，让它生成一个 boyin.spec 文件
-          echo "Step 2: Generating initial boyin.spec file..."
-          pyi-makespec --noconfirm --onefile --windowed --name boyin --icon=icon.ico --hidden-import=win32timezone boyin.py
-
-          # 步骤 3: 使用 Python 脚本来修改 boyin.spec 文件，这是最可靠的方法
-          echo "Step 3: Modifying boyin.spec to include COM cache..."
-          python -c "
-import os
-import win32com
-gen_py_path = os.path.join(os.path.dirname(win32com.__file__), 'gen_py')
-spec_file = 'boyin.spec'
-with open(spec_file, 'r') as f:
-    content = f.read()
-# 将 gen_py 路径添加到 datas 列表中
-# 注意路径中的反斜杠需要转义
-datas_line = f\"datas=[('icon.ico', '.'), ('{gen_py_path.replace('\\\\', '/')}', 'win32com/gen_py')],\"
-content = content.replace(\"datas=[],\", datas_line)
-with open(spec_file, 'w') as f:
-    f.write(content)
-print('--- boyin.spec after modification ---')
-with open(spec_file, 'r') as f:
-    print(f.read())
-"
-          
-          # 步骤 4: 使用修改后的 boyin.spec 文件来完成最终的打包
-          echo "Step 4: Building the application with the modified spec file..."
-          pyinstaller boyin.spec
-        shell: pwsh
+      - name: Build application with PyInstaller
+        run: pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico --add-data "icon.ico;." boyin.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
