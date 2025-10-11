@@ -7,6 +7,7 @@ from datetime import datetime
 import os
 import random
 import sys
+import getpass
 
 # 尝试导入所需库
 TRAY_AVAILABLE = False
@@ -24,7 +25,7 @@ try:
     from pywintypes import com_error
     WIN32COM_AVAILABLE = True
 except ImportError:
-    print("警告: pywin32 未安装，语音功能将受限。")
+    print("警告: pywin32 未安装，语音和开机启动功能将受限。")
 
 AUDIO_AVAILABLE = False
 try:
@@ -52,6 +53,7 @@ else:
     application_path = os.path.dirname(os.path.abspath(__file__))
 
 TASK_FILE = os.path.join(application_path, "broadcast_tasks.json")
+SETTINGS_FILE = os.path.join(application_path, "settings.json")
 PROMPT_FOLDER = os.path.join(application_path, "提示音")
 AUDIO_FOLDER = os.path.join(application_path, "音频文件")
 BGM_FOLDER = os.path.join(application_path, "文稿背景")
@@ -71,67 +73,104 @@ class TimedBroadcastApp:
                 print(f"加载窗口图标失败: {e}")
 
         self.tasks = []
+        self.settings = {}
         self.running = True
-        self.task_file = TASK_FILE
         self.tray_icon = None
-        
         self.is_locked = False
 
         self.is_playing = threading.Event()
         self.playback_queue = []
         self.queue_lock = threading.Lock()
-        # 【Bug修复】: 移除了 self.stop_speech_event
+        
+        # --- 页面管理 ---
+        self.pages = {}
+        self.nav_buttons = {}
+        self.current_page = None
 
         self.create_folder_structure()
+        self.load_settings()
         self.create_widgets()
         self.load_tasks()
+        
         self.start_background_thread()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
 
         self.start_tray_icon_thread()
+        
+        # 根据设置决定是否启动后最小化
+        if self.settings.get("start_minimized", False):
+            self.root.after(100, self.hide_to_tray)
+
 
     def create_folder_structure(self):
         """创建所有必要的文件夹"""
         for folder in [PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
-                self.log(f"已创建文件夹: {folder}") if hasattr(self, 'log_text') else None
 
     def create_widgets(self):
         self.nav_frame = tk.Frame(self.root, bg='#A8D8E8', width=160)
         self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
 
-        # 【界面调整】: 已从下方列表中移除 "立即插播"
-        nav_buttons = [
-            ("定时广播", ""), ("节假日", ""),
-            ("语音广告 制作", ""), ("设置", "")
-        ]
-        for i, (title, subtitle) in enumerate(nav_buttons):
-            btn_frame = tk.Frame(self.nav_frame, bg='#5DADE2' if i == 0 else '#A8D8E8')
+        nav_button_titles = ["定时广播", "节假日", "语音广告 制作", "设置"]
+        
+        for i, title in enumerate(nav_button_titles):
+            btn_frame = tk.Frame(self.nav_frame, bg='#A8D8E8')
             btn_frame.pack(fill=tk.X, pady=1)
-            btn = tk.Button(btn_frame, text=title, bg='#5DADE2' if i == 0 else '#A8D8E8',
-                          fg='white' if i == 0 else 'black', font=('Microsoft YaHei', 13, 'bold'),
+            btn = tk.Button(btn_frame, text=title, bg='#A8D8E8',
+                          fg='black', font=('Microsoft YaHei', 13, 'bold'),
                           bd=0, padx=10, pady=8, anchor='w', command=lambda t=title: self.switch_page(t))
             btn.pack(fill=tk.X)
-            if subtitle:
-                sub_label = tk.Label(btn_frame, text=subtitle, bg='#5DADE2' if i == 0 else '#A8D8E8',
-                                   fg='#555' if i == 0 else '#666',
-                                   font=('Microsoft YaHei', 10), anchor='w', padx=10)
-                sub_label.pack(fill=tk.X)
-
+            self.nav_buttons[title] = btn
+        
+        # --- 创建主页面框架 ---
         self.main_frame = tk.Frame(self.root, bg='white')
-        self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.pages["定时广播"] = self.main_frame
         self.create_scheduled_broadcast_page()
 
+        # --- 默认显示主页面 ---
+        self.current_page = self.main_frame
+        self.switch_page("定时广播")
+
     def switch_page(self, page_name):
-        if self.is_locked:
+        if self.is_locked and page_name != "设置":
             self.log("界面已锁定，请先解锁。")
             return
             
-        if page_name != "定时广播":
+        # 隐藏当前页面
+        if self.current_page:
+            self.current_page.pack_forget()
+
+        # 取消所有导航按钮的高亮
+        for title, btn in self.nav_buttons.items():
+            btn.config(bg='#A8D8E8', fg='black')
+            btn.master.config(bg='#A8D8E8')
+
+        target_frame = None
+        if page_name == "定时广播":
+            target_frame = self.pages["定时广播"]
+        elif page_name == "设置":
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_settings_page()
+            target_frame = self.pages[page_name]
+            # 更新锁定复选框的状态
+            self.lock_now_var.set(self.is_locked)
+        else:
             messagebox.showinfo("提示", f"页面 [{page_name}] 正在开发中...")
             self.log(f"功能开发中: {page_name}")
+            # 如果请求的页面不存在，则返回默认页面
+            target_frame = self.pages["定时广播"]
+            page_name = "定时广播"
+
+        # 显示目标页面
+        target_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.current_page = target_frame
+        
+        # 高亮选中的导航按钮
+        selected_btn = self.nav_buttons[page_name]
+        selected_btn.config(bg='#5DADE2', fg='white')
+        selected_btn.master.config(bg='#5DADE2')
 
     def create_scheduled_broadcast_page(self):
         top_frame = tk.Frame(self.main_frame, bg='white')
@@ -164,11 +203,31 @@ class TimedBroadcastApp:
         columns = ('节目名称', '状态', '开始时间', '模式', '音频或文字', '音量', '周几/几号', '日期范围')
         self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12)
         
-        col_widths = [200, 60, 140, 70, 300, 60, 100, 120]
+        # --- 【修改】锁定列宽 ---
+        self.task_tree.heading('节目名称', text='节目名称')
+        self.task_tree.column('节目名称', width=200, anchor='w')
         
-        for col, width in zip(columns, col_widths):
-            self.task_tree.heading(col, text=col)
-            self.task_tree.column(col, width=width, anchor='w' if col in ['节目名称', '音频或文字'] else 'center')
+        self.task_tree.heading('状态', text='状态')
+        self.task_tree.column('状态', width=70, anchor='center', stretch=tk.NO)
+
+        self.task_tree.heading('开始时间', text='开始时间')
+        self.task_tree.column('开始时间', width=100, anchor='center', stretch=tk.NO)
+
+        self.task_tree.heading('模式', text='模式')
+        self.task_tree.column('模式', width=70, anchor='center', stretch=tk.NO)
+
+        self.task_tree.heading('音频或文字', text='音频或文字')
+        self.task_tree.column('音频或文字', width=300, anchor='w')
+
+        self.task_tree.heading('音量', text='音量')
+        self.task_tree.column('音量', width=70, anchor='center', stretch=tk.NO)
+        
+        self.task_tree.heading('周几/几号', text='周几/几号')
+        self.task_tree.column('周几/几号', width=100, anchor='center')
+
+        self.task_tree.heading('日期范围', text='日期范围')
+        self.task_tree.column('日期范围', width=120, anchor='center')
+
         self.task_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.task_tree.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -188,14 +247,12 @@ class TimedBroadcastApp:
         log_frame = tk.LabelFrame(self.main_frame, text="", font=('Microsoft YaHei', 10),
                                  bg='white', fg='#2C5F7C', padx=10, pady=5)
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-
+        
         log_header_frame = tk.Frame(log_frame, bg='white')
         log_header_frame.pack(fill=tk.X)
-
         log_label = tk.Label(log_header_frame, text="日志：", font=('Microsoft YaHei', 10, 'bold'),
                              bg='white', fg='#2C5F7C')
         log_label.pack(side=tk.LEFT)
-
         self.clear_log_btn = tk.Button(log_header_frame, text="清除日志", command=self.clear_log,
                                        font=('Microsoft YaHei', 8), bd=0, bg='#EAEAEA',
                                        fg='#333', cursor='hand2', padx=5, pady=0)
@@ -219,6 +276,91 @@ class TimedBroadcastApp:
         self.update_status_bar()
         self.log("定时播音软件已启动")
     
+    def create_settings_page(self):
+        settings_frame = tk.Frame(self.root, bg='white')
+
+        title_label = tk.Label(settings_frame, text="系统设置", font=('Microsoft YaHei', 14, 'bold'),
+                               bg='white', fg='#2C5F7C')
+        title_label.pack(anchor='w', padx=20, pady=20)
+
+        # --- 通用设置 ---
+        general_frame = tk.LabelFrame(settings_frame, text="通用设置", font=('Microsoft YaHei', 11, 'bold'),
+                                      bg='white', padx=15, pady=10)
+        general_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        # 定义 Tkinter 变量
+        self.autostart_var = tk.BooleanVar(value=self.settings.get("autostart", False))
+        self.start_minimized_var = tk.BooleanVar(value=self.settings.get("start_minimized", False))
+        self.lock_now_var = tk.BooleanVar(value=self.is_locked)
+
+        tk.Checkbutton(general_frame, text="登录windows后自动启动", variable=self.autostart_var, 
+                       font=('Microsoft YaHei', 10), bg='white', anchor='w', 
+                       command=self._handle_autostart_setting).pack(fill=tk.X, pady=5)
+        tk.Checkbutton(general_frame, text="启动后最小化到系统托盘", variable=self.start_minimized_var,
+                       font=('Microsoft YaHei', 10), bg='white', anchor='w',
+                       command=self.save_settings).pack(fill=tk.X, pady=5)
+        tk.Checkbutton(general_frame, text="立即锁定", variable=self.lock_now_var,
+                       font=('Microsoft YaHei', 10), bg='white', anchor='w',
+                       command=self.toggle_lock_state).pack(fill=tk.X, pady=5)
+        
+        # --- 电源管理 ---
+        power_frame = tk.LabelFrame(settings_frame, text="电源管理", font=('Microsoft YaHei', 11, 'bold'),
+                                    bg='white', padx=15, pady=10)
+        power_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        # 定义 Tkinter 变量
+        self.daily_shutdown_enabled_var = tk.BooleanVar(value=self.settings.get("daily_shutdown_enabled", False))
+        self.daily_shutdown_time_var = tk.StringVar(value=self.settings.get("daily_shutdown_time", "23:00:00"))
+        
+        self.weekly_shutdown_enabled_var = tk.BooleanVar(value=self.settings.get("weekly_shutdown_enabled", False))
+        self.weekly_shutdown_time_var = tk.StringVar(value=self.settings.get("weekly_shutdown_time", "23:30:00"))
+        self.weekly_shutdown_days_var = tk.StringVar(value=self.settings.get("weekly_shutdown_days", "每周:12345"))
+
+        self.weekly_reboot_enabled_var = tk.BooleanVar(value=self.settings.get("weekly_reboot_enabled", False))
+        self.weekly_reboot_time_var = tk.StringVar(value=self.settings.get("weekly_reboot_time", "22:00:00"))
+        self.weekly_reboot_days_var = tk.StringVar(value=self.settings.get("weekly_reboot_days", "每周:67"))
+
+        # 每日关机
+        daily_frame = tk.Frame(power_frame, bg='white')
+        daily_frame.pack(fill=tk.X, pady=4)
+        tk.Checkbutton(daily_frame, text="每天关机", variable=self.daily_shutdown_enabled_var, 
+                       font=('Microsoft YaHei', 10), bg='white', command=self.save_settings).pack(side=tk.LEFT)
+        time_entry_daily = tk.Entry(daily_frame, textvariable=self.daily_shutdown_time_var, 
+                                    font=('Microsoft YaHei', 10), width=15, state='readonly')
+        time_entry_daily.pack(side=tk.LEFT, padx=10)
+        tk.Button(daily_frame, text="设置", command=lambda: self.show_single_time_dialog(self.daily_shutdown_time_var)
+                  ).pack(side=tk.LEFT)
+
+        # 每周关机
+        weekly_frame = tk.Frame(power_frame, bg='white')
+        weekly_frame.pack(fill=tk.X, pady=4)
+        tk.Checkbutton(weekly_frame, text="每周关机", variable=self.weekly_shutdown_enabled_var, 
+                       font=('Microsoft YaHei', 10), bg='white', command=self.save_settings).pack(side=tk.LEFT)
+        days_entry_weekly = tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_days_var,
+                                     font=('Microsoft YaHei', 10), width=20, state='readonly')
+        days_entry_weekly.pack(side=tk.LEFT, padx=(10,5))
+        time_entry_weekly = tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_time_var,
+                                     font=('Microsoft YaHei', 10), width=15, state='readonly')
+        time_entry_weekly.pack(side=tk.LEFT, padx=5)
+        tk.Button(weekly_frame, text="设置", command=lambda: self.show_power_week_time_dialog(
+            "设置每周关机", self.weekly_shutdown_days_var, self.weekly_shutdown_time_var)).pack(side=tk.LEFT)
+
+        # 每周重启
+        reboot_frame = tk.Frame(power_frame, bg='white')
+        reboot_frame.pack(fill=tk.X, pady=4)
+        tk.Checkbutton(reboot_frame, text="每周重启", variable=self.weekly_reboot_enabled_var,
+                       font=('Microsoft YaHei', 10), bg='white', command=self.save_settings).pack(side=tk.LEFT)
+        days_entry_reboot = tk.Entry(reboot_frame, textvariable=self.weekly_reboot_days_var,
+                                     font=('Microsoft YaHei', 10), width=20, state='readonly')
+        days_entry_reboot.pack(side=tk.LEFT, padx=(10,5))
+        time_entry_reboot = tk.Entry(reboot_frame, textvariable=self.weekly_reboot_time_var,
+                                     font=('Microsoft YaHei', 10), width=15, state='readonly')
+        time_entry_reboot.pack(side=tk.LEFT, padx=5)
+        tk.Button(reboot_frame, text="设置", command=lambda: self.show_power_week_time_dialog(
+            "设置每周重启", self.weekly_reboot_days_var, self.weekly_reboot_time_var)).pack(side=tk.LEFT)
+
+        return settings_frame
+
     def toggle_lock_state(self):
         self.is_locked = not self.is_locked
         if self.is_locked:
@@ -229,6 +371,10 @@ class TimedBroadcastApp:
             self.lock_button.config(text="锁定", bg='#E74C3C')
             self._set_ui_lock_state(tk.NORMAL)
             self.log("界面已解锁。")
+        
+        # 同步设置页面的复选框
+        if "设置" in self.pages:
+            self.lock_now_var.set(self.is_locked)
 
     def _set_ui_lock_state(self, state):
         self._set_widget_state_recursively(self.nav_frame, state)
@@ -237,11 +383,16 @@ class TimedBroadcastApp:
 
     def _set_widget_state_recursively(self, parent_widget, state):
         for child in parent_widget.winfo_children():
-            if child == self.lock_button:
+            # 跳过锁定按钮本身和设置导航按钮
+            if child == self.lock_button or child == self.nav_buttons.get("设置"):
                 continue
             
             try:
-                child.config(state=state)
+                # 对导航按钮的父框架（用于高亮）特殊处理
+                if child.master in [b.master for b in self.nav_buttons.values()] and child.master != self.nav_buttons.get("设置").master:
+                     child.config(state=state)
+                elif child.master not in [b.master for b in self.nav_buttons.values()]:
+                    child.config(state=state)
             except tk.TclError:
                 pass
             
@@ -270,7 +421,6 @@ class TimedBroadcastApp:
             if iid not in self.task_tree.selection():
                 self.task_tree.selection_set(iid)
             
-            # 【界面对齐】: 为较窄的图标添加额外空格，确保所有文本对齐
             context_menu.add_command(label="▶️ 立即播放", command=self.play_now)
             context_menu.add_separator()
             context_menu.add_command(label="✏️  修改", command=self.edit_task)
@@ -284,7 +434,6 @@ class TimedBroadcastApp:
             context_menu.add_separator()
             context_menu.add_command(label="▶️ 启用", command=self.enable_task)
             context_menu.add_command(label="⏸️  禁用", command=self.disable_task)
-
         else:
             self.task_tree.selection_set()
             context_menu.add_command(label="➕  添加节目", command=self.add_task)
@@ -294,47 +443,8 @@ class TimedBroadcastApp:
         
         context_menu.post(event.x_root, event.y_root)
     
-    # 【Bug修复】: 恢复到简单、稳定的版本
-    def _force_stop_playback(self):
-        """强制停止当前所有播放活动"""
-        if self.is_playing.is_set():
-            self.log("接收到中断指令，正在停止当前播放...")
-            if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
-                pygame.mixer.music.stop()
-            # 对于音频任务，循环会自己结束；对于语音任务，它本身是阻塞的，无法从外部停止，
-            # 但高优先级任务会清空队列，使其结束后不会播放下一个排队的任务。
-            # on_playback_finished 会在各自的线程中被调用。
-            # 为了确保状态被重置，可以手动调用一次
-            self.on_playback_finished()
-    
-    def play_now(self):
-        selection = self.task_tree.selection()
-        if not selection: 
-            messagebox.showwarning("提示", "请先选择一个要立即播放的节目。")
-            return
-        
-        index = self.task_tree.index(selection[0])
-        task = self.tasks[index]
-
-        self.log(f"手动触发高优先级播放: {task['name']}")
-        
-        self._force_stop_playback()
-        
-        with self.queue_lock:
-            self.playback_queue.clear()
-            self.playback_queue.insert(0, (task, "manual_play"))
-            self.log("播放队列已清空，新任务已置顶。")
-        
-        self.root.after(0, self._process_queue)
-
-    def stop_current_playback(self):
-        self.log("手动触发“停止当前播放”...")
-        self._force_stop_playback()
-        with self.queue_lock:
-            if self.playback_queue:
-                self.playback_queue.clear()
-                self.log("等待播放的队列也已清空。")
-
+    # ... [此处省略 add_task, open_audio_dialog, open_voice_dialog 等未改变的函数, 以节省篇幅] ...
+    # ... [如果您需要包含所有函数，请告诉我，我会将它们全部粘贴回来] ...
     def add_task(self):
         choice_dialog = tk.Toplevel(self.root)
         choice_dialog.title("选择节目类型")
@@ -767,6 +877,42 @@ class TimedBroadcastApp:
         
         content_frame.columnconfigure(1, weight=1)
         time_frame.columnconfigure(1, weight=1)
+        
+    def _force_stop_playback(self):
+        """强制停止当前所有播放活动"""
+        if self.is_playing.is_set():
+            self.log("接收到中断指令，正在停止当前播放...")
+            if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
+                pygame.mixer.music.stop()
+            self.on_playback_finished()
+    
+    def play_now(self):
+        selection = self.task_tree.selection()
+        if not selection: 
+            messagebox.showwarning("提示", "请先选择一个要立即播放的节目。")
+            return
+        
+        index = self.task_tree.index(selection[0])
+        task = self.tasks[index]
+
+        self.log(f"手动触发高优先级播放: {task['name']}")
+        
+        self._force_stop_playback()
+        
+        with self.queue_lock:
+            self.playback_queue.clear()
+            self.playback_queue.insert(0, (task, "manual_play"))
+            self.log("播放队列已清空，新任务已置顶。")
+        
+        self.root.after(0, self._process_queue)
+
+    def stop_current_playback(self):
+        self.log("手动触发“停止当前播放”...")
+        self._force_stop_playback()
+        with self.queue_lock:
+            if self.playback_queue:
+                self.playback_queue.clear()
+                self.log("等待播放的队列也已清空。")
 
     def get_available_voices(self):
         available_voices = []
@@ -853,13 +999,11 @@ class TimedBroadcastApp:
             self.tasks.insert(new_index, task_to_move)
             self.update_task_list()
             self.save_tasks()
-            # 重新选中移动后的项
             items = self.task_tree.get_children()
             if items: 
                 self.task_tree.selection_set(items[new_index])
                 self.task_tree.focus(items[new_index])
 
-    # 【新功能】: 置顶任务
     def move_task_to_top(self):
         selections = self.task_tree.selection()
         if not selections or len(selections) > 1: return
@@ -875,7 +1019,6 @@ class TimedBroadcastApp:
                 self.task_tree.selection_set(items[0])
                 self.task_tree.focus(items[0])
 
-    # 【新功能】: 置末任务
     def move_task_to_bottom(self):
         selections = self.task_tree.selection()
         if not selections or len(selections) > 1: return
@@ -921,6 +1064,7 @@ class TimedBroadcastApp:
         if count > 0: self.update_task_list(); self.save_tasks(); self.log(f"已{status} {count} 个节目")
 
     def show_time_settings_dialog(self, time_entry):
+        # ... [此处省略未改变的 show_time_settings_dialog, show_weekday_settings_dialog 等函数] ...
         dialog = tk.Toplevel(self.root)
         dialog.title("开始时间设置"); dialog.geometry("450x400"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
@@ -937,7 +1081,11 @@ class TimedBroadcastApp:
         listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar = tk.Scrollbar(box_frame, orient=tk.VERTICAL, command=listbox.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y); listbox.configure(yscrollcommand=scrollbar.set)
-        for t in [t.strip() for t in time_entry.get().split(',') if t.strip()]: listbox.insert(tk.END, t)
+        
+        current_times = time_entry.get().split(',') if isinstance(time_entry, tk.Entry) else time_entry.get().split(',')
+        for t in [t.strip() for t in current_times if t.strip()]:
+            listbox.insert(tk.END, t)
+
         btn_frame = tk.Frame(list_frame, bg='#D7F3F5')
         btn_frame.pack(side=tk.RIGHT, padx=10, fill=tk.Y)
         new_entry = tk.Entry(btn_frame, font=('Microsoft YaHei', 10), width=12)
@@ -963,13 +1111,20 @@ class TimedBroadcastApp:
         bottom_frame = tk.Frame(main_frame, bg='#D7F3F5')
         bottom_frame.pack(pady=10)
         def confirm():
-            time_entry.delete(0, tk.END); time_entry.insert(0, ", ".join(list(listbox.get(0, tk.END)))); dialog.destroy()
+            result = ", ".join(list(listbox.get(0, tk.END)))
+            if isinstance(time_entry, tk.Entry):
+                time_entry.delete(0, tk.END)
+                time_entry.insert(0, result)
+            elif isinstance(time_entry, tk.StringVar):
+                time_entry.set(result)
+            self.save_settings()
+            dialog.destroy()
         tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white',
                  font=('Microsoft YaHei', 9, 'bold'), bd=1, padx=25, pady=5).pack(side=tk.LEFT, padx=5)
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0',
                  font=('Microsoft YaHei', 9), bd=1, padx=25, pady=5).pack(side=tk.LEFT, padx=5)
 
-    def show_weekday_settings_dialog(self, weekday_entry):
+    def show_weekday_settings_dialog(self, weekday_var):
         dialog = tk.Toplevel(self.root); dialog.title("周几或几号")
         dialog.geometry("500x520"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
@@ -998,6 +1153,20 @@ class TimedBroadcastApp:
                           font=('Microsoft YaHei', 10)).grid(row=((i - 1) // 7) + 1, column=(i - 1) % 7, sticky='w', padx=8, pady=2)
         bottom_frame = tk.Frame(main_frame, bg='#D7F3F5')
         bottom_frame.pack(pady=10)
+        
+        # Pre-fill based on weekday_var
+        current_val = weekday_var.get()
+        if current_val.startswith("每周:"):
+            week_type_var.set("week")
+            selected_days = current_val.replace("每周:", "")
+            for day_num in week_vars:
+                week_vars[day_num].set(1 if str(day_num) in selected_days else 0)
+        elif current_val.startswith("每月:"):
+            week_type_var.set("day")
+            selected_days = current_val.replace("每月:", "").split(',')
+            for day_num in day_vars:
+                 day_vars[day_num].set(1 if f"{day_num:02d}" in selected_days else 0)
+
         def confirm():
             if week_type_var.get() == "week":
                 selected = sorted([str(n) for n, v in week_vars.items() if v.get()])
@@ -1005,7 +1174,15 @@ class TimedBroadcastApp:
             else:
                 selected = sorted([f"{n:02d}" for n, v in day_vars.items() if v.get()])
                 result = "每月:" + ",".join(selected)
-            weekday_entry.delete(0, tk.END); weekday_entry.insert(0, result if selected else ""); dialog.destroy()
+            
+            if isinstance(weekday_var, tk.Entry):
+                weekday_var.delete(0, tk.END)
+                weekday_var.insert(0, result if selected else "")
+            elif isinstance(weekday_var, tk.StringVar):
+                weekday_var.set(result if selected else "")
+
+            self.save_settings()
+            dialog.destroy()
         tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white',
                  font=('Microsoft YaHei', 9, 'bold'), bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0',
@@ -1055,7 +1232,93 @@ class TimedBroadcastApp:
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0',
                  font=('Microsoft YaHei', 9), bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
 
+    def show_single_time_dialog(self, time_var):
+        """为设置页面创建的简化版时间设置对话框"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("设置时间"); dialog.geometry("300x180"); dialog.resizable(False, False)
+        dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
+        self.center_window(dialog, 300, 180)
+
+        main_frame = tk.Frame(dialog, bg='#D7F3F5', padx=15, pady=15)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(main_frame, text="24小时制 HH:MM:SS", font=('Microsoft YaHei', 10, 'bold'),
+                bg='#D7F3F5').pack(pady=5)
+        
+        time_entry = tk.Entry(main_frame, font=('Microsoft YaHei', 12), width=15, justify='center')
+        time_entry.insert(0, time_var.get())
+        time_entry.pack(pady=10)
+
+        def confirm():
+            val = time_entry.get().strip()
+            normalized_time = self._normalize_time_string(val)
+            if normalized_time:
+                time_var.set(normalized_time)
+                self.save_settings()
+                dialog.destroy()
+            else:
+                messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog)
+
+        bottom_frame = tk.Frame(main_frame, bg='#D7F3F5')
+        bottom_frame.pack(pady=10)
+        tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white').pack(side=tk.LEFT, padx=10)
+        tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0').pack(side=tk.LEFT, padx=10)
+
+    def show_power_week_time_dialog(self, title, days_var, time_var):
+        """为电源设置创建的周和时间组合对话框"""
+        dialog = tk.Toplevel(self.root); dialog.title(title)
+        dialog.geometry("400x300"); dialog.resizable(False, False)
+        dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
+        self.center_window(dialog, 400, 300)
+        
+        # 周选择
+        week_frame = tk.LabelFrame(dialog, text="选择周几", font=('Microsoft YaHei', 10, 'bold'),
+                                  bg='#D7F3F5', padx=10, pady=10)
+        week_frame.pack(fill=tk.X, pady=10, padx=10)
+        
+        weekdays = [("周一", 1), ("周二", 2), ("周三", 3), ("周四", 4), ("周五", 5), ("周六", 6), ("周日", 7)]
+        week_vars = {num: tk.IntVar() for day, num in weekdays}
+        
+        current_days = days_var.get().replace("每周:", "")
+        for day_num_str in current_days:
+            week_vars[int(day_num_str)].set(1)
+
+        for i, (day, num) in enumerate(weekdays):
+            tk.Checkbutton(week_frame, text=day, variable=week_vars[num], bg='#D7F3F5',
+                          font=('Microsoft YaHei', 10)).grid(row=0, column=i, sticky='w', padx=5, pady=3)
+
+        # 时间选择
+        time_frame = tk.LabelFrame(dialog, text="设置时间", font=('Microsoft YaHei', 10, 'bold'),
+                                  bg='#D7F3F5', padx=10, pady=10)
+        time_frame.pack(fill=tk.X, pady=10, padx=10)
+        tk.Label(time_frame, text="时间 (HH:MM:SS):", font=('Microsoft YaHei', 10), bg='#D7F3F5').pack(side=tk.LEFT)
+        time_entry = tk.Entry(time_frame, font=('Microsoft YaHei', 10), width=15)
+        time_entry.insert(0, time_var.get())
+        time_entry.pack(side=tk.LEFT, padx=10)
+
+        def confirm():
+            selected_days = sorted([str(n) for n, v in week_vars.items() if v.get()])
+            if not selected_days:
+                messagebox.showwarning("提示", "请至少选择一天", parent=dialog)
+                return
+            
+            normalized_time = self._normalize_time_string(time_entry.get().strip())
+            if not normalized_time:
+                messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog)
+                return
+
+            days_var.set("每周:" + "".join(selected_days))
+            time_var.set(normalized_time)
+            self.save_settings()
+            dialog.destroy()
+            
+        bottom_frame = tk.Frame(dialog, bg='#D7F3F5')
+        bottom_frame.pack(pady=15)
+        tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white').pack(side=tk.LEFT, padx=10)
+        tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0').pack(side=tk.LEFT, padx=10)
+
     def update_task_list(self):
+        # ... [此处省略未改变的 update_task_list, update_status_bar, start_background_thread] ...
         selection = self.task_tree.selection()
         self.task_tree.delete(*self.task_tree.get_children())
         for task in self.tasks:
@@ -1069,7 +1332,6 @@ class TimedBroadcastApp:
             ))
         if selection:
             try: 
-                # 确保只选择存在的项目
                 valid_selection = [s for s in selection if self.task_tree.exists(s)]
                 if valid_selection:
                     self.task_tree.selection_set(valid_selection)
@@ -1084,51 +1346,85 @@ class TimedBroadcastApp:
         self.root.after(1000, self.update_status_bar)
 
     def start_background_thread(self):
-        threading.Thread(target=self._check_tasks, daemon=True).start()
+        threading.Thread(target=self._background_worker, daemon=True).start()
 
-    def _check_tasks(self):
+    def _background_worker(self):
         while self.running:
             now = datetime.now()
-            current_date_str = now.strftime("%Y-%m-%d")
-            current_time_str = now.strftime("%H:%M:%S")
-
-            for task in self.tasks:
-                if task.get('status') != '启用': continue
-
-                try:
-                    start, end = [d.strip() for d in task.get('date_range', '').split('~')]
-                    if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()): continue
-                except (ValueError, IndexError): pass
-                
-                schedule = task.get('weekday', '每周:1234567')
-                run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or \
-                            (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
-                if not run_today: continue
-                
-                for trigger_time in [t.strip() for t in task.get('time', '').split(',')]:
-                    if trigger_time == current_time_str and task.get('last_run', {}).get(trigger_time) != current_date_str:
-                        if task.get('delay') == 'ontime':
-                            self.log(f"准时任务 '{task['name']}' 已到时间，执行高优先级中断。")
-                            self._force_stop_playback()
-                            with self.queue_lock:
-                                self.playback_queue.clear()
-                                self.playback_queue.insert(0, (task, trigger_time))
-                            self.root.after(0, self._process_queue)
-                        else:
-                            with self.queue_lock:
-                                self.playback_queue.append((task, trigger_time))
-                            self.log(f"延时任务 '{task['name']}' 已到时间，加入播放队列。")
-                            self.root.after(0, self._process_queue)
-
+            self._check_broadcast_tasks(now)
+            self._check_power_tasks(now)
             time.sleep(1)
 
-    def _process_queue(self):
-        if self.is_playing.is_set():
+    def _check_broadcast_tasks(self, now):
+        current_date_str = now.strftime("%Y-%m-%d")
+        current_time_str = now.strftime("%H:%M:%S")
+
+        for task in self.tasks:
+            if task.get('status') != '启用': continue
+
+            try:
+                start, end = [d.strip() for d in task.get('date_range', '').split('~')]
+                if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()): continue
+            except (ValueError, IndexError): pass
+            
+            schedule = task.get('weekday', '每周:1234567')
+            run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or \
+                        (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
+            if not run_today: continue
+            
+            for trigger_time in [t.strip() for t in task.get('time', '').split(',')]:
+                if trigger_time == current_time_str and task.get('last_run', {}).get(trigger_time) != current_date_str:
+                    if task.get('delay') == 'ontime':
+                        self.log(f"准时任务 '{task['name']}' 已到时间，执行高优先级中断。")
+                        self._force_stop_playback()
+                        with self.queue_lock:
+                            self.playback_queue.clear()
+                            self.playback_queue.insert(0, (task, trigger_time))
+                        self.root.after(0, self._process_queue)
+                    else:
+                        with self.queue_lock:
+                            self.playback_queue.append((task, trigger_time))
+                        self.log(f"延时任务 '{task['name']}' 已到时间，加入播放队列。")
+                        self.root.after(0, self._process_queue)
+
+    def _check_power_tasks(self, now):
+        current_date_str = now.strftime("%Y-%m-%d")
+        current_time_str = now.strftime("%H:%M:%S")
+
+        if self.settings.get("last_power_action_date") == current_date_str:
             return
 
+        action_to_take = None
+        
+        # 每日关机
+        if self.settings.get("daily_shutdown_enabled") and current_time_str == self.settings.get("daily_shutdown_time"):
+            action_to_take = ("shutdown /s /t 60", "每日定时关机")
+
+        # 每周关机
+        if not action_to_take and self.settings.get("weekly_shutdown_enabled"):
+            days = self.settings.get("weekly_shutdown_days", "").replace("每周:", "")
+            if str(now.isoweekday()) in days and current_time_str == self.settings.get("weekly_shutdown_time"):
+                action_to_take = ("shutdown /s /t 60", "每周定时关机")
+        
+        # 每周重启
+        if not action_to_take and self.settings.get("weekly_reboot_enabled"):
+            days = self.settings.get("weekly_reboot_days", "").replace("每周:", "")
+            if str(now.isoweekday()) in days and current_time_str == self.settings.get("weekly_reboot_time"):
+                action_to_take = ("shutdown /r /t 60", "每周定时重启")
+
+        if action_to_take:
+            command, reason = action_to_take
+            self.log(f"执行系统电源任务: {reason}。系统将在60秒后操作。")
+            self.settings["last_power_action_date"] = current_date_str
+            self.save_settings()
+            os.system(command)
+
+    def _process_queue(self):
+        # ... [此处省略未改变的 _process_queue, _execute_broadcast, _play_audio, _speak, on_playback_finished] ...
+        if self.is_playing.is_set(): return
+
         with self.queue_lock:
-            if not self.playback_queue:
-                return
+            if not self.playback_queue: return
             task, trigger_time = self.playback_queue.pop(0)
         
         self._execute_broadcast(task, trigger_time)
@@ -1174,6 +1470,7 @@ class TimedBroadcastApp:
 
             start_time = time.time()
             for audio_path in playlist:
+                if not self.is_playing.is_set(): break
                 self.log(f"正在播放: {os.path.basename(audio_path)}")
                 self.update_playing_text(f"[{task['name']}] 正在播放: {os.path.basename(audio_path)}")
                 
@@ -1181,7 +1478,7 @@ class TimedBroadcastApp:
                 pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
                 pygame.mixer.music.play()
 
-                while pygame.mixer.music.get_busy():
+                while pygame.mixer.music.get_busy() and self.is_playing.is_set():
                     if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds:
                         pygame.mixer.music.stop()
                         self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
@@ -1195,7 +1492,6 @@ class TimedBroadcastApp:
         finally:
             self.root.after(0, self.on_playback_finished)
 
-    # 【Bug修复】: 恢复到简单、稳定、阻塞式的语音播放方法
     def _speak(self, text, task):
         if not WIN32COM_AVAILABLE:
             self.log("错误: pywin32库不可用，无法执行语音播报。")
@@ -1227,16 +1523,17 @@ class TimedBroadcastApp:
                     
                     channel = sound.play()
                     if channel:
-                        while channel.get_busy():
+                        while channel.get_busy() and self.is_playing.is_set():
                             time.sleep(0.05)
                 else:
                     self.log(f"警告: 提示音文件不存在 - {prompt_path}")
             
+            if not self.is_playing.is_set(): return
+
             try:
                 speaker = win32com.client.Dispatch("SAPI.SpVoice")
             except com_error as e:
-                self.log(f"严重错误: 无法初始化语音引擎! 错误: {e}")
-                raise
+                self.log(f"严重错误: 无法初始化语音引擎! 错误: {e}"); raise
 
             all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
             selected_voice_desc = task.get('voice')
@@ -1255,9 +1552,16 @@ class TimedBroadcastApp:
             self.log(f"准备播报 {repeat_count} 遍...")
 
             for i in range(repeat_count):
+                if not self.is_playing.is_set(): break
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
-                # 使用标志 8 (SVSF_XML) 来解析语速和音调标签
-                speaker.Speak(xml_text, 8) 
+                speaker.Speak(xml_text, 1+8) # SVSFlagsAsync + SVSFIsXML
+
+                while speaker.Status.RunningState == 2: # 2 means ISpeechVoiceStatus.IsSpeaking
+                    if not self.is_playing.is_set():
+                        speaker.Speak("", 2) # Purge the queue to stop
+                        break
+                    time.sleep(0.1)
+
                 if i < repeat_count - 1:
                     time.sleep(0.5)
 
@@ -1269,9 +1573,8 @@ class TimedBroadcastApp:
                 self.log("背景音乐已停止。")
             pythoncom.CoUninitialize()
             self.root.after(0, self.on_playback_finished)
-
+    
     def on_playback_finished(self):
-        # 确保此方法是线程安全的，并且不会因为重复调用而出错
         if self.is_playing.is_set():
             self.is_playing.clear()
             self.update_playing_text("等待下一个任务...")
@@ -1293,13 +1596,14 @@ class TimedBroadcastApp:
 
     def save_tasks(self):
         try:
-            with open(self.task_file, 'w', encoding='utf-8') as f: json.dump(self.tasks, f, ensure_ascii=False, indent=2)
+            with open(TASK_FILE, 'w', encoding='utf-8') as f: json.dump(self.tasks, f, ensure_ascii=False, indent=2)
         except Exception as e: self.log(f"保存任务失败: {e}")
 
     def load_tasks(self):
-        if not os.path.exists(self.task_file): return
+        if not os.path.exists(TASK_FILE): return
         try:
-            with open(self.task_file, 'r', encoding='utf-8') as f: self.tasks = json.load(f)
+            with open(TASK_FILE, 'r', encoding='utf-8') as f: self.tasks = json.load(f)
+            # ... [此处省略未改变的 load_tasks, center_window, _normalize_* 函数] ...
             migrated = False
             for task in self.tasks:
                 if 'delay' not in task:
@@ -1313,6 +1617,86 @@ class TimedBroadcastApp:
             self.update_task_list(); self.log(f"已加载 {len(self.tasks)} 个节目")
         except Exception as e: self.log(f"加载任务失败: {e}")
 
+    def load_settings(self):
+        defaults = {
+            "autostart": False, "start_minimized": False,
+            "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00",
+            "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00",
+            "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00",
+            "last_power_action_date": ""
+        }
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                    self.settings = json.load(f)
+                # 确保所有默认键都存在
+                for key, value in defaults.items():
+                    self.settings.setdefault(key, value)
+            except Exception as e:
+                self.log(f"加载设置失败: {e}, 将使用默认设置。")
+                self.settings = defaults
+        else:
+            self.settings = defaults
+        
+        self.log("系统设置已加载。")
+
+    def save_settings(self):
+        # 从 Tkinter 变量更新 self.settings 字典
+        if hasattr(self, 'autostart_var'):
+            self.settings["autostart"] = self.autostart_var.get()
+            self.settings["start_minimized"] = self.start_minimized_var.get()
+            self.settings["daily_shutdown_enabled"] = self.daily_shutdown_enabled_var.get()
+            self.settings["daily_shutdown_time"] = self.daily_shutdown_time_var.get()
+            self.settings["weekly_shutdown_enabled"] = self.weekly_shutdown_enabled_var.get()
+            self.settings["weekly_shutdown_days"] = self.weekly_shutdown_days_var.get()
+            self.settings["weekly_shutdown_time"] = self.weekly_shutdown_time_var.get()
+            self.settings["weekly_reboot_enabled"] = self.weekly_reboot_enabled_var.get()
+            self.settings["weekly_reboot_days"] = self.weekly_reboot_days_var.get()
+            self.settings["weekly_reboot_time"] = self.weekly_reboot_time_var.get()
+        
+        try:
+            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.settings, f, ensure_ascii=False, indent=2)
+            # self.log("设置已保存。") # 此日志过于频繁，可注释掉
+        except Exception as e:
+            self.log(f"保存设置失败: {e}")
+
+    def _handle_autostart_setting(self):
+        self.save_settings() # 首先保存复选框状态
+        enable = self.autostart_var.get()
+
+        if not WIN32COM_AVAILABLE:
+            self.log("错误: 自动启动功能需要 pywin32 库。")
+            if enable: self.autostart_var.set(False); self.save_settings()
+            messagebox.showerror("功能受限", "未安装 pywin32 库，无法设置开机启动。")
+            return
+
+        shortcut_path = os.path.join(
+            os.environ['APPDATA'], 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', "定时播音.lnk"
+        )
+        target_path = sys.executable if getattr(sys, 'frozen', False) else sys.argv[0]
+        
+        try:
+            if enable:
+                pythoncom.CoInitialize()
+                shell = win32com.client.Dispatch("WScript.Shell")
+                shortcut = shell.CreateShortCut(shortcut_path)
+                shortcut.Targetpath = target_path
+                shortcut.WorkingDirectory = os.path.dirname(target_path)
+                shortcut.IconLocation = ICON_FILE if os.path.exists(ICON_FILE) else target_path
+                shortcut.save()
+                pythoncom.CoUninitialize()
+                self.log("已设置开机自动启动。")
+            else:
+                if os.path.exists(shortcut_path):
+                    os.remove(shortcut_path)
+                    self.log("已取消开机自动启动。")
+        except Exception as e:
+            self.log(f"错误: 操作自动启动设置失败 - {e}")
+            self.autostart_var.set(not enable); self.save_settings()
+            messagebox.showerror("错误", f"操作失败: {e}")
+
+    # ... [此处省略未改变的 show_quit_dialog, hide_to_tray 等函数] ...
     def center_window(self, win, width, height):
         x = (win.winfo_screenwidth() // 2) - (width // 2)
         y = (win.winfo_screenheight() // 2) - (height // 2)
@@ -1321,57 +1705,42 @@ class TimedBroadcastApp:
     def _normalize_time_string(self, time_str):
         try:
             parts = str(time_str).split(':')
+            if len(parts) == 2: parts.append('00') # 允许 HH:MM 格式
             if len(parts) != 3: return None
             h, m, s = int(parts[0]), int(parts[1]), int(parts[2])
-            if not (0 <= h <= 23 and 0 <= m <= 59 and 0 <= s <= 59):
-                return None
+            if not (0 <= h <= 23 and 0 <= m <= 59 and 0 <= s <= 59): return None
             return f"{h:02d}:{m:02d}:{s:02d}"
-        except (ValueError, IndexError):
-            return None
+        except (ValueError, IndexError): return None
 
     def _normalize_multiple_times_string(self, times_input_str):
-        if not times_input_str.strip():
-            return True, ""
+        if not times_input_str.strip(): return True, ""
         
         original_times = [t.strip() for t in times_input_str.split(',') if t.strip()]
-        normalized_times = []
-        invalid_times = []
-
+        normalized_times, invalid_times = [], []
         for t in original_times:
             normalized = self._normalize_time_string(t)
-            if normalized:
-                normalized_times.append(normalized)
-            else:
-                invalid_times.append(t)
+            if normalized: normalized_times.append(normalized)
+            else: invalid_times.append(t)
         
-        if invalid_times:
-            return False, f"以下时间格式无效: {', '.join(invalid_times)}"
-        
+        if invalid_times: return False, f"以下时间格式无效: {', '.join(invalid_times)}"
         return True, ", ".join(normalized_times)
 
     def _normalize_date_string(self, date_str):
         try:
-            dt = datetime.strptime(date_str, "%Y-%m-%d")
-            return dt.strftime("%Y-%m-%d")
-        except ValueError:
-            return None
+            return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d")
+        except ValueError: return None
             
     def _normalize_date_range_string(self, date_range_input_str):
-        if not date_range_input_str.strip():
-            return True, ""
-
+        if not date_range_input_str.strip(): return True, ""
         try:
             start_str, end_str = [d.strip() for d in date_range_input_str.split('~')]
-            norm_start = self._normalize_date_string(start_str)
-            norm_end = self._normalize_date_string(end_str)
-
-            if norm_start and norm_end:
-                return True, f"{norm_start} ~ {norm_end}"
-            else:
-                invalid_parts = []
-                if not norm_start: invalid_parts.append(start_str)
-                if not norm_end: invalid_parts.append(end_str)
-                return False, f"以下日期格式无效 (应为 YYYY-MM-DD): {', '.join(invalid_parts)}"
+            norm_start, norm_end = self._normalize_date_string(start_str), self._normalize_date_string(end_str)
+            if norm_start and norm_end: return True, f"{norm_start} ~ {norm_end}"
+            
+            invalid_parts = []
+            if not norm_start: invalid_parts.append(start_str)
+            if not norm_end: invalid_parts.append(end_str)
+            return False, f"以下日期格式无效 (应为 YYYY-MM-DD): {', '.join(invalid_parts)}"
         except (ValueError, IndexError):
             return False, "日期范围格式无效，应为 'YYYY-MM-DD ~ YYYY-MM-DD'"
 
@@ -1379,9 +1748,7 @@ class TimedBroadcastApp:
         dialog = tk.Toplevel(self.root)
         dialog.title("确认")
         dialog.geometry("350x150")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.grab_set()
+        dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
         self.center_window(dialog, 350, 150)
         
         tk.Label(dialog, text="您想要如何操作？", font=('Microsoft YaHei', 12), pady=20).pack()
@@ -1390,17 +1757,14 @@ class TimedBroadcastApp:
         btn_frame.pack(pady=10)
         
         tk.Button(btn_frame, text="退出程序", command=lambda: [dialog.destroy(), self.quit_app()]).pack(side=tk.LEFT, padx=10)
-        
         if TRAY_AVAILABLE:
             tk.Button(btn_frame, text="最小化到托盘", command=lambda: [dialog.destroy(), self.hide_to_tray()]).pack(side=tk.LEFT, padx=10)
-            
         tk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=tk.LEFT, padx=10)
 
     def hide_to_tray(self):
         if not TRAY_AVAILABLE:
             messagebox.showwarning("功能不可用", "pystray 或 Pillow 库未安装，无法最小化到托盘。")
             return
-            
         self.root.withdraw()
         self.log("程序已最小化到系统托盘。")
 
@@ -1409,12 +1773,11 @@ class TimedBroadcastApp:
         self.log("程序已从托盘恢复。")
 
     def quit_app(self, icon=None, item=None):
-        if self.tray_icon:
-            self.tray_icon.stop()
+        if self.tray_icon: self.tray_icon.stop()
         self.running = False
         self.save_tasks()
-        if AUDIO_AVAILABLE and pygame.mixer.get_init():
-            pygame.mixer.quit()
+        self.save_settings()
+        if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
         self.root.destroy()
         sys.exit()
 
@@ -1431,8 +1794,7 @@ class TimedBroadcastApp:
     def start_tray_icon_thread(self):
         if TRAY_AVAILABLE and self.tray_icon is None:
             self.setup_tray_icon()
-            thread = threading.Thread(target=self.tray_icon.run, daemon=True)
-            thread.start()
+            threading.Thread(target=self.tray_icon.run, daemon=True).start()
             self.log("系统托盘图标已启动。")
 
 def main():
