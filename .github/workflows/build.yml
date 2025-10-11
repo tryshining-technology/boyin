@@ -66,3 +66,4 @@ with open(spec_file, 'r') as f:
         uses: actions/upload-artifact@v4
         with:
           name: boyin-Windows-x64
+          path: dist/boyin.exe
