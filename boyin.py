@@ -74,7 +74,12 @@ class TimedBroadcastApp:
         self.running = True
         self.task_file = TASK_FILE
         self.tray_icon = None
-        # self.stop_playback_flag = threading.Event() # 暂时禁用
+
+        # --- 新增：播放队列和状态管理 ---
+        self.is_playing = threading.Event()  # 用于标记当前是否正在播放
+        self.playback_queue = []             # 等待播放的任务队列
+        self.queue_lock = threading.Lock()   # 用于保护队列的线程锁
+        # --- 新增结束 ---
 
         self.create_folder_structure()
         self.create_widgets()
@@ -169,12 +174,10 @@ class TimedBroadcastApp:
                                  bg='white', fg='#2C5F7C', padx=10, pady=5)
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # --- 新增：清除日志按钮 ---
         clear_log_btn = tk.Button(log_frame, text="清除日志", command=self.clear_log,
                                   font=('Microsoft YaHei', 8), bd=0, bg='#EAEAEA',
                                   fg='#333', cursor='hand2', padx=5, pady=0)
         clear_log_btn.place(relx=1.0, y=-4, anchor='ne')
-        # --- 新增结束 ---
 
         self.log_text = scrolledtext.ScrolledText(log_frame, height=6, font=('Microsoft YaHei', 9),
                                                  bg='#F9F9F9', wrap=tk.WORD, state='disabled')
@@ -194,7 +197,6 @@ class TimedBroadcastApp:
         self.update_status_bar()
         self.log("定时播音软件已启动")
     
-    # --- 新增：清除日志的方法 ---
     def clear_log(self):
         """清除日志文本框中的所有内容"""
         if messagebox.askyesno("确认操作", "您确定要清空所有日志记录吗？\n此操作不可恢复。"):
@@ -202,7 +204,6 @@ class TimedBroadcastApp:
             self.log_text.delete('1.0', tk.END)
             self.log_text.config(state='disabled')
             self.log("日志已清空。")
-    # --- 新增结束 ---
 
     def on_double_click_edit(self, event):
         if self.task_tree.identify_row(event.y):
@@ -234,7 +235,6 @@ class TimedBroadcastApp:
             context_menu.add_command(label="➕ 添加节目", command=self.add_task)
         
         context_menu.add_separator()
-        # 停止播放功能已禁用
         context_menu.add_command(label="⏹️ 停止当前播放", command=self.stop_current_playback, state="disabled")
         
         context_menu.post(event.x_root, event.y_root)
@@ -246,11 +246,14 @@ class TimedBroadcastApp:
         index = self.task_tree.index(selection[0])
         task = self.tasks[index]
 
-        self.log(f"手动触发立即播放: {task['name']}")
-        self._execute_broadcast(task, "manual_play")
+        # 立即播放也需要排队
+        with self.queue_lock:
+            # 插入到队列头部，实现优先播放
+            self.playback_queue.insert(0, (task, "manual_play"))
+        self.log(f"手动触发节目: {task['name']}，已添加到播放队列。")
+        self.root.after(0, self._process_queue) # 尝试处理队列
 
     def stop_current_playback(self):
-        # 停止功能已暂时移除以进行调试
         self.log("注意：停止播放功能已暂时禁用。")
         pass
 
@@ -939,6 +942,10 @@ class TimedBroadcastApp:
 
             for task in self.tasks:
                 if task.get('status') != '启用': continue
+                
+                # --- 此处逻辑暂不处理 '准时/延后' 选项，默认全部排队 ---
+                # --- 后续可在此处添加逻辑，例如 '准时' 任务可以清空队列并中断当前播放 ---
+
                 try:
                     start, end = [d.strip() for d in task.get('date_range', '').split('~')]
                     if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()): continue
@@ -951,15 +958,44 @@ class TimedBroadcastApp:
                 
                 for trigger_time in [t.strip() for t in task.get('time', '').split(',')]:
                     if trigger_time == current_time_str and task.get('last_run', {}).get(trigger_time) != current_date_str:
-                        self.root.after(0, self._execute_broadcast, task, trigger_time)
+                        # --- 修改：不再直接执行，而是加入队列 ---
+                        with self.queue_lock:
+                            self.playback_queue.append((task, trigger_time))
+                        
+                        self.log(f"任务 '{task['name']}' 已到时间，加入播放队列。")
+                        self.root.after(0, self._process_queue)
+                        # --- 修改结束 ---
 
             time.sleep(1)
 
+    # --- 新增：队列处理器 ---
+    def _process_queue(self):
+        """处理播放队列中的下一个任务"""
+        # 如果当前正在播放，则不做任何事
+        if self.is_playing.is_set():
+            return
+
+        with self.queue_lock:
+            # 如果队列为空，则不做任何事
+            if not self.playback_queue:
+                return
+            # 从队列中取出第一个任务
+            task, trigger_time = self.playback_queue.pop(0)
+        
+        # 执行这个任务
+        self._execute_broadcast(task, trigger_time)
+    # --- 新增结束 ---
+
+
     def _execute_broadcast(self, task, trigger_time):
-        # self.stop_playback_flag.clear() # 禁用
+        # --- 修改：设置播放状态 ---
+        self.is_playing.set()
+        # --- 修改结束 ---
+
         self.update_playing_text(f"[{task['name']}] 正在准备播放...")
         self.status_labels[2].config(text="播放状态: 播放中")
         
+        # 只有非手动播放的任务才记录上次运行时间
         if trigger_time != "manual_play":
             if not isinstance(task.get('last_run'), dict):
                 task['last_run'] = {}
@@ -996,8 +1032,6 @@ class TimedBroadcastApp:
 
             start_time = time.time()
             for audio_path in playlist:
-                # if self.stop_playback_flag.is_set(): self.log("播放被手动停止。"); break # 禁用
-                
                 self.log(f"正在播放: {os.path.basename(audio_path)}")
                 self.update_playing_text(f"[{task['name']}] 正在播放: {os.path.basename(audio_path)}")
                 
@@ -1005,7 +1039,7 @@ class TimedBroadcastApp:
                 pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
                 pygame.mixer.music.play()
 
-                while pygame.mixer.music.get_busy(): # 移除 and not self.stop_playback_flag.is_set()
+                while pygame.mixer.music.get_busy():
                     if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds:
                         pygame.mixer.music.stop()
                         self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
@@ -1017,6 +1051,7 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"音频播放错误: {e}")
         finally:
+            # 确保在主线程中调用完成处理函数
             self.root.after(0, self.on_playback_finished)
 
     def _speak(self, text, task):
@@ -1079,9 +1114,7 @@ class TimedBroadcastApp:
 
             for i in range(repeat_count):
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
-                # 使用阻塞模式 (0) + XML (8) = 8
-                speaker.Speak(xml_text, 8)
-                
+                speaker.Speak(xml_text, 8) # 使用 SAPI.SVSFIsXML (8)
                 if i < repeat_count - 1:
                     time.sleep(0.5)
 
@@ -1095,10 +1128,17 @@ class TimedBroadcastApp:
             self.root.after(0, self.on_playback_finished)
 
     def on_playback_finished(self):
-        # self.stop_playback_flag.clear() # 禁用
+        # --- 修改：清除播放状态并尝试处理下一个任务 ---
+        self.is_playing.clear()
+        # --- 修改结束 ---
+
         self.update_playing_text("等待下一个任务...")
         self.status_labels[2].config(text="播放状态: 待机")
         self.log("播放结束")
+
+        # --- 修改：检查队列中是否还有等待的任务 ---
+        self.root.after(100, self._process_queue) # 稍作延迟以确保状态更新
+        # --- 修改结束 ---
 
     def log(self, message): self.root.after(0, lambda: self._log_threadsafe(message))
     def _log_threadsafe(self, message):
