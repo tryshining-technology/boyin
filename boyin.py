@@ -76,17 +76,16 @@ class TimedBroadcastApp:
         self.task_file = TASK_FILE
         self.tray_icon = None
 
-        # --- 核心状态管理 ---
+        # --- 核心状态管理 (简化版，无停止功能) ---
         self.is_playing = False
         self.wait_queue = deque()
         self.state_lock = threading.Lock()
-        # self.stop_playback_flag = threading.Event() # 禁用
         self.current_task_thread = None
 
         self.create_folder_structure()
         self.create_widgets()
         self.load_tasks()
-        self.start_background_thread()
+        self.start_background_thread() # <--- 这个函数现在存在了
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
 
     def create_folder_structure(self):
@@ -219,10 +218,8 @@ class TimedBroadcastApp:
         self.root.after(0, self._execute_broadcast, task, "manual_play")
 
     def stop_current_playback(self):
-        # 功能已禁用
-        pass
-    
-    # ... 所有UI函数（add_task, open_..._dialog, 等）保持不变 ...
+        pass # Disabled
+
     def add_task(self):
         choice_dialog = tk.Toplevel(self.root)
         choice_dialog.title("选择节目类型")
@@ -245,11 +242,10 @@ class TimedBroadcastApp:
                              bg='#3498DB', fg='white', font=('Microsoft YaHei', 11, 'bold'),
                              bd=0, padx=30, pady=12, cursor='hand2', width=15)
         voice_btn.pack(pady=8)
-
+        
     def open_audio_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
-
         dialog = tk.Toplevel(self.root)
         dialog.title("修改音频节目" if is_edit_mode else "添加音频节目")
         dialog.geometry("850x750")
@@ -891,7 +887,7 @@ class TimedBroadcastApp:
         self.status_labels[0].config(text=f"当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         self.status_labels[1].config(text="系统状态: 运行中")
         self.root.after(1000, self.update_status_bar)
-
+    
     def log(self, message): self.root.after(0, lambda: self._log_threadsafe(message))
     def _log_threadsafe(self, message):
         self.log_text.config(state='normal')
@@ -988,6 +984,206 @@ class TimedBroadcastApp:
         menu = (item('显示', self.show_from_tray, default=True), item('退出', self.quit_app))
         self.tray_icon = Icon("boyin", image, "定时播音", menu)
         self.tray_icon.activations['left'] = self.show_from_tray
+
+    # --- 核心逻辑函数 ---
+    
+    def start_background_thread(self):
+        threading.Thread(target=self._check_tasks, daemon=True).start()
+
+    def _check_tasks(self):
+        while self.running:
+            now = datetime.now()
+            current_date_str = now.strftime("%Y-%m-%d")
+            current_time_str = now.strftime("%H:%M:%S")
+
+            for task in self.tasks:
+                if task.get('status') != '启用': continue
+                try:
+                    start, end = [d.strip() for d in task.get('date_range', '').split('~')]
+                    if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()): continue
+                except (ValueError, IndexError): pass
+                
+                schedule = task.get('weekday', '每周:1234567')
+                run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or \
+                            (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
+                if not run_today: continue
+                
+                for trigger_time in [t.strip() for t in task.get('time', '').split(',')]:
+                    if trigger_time == current_time_str and task.get('last_run', {}).get(trigger_time) != current_date_str:
+                        self.root.after(0, self._execute_broadcast, task.copy(), trigger_time)
+
+            time.sleep(1)
+
+    def _execute_broadcast(self, task, trigger_time):
+        is_manual = task.pop('manual_play', False)
+        is_ontime = task.get('delay', 'ontime') == 'ontime' or is_manual
+
+        with self.state_lock:
+            if self.is_playing:
+                if is_ontime:
+                    self.log(f"准时任务 '{task['name']}' 将中断当前播放。")
+                    self.wait_queue.appendleft((task, trigger_time))
+                    self.stop_current_playback()
+                else:
+                    self.log(f"延时任务 '{task['name']}' 进入等待队列。")
+                    self.wait_queue.append((task, trigger_time))
+                return
+
+            self._start_playback(task, trigger_time)
+
+    def _start_playback(self, task, trigger_time):
+        self.is_playing = True
+        
+        self.root.after(0, lambda: self.status_labels[2].config(text="播放状态: 播放中"))
+        self.root.after(0, lambda: self.update_playing_text(f"[{task['name']}] 正在准备播放..."))
+        
+        if trigger_time != "manual_play":
+            for original_task in self.tasks:
+                if all(original_task.get(k) == task.get(k) for k in ['name', 'time', 'content']):
+                    if not isinstance(original_task.get('last_run'), dict): original_task['last_run'] = {}
+                    original_task['last_run'][trigger_time] = datetime.now().strftime("%Y-%m-%d")
+                    self.save_tasks()
+                    break
+
+        if task.get('type') == 'audio':
+            self.log(f"开始音频任务: {task['name']}")
+            self.current_task_thread = threading.Thread(target=self._play_audio, args=(task,), daemon=True)
+        else:
+            self.log(f"开始语音任务: {task['name']} (共 {task.get('repeat', 1)} 遍)")
+            self.current_task_thread = threading.Thread(target=self._speak, args=(task.get('content', ''), task), daemon=True)
+        
+        self.current_task_thread.start()
+
+    def _play_audio(self, task):
+        try:
+            # ... (Audio playback logic without stop flag) ...
+            # This part can remain simple as pygame.mixer.music.stop() is a hard stop
+            # We just need to ensure the loop terminates
+            interval_type = task.get('interval_type')
+            duration_seconds = int(task.get('interval_seconds', 0))
+            repeat_count = int(task.get('interval_first', 1))
+            
+            playlist = []
+            if task.get('audio_type') == 'single':
+                if os.path.exists(task['content']):
+                    playlist = [task['content']] * repeat_count
+            else:
+                folder_path = task['content']
+                if os.path.isdir(folder_path):
+                    all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
+                    if task.get('play_order') == 'random':
+                        random.shuffle(all_files)
+                    playlist = all_files[:repeat_count]
+
+            if not playlist:
+                self.log(f"错误: 音频列表为空，任务 '{task['name']}' 无法播放。")
+                return
+
+            start_time = time.time()
+            for audio_path in playlist:
+                self.log(f"正在播放: {os.path.basename(audio_path)}")
+                self.root.after(0, lambda p=audio_path: self.update_playing_text(f"[{task['name']}] 正在播放: {os.path.basename(p)}"))
+                
+                pygame.mixer.music.load(audio_path)
+                pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
+                pygame.mixer.music.play()
+
+                while pygame.mixer.music.get_busy():
+                    if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds:
+                        pygame.mixer.music.stop()
+                        self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
+                        break
+                    time.sleep(0.1)
+                
+                if not pygame.mixer.music.get_busy(): # Stopped naturally or by stop_current_playback
+                    continue
+                
+        except Exception as e:
+            self.log(f"音频播放错误: {e}")
+        finally:
+            self.root.after(0, self.on_playback_finished)
+
+    def _speak(self, text, task):
+        if not WIN32COM_AVAILABLE:
+            self.log("错误: pywin32库不可用，无法执行语音播报。")
+            self.root.after(0, self.on_playback_finished)
+            return
+        
+        pythoncom.CoInitialize()
+        try:
+            if task.get('bgm', 0) and AUDIO_AVAILABLE:
+                bgm_file = task.get('bgm_file', '')
+                bgm_path = os.path.join(BGM_FOLDER, bgm_file)
+                if os.path.exists(bgm_path):
+                    self.log(f"播放背景音乐: {bgm_file}")
+                    pygame.mixer.music.load(bgm_path)
+                    pygame.mixer.music.set_volume(float(task.get('bgm_volume', 40)) / 100.0)
+                    pygame.mixer.music.play(-1)
+                else: self.log(f"警告: 背景音乐文件不存在 - {bgm_path}")
+
+            if task.get('prompt', 0) and AUDIO_AVAILABLE:
+                prompt_file = task.get('prompt_file', '')
+                prompt_path = os.path.join(PROMPT_FOLDER, prompt_file)
+                if os.path.exists(prompt_path):
+                    self.log(f"播放提示音: {prompt_file}")
+                    sound = pygame.mixer.Sound(prompt_path)
+                    sound.set_volume(float(task.get('prompt_volume', 80)) / 100.0)
+                    channel = sound.play()
+                    if channel:
+                        while channel.get_busy(): time.sleep(0.05)
+                else: self.log(f"警告: 提示音文件不存在 - {prompt_path}")
+            
+            try:
+                speaker = win32com.client.Dispatch("SAPI.SpVoice")
+            except com_error as e:
+                self.log(f"严重错误: 无法初始化语音引擎! 错误: {e}")
+                raise
+
+            all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
+            selected_voice_desc = task.get('voice')
+            if selected_voice_desc in all_voices:
+                speaker.Voice = all_voices[selected_voice_desc]
+            
+            speaker.Volume = int(task.get('volume', 80))
+            rate = task.get('speed', '0')
+            pitch = task.get('pitch', '0')
+            escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("'", "&apos;").replace('"', "&quot;")
+            xml_text = f"<rate absspeed='{rate}'><pitch middle='{pitch}'>{escaped_text}</pitch></rate>"
+            
+            repeat_count = int(task.get('repeat', 1))
+            self.log(f"准备播报 {repeat_count} 遍...")
+
+            for i in range(repeat_count):
+                self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
+                self.root.after(0, lambda i=i, c=repeat_count: self.update_playing_text(f"[{task['name']}] 正在播报第 {i+1}/{c} 遍"))
+                speaker.Speak(xml_text, 8) # 阻塞模式
+                if i < repeat_count - 1: time.sleep(0.5)
+
+        except Exception as e:
+            self.log(f"播报错误: {e}")
+        finally:
+            if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
+                pygame.mixer.music.stop()
+            pythoncom.CoUninitialize()
+            self.root.after(0, self.on_playback_finished)
+
+    def on_playback_finished(self):
+        self.log("一个播放任务已结束。")
+        next_task_info = None
+        with self.state_lock:
+            if self.wait_queue:
+                next_task_info = self.wait_queue.popleft()
+                self.log("从等待队列中取出下一个任务。")
+            else:
+                self.is_playing = False
+
+        if next_task_info:
+            task, trigger_time = next_task_info
+            self.root.after(100, self._execute_broadcast, task, trigger_time)
+        else:
+            self.log("所有任务播放完毕，进入待机状态。")
+            self.root.after(0, lambda: self.status_labels[2].config(text="播放状态: 待机"))
+            self.root.after(0, lambda: self.update_playing_text("等待下一个任务..."))
 
 def main():
     root = tk.Tk()
