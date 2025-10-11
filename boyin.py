@@ -270,25 +270,24 @@ class TimedBroadcastApp:
             if iid not in self.task_tree.selection():
                 self.task_tree.selection_set(iid)
             
-            # 【界面对齐】: 为所有菜单项添加图标以实现对齐
+            # 【界面对齐】: 为较窄的图标添加额外空格，确保所有文本对齐
             context_menu.add_command(label="▶️ 立即播放", command=self.play_now)
             context_menu.add_separator()
-            context_menu.add_command(label="✏️ 修改", command=self.edit_task)
-            context_menu.add_command(label="❌ 删除", command=self.delete_task)
-            context_menu.add_command(label="📋 复制", command=self.copy_task)
+            context_menu.add_command(label="✏️  修改", command=self.edit_task)
+            context_menu.add_command(label="❌  删除", command=self.delete_task)
+            context_menu.add_command(label="📋  复制", command=self.copy_task)
             context_menu.add_separator()
-            # 【新功能】: 增加置顶和置末
             context_menu.add_command(label="🔼 置顶", command=self.move_task_to_top)
             context_menu.add_command(label="🔼 上移", command=lambda: self.move_task(-1))
             context_menu.add_command(label="🔽 下移", command=lambda: self.move_task(1))
             context_menu.add_command(label="🔽 置末", command=self.move_task_to_bottom)
             context_menu.add_separator()
             context_menu.add_command(label="▶️ 启用", command=self.enable_task)
-            context_menu.add_command(label="⏸️ 禁用", command=self.disable_task)
+            context_menu.add_command(label="⏸️  禁用", command=self.disable_task)
 
         else:
             self.task_tree.selection_set()
-            context_menu.add_command(label="➕ 添加节目", command=self.add_task)
+            context_menu.add_command(label="➕  添加节目", command=self.add_task)
         
         context_menu.add_separator()
         context_menu.add_command(label="⏹️ 停止当前播放", command=self.stop_current_playback, state="normal")
