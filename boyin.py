@@ -1083,7 +1083,6 @@ class TimedBroadcastApp:
         self.save_tasks()
         if AUDIO_AVAILABLE and pygame.mixer.get_init():
             pygame.mixer.quit()
-        # 使用 after 确保在主循环中安全销毁
         self.root.after(100, self.root.destroy)
 
     def setup_tray_icon(self):
