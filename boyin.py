@@ -88,10 +88,6 @@ class TimedBroadcastApp:
         self.start_background_thread()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
 
-        # 【修复点 1】: 在程序启动时就初始化并运行托盘图标
-        self.start_tray_icon_thread()
-
-
     def create_folder_structure(self):
         """创建所有必要的文件夹"""
         for folder in [PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER]:
@@ -165,6 +161,7 @@ class TimedBroadcastApp:
         columns = ('节目名称', '状态', '开始时间', '模式', '音频或文字', '音量', '周几/几号', '日期范围')
         self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12)
         
+        # --- 这是修复的地方 ---
         col_widths = [200, 60, 140, 70, 300, 60, 100, 120]
         
         for col, width in zip(columns, col_widths):
@@ -1353,20 +1350,15 @@ class TimedBroadcastApp:
             
         tk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=tk.LEFT, padx=10)
 
-    # 【修复点 3】: 简化 hide_to_tray 方法，只隐藏窗口
     def hide_to_tray(self):
-        """最小化窗口到系统托盘 (图标应该已经在运行了)。"""
-        if not TRAY_AVAILABLE:
-            messagebox.showwarning("功能不可用", "pystray 或 Pillow 库未安装，无法最小化到托盘。")
-            return
-            
         self.root.withdraw()
-        self.log("程序已最小化到系统托盘。")
+        if not self.tray_icon and TRAY_AVAILABLE:
+            self.setup_tray_icon()
+            threading.Thread(target=self.tray_icon.run, daemon=True).start()
+            self.log("程序已最小化到系统托盘。")
 
-    # 【修复点 4】: 移除 icon.stop()，防止恢复窗口时杀死托盘图标
     def show_from_tray(self, icon, item):
-        """从系统托盘恢复窗口。"""
-        # icon.stop()  <-- 关键：已移除此行
+        icon.stop()
         self.root.after(0, self.root.deiconify)
         self.log("程序已从托盘恢复。")
 
@@ -1381,7 +1373,6 @@ class TimedBroadcastApp:
         sys.exit()
 
     def setup_tray_icon(self):
-        """设置托盘图标的图片和菜单。"""
         try:
             image = Image.open(ICON_FILE)
         except Exception as e:
@@ -1390,18 +1381,7 @@ class TimedBroadcastApp:
         
         menu = (item('显示', self.show_from_tray, default=True), item('退出', self.quit_app))
         self.tray_icon = Icon("boyin", image, "定时播音", menu)
-        # 左键点击默认执行第一个菜单项（'显示'）
         self.tray_icon.activations['left'] = self.show_from_tray
-
-    # 【修复点 2】: 新增此方法，用于在后台线程中启动托盘图标
-    def start_tray_icon_thread(self):
-        """在程序启动时，就在一个单独的线程中创建并运行托盘图标。"""
-        if TRAY_AVAILABLE and self.tray_icon is None:
-            self.setup_tray_icon()
-            # 在后台线程中运行图标，防止阻塞主GUI线程
-            thread = threading.Thread(target=self.tray_icon.run, daemon=True)
-            thread.start()
-            self.log("系统托盘图标已启动。")
 
 def main():
     root = tk.Tk()
