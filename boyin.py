@@ -1083,7 +1083,8 @@ class TimedBroadcastApp:
         self.save_tasks()
         if AUDIO_AVAILABLE and pygame.mixer.get_init():
             pygame.mixer.quit()
-        self.root.destroy()
+        # 使用 after 确保在主循环中安全销毁
+        self.root.after(100, self.root.destroy)
 
     def setup_tray_icon(self):
         try:
@@ -1092,7 +1093,6 @@ class TimedBroadcastApp:
             image = Image.new('RGB', (64, 64), 'white')
             print(f"警告: 未找到或无法加载图标文件 '{ICON_FILE}': {e}")
         
-        # --- 托盘逻辑修改 3: 使用 default=True 来定义左键单击行为，兼容老版本 ---
         menu = (item('显示', self.show_from_tray, default=True), item('退出', self.quit_app))
         self.tray_icon = Icon("boyin", image, "定时播音", menu)
 
