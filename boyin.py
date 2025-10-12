@@ -347,6 +347,7 @@ class TimedBroadcastApp:
 
         tk.Button(action_frame, text="导入节日", command=self.import_holidays, font=btn_font, width=btn_width, pady=5).pack(pady=5)
         tk.Button(action_frame, text="导出节日", command=self.export_holidays, font=btn_font, width=btn_width, pady=5).pack(pady=5)
+        tk.Button(action_frame, text="清空节日", command=self.clear_all_holidays, font=btn_font, width=btn_width, pady=5, bg='#FFDDDD').pack(pady=5)
         
         self.update_holiday_list()
         return page_frame
@@ -534,10 +535,8 @@ class TimedBroadcastApp:
                 messagebox.showerror("错误", "密码不正确！无法清除。", parent=dialog)
                 return
             
-            # Call the main method, which handles confirmation and logic
             password_was_cleared = self.clear_lock_password()
             
-            # If the user confirmed and password was cleared, close the dialog and unlock
             if password_was_cleared:
                 dialog.destroy()
                 self._apply_unlock()
@@ -557,8 +556,8 @@ class TimedBroadcastApp:
                 self.clear_password_btn.config(state=tk.DISABLED)
             self.log("锁定密码已清除。")
             messagebox.showinfo("成功", "锁定密码已成功清除。")
-            return True # Indicate success
-        return False # Indicate cancellation
+            return True 
+        return False 
 
     def _handle_lock_on_start_toggle(self):
         if not self.settings.get("lock_password_b64"):
@@ -655,7 +654,6 @@ class TimedBroadcastApp:
         self._stop_and_cleanup_playback()
         with self.queue_lock:
             self.playback_queue.clear()
-            # The tuple is (task_dict, trigger_time_string)
             self.playback_queue.insert(0, (task, "manual_play"))
             self.log(f"手动触发高优先级播放: {task['name']}")
         self.root.after(10, self._process_queue)
@@ -812,7 +810,6 @@ class TimedBroadcastApp:
             
             play_mode = delay_var.get()
             play_this_task_now = (play_mode == 'immediate')
-            # Save the task with a normal delay type, 'immediate' is just a trigger
             saved_delay_type = 'ontime' if play_mode == 'immediate' else play_mode
 
             new_task_data = {'name': name_entry.get().strip(), 'time': time_msg, 'content': audio_path, 'type': 'audio', 'audio_type': audio_type_var.get(), 'play_order': play_order_var.get(), 'volume': volume_entry.get().strip() or "80", 'interval_type': interval_var.get(), 'interval_first': interval_first_entry.get().strip(), 'interval_seconds': interval_seconds_entry.get().strip(), 'weekday': weekday_entry.get().strip(), 'date_range': date_msg, 'delay': saved_delay_type, 'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {})}
@@ -1147,7 +1144,7 @@ class TimedBroadcastApp:
             if items: self.task_tree.selection_set(items[-1]); self.task_tree.focus(items[-1])
 
     def import_tasks(self):
-        filename = filedialog.askopenfilename(title="选择导入文件", filetypes=[("JSON文件", "*.json")])
+        filename = filedialog.askopenfilename(title="选择导入文件", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
         if filename:
             try:
                 with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
@@ -1157,7 +1154,7 @@ class TimedBroadcastApp:
 
     def export_tasks(self):
         if not self.tasks: messagebox.showwarning("警告", "没有节目可以导出"); return
-        filename = filedialog.asksaveasfilename(title="导出到...", defaultextension=".json", initialfile="broadcast_backup.json", filetypes=[("JSON文件", "*.json")])
+        filename = filedialog.asksaveasfilename(title="导出到...", defaultextension=".json", initialfile="broadcast_backup.json", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
         if filename:
             try:
                 with open(filename, 'w', encoding='utf-8') as f: json.dump(self.tasks, f, ensure_ascii=False, indent=2)
@@ -1196,7 +1193,6 @@ class TimedBroadcastApp:
     def clear_all_tasks(self):
         if not self.tasks: return
         if messagebox.askyesno("严重警告", "您确定要清空所有节目吗？\n此操作不可恢复！"):
-            # Clean up associated voice files first
             for task in self.tasks:
                 if task.get('type') == 'voice' and 'wav_filename' in task:
                     wav_path = os.path.join(AUDIO_FOLDER, task['wav_filename'])
@@ -1365,6 +1361,7 @@ class TimedBroadcastApp:
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=font_spec).pack(side=tk.LEFT, padx=10)
 
     def update_task_list(self):
+        if not hasattr(self, 'task_tree') or not self.task_tree.winfo_exists(): return
         selection = self.task_tree.selection()
         self.task_tree.delete(*self.task_tree.get_children())
         for task in self.tasks:
@@ -1403,7 +1400,6 @@ class TimedBroadcastApp:
             time.sleep(1)
     
     def _is_in_holiday(self, check_time):
-        """Checks if a given datetime object falls within any enabled holiday period."""
         for holiday in self.holidays:
             if holiday.get('status') != '启用':
                 continue
@@ -1756,7 +1752,7 @@ class TimedBroadcastApp:
             self.holidays = []
 
     def update_holiday_list(self):
-        if not hasattr(self, 'holiday_tree'): return
+        if not hasattr(self, 'holiday_tree') or not self.holiday_tree.winfo_exists(): return
         selection = self.holiday_tree.selection()
         self.holiday_tree.delete(*self.holiday_tree.get_children())
         for holiday in self.holidays:
@@ -1768,7 +1764,8 @@ class TimedBroadcastApp:
             ))
         if selection:
             try:
-                self.holiday_tree.selection_set(selection)
+                valid_selection = [s for s in selection if self.holiday_tree.exists(s)]
+                if valid_selection: self.holiday_tree.selection_set(valid_selection)
             except tk.TclError:
                 pass
 
@@ -1970,7 +1967,7 @@ class TimedBroadcastApp:
         self.update_holiday_list(); self.save_holidays(); self.log("已禁用全部节假日。")
     
     def import_holidays(self):
-        filename = filedialog.askopenfilename(title="选择导入节假日文件", filetypes=[("JSON文件", "*.json")])
+        filename = filedialog.askopenfilename(title="选择导入节假日文件", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
         if filename:
             try:
                 with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
@@ -1985,7 +1982,7 @@ class TimedBroadcastApp:
             messagebox.showwarning("警告", "没有节假日可以导出")
             return
         filename = filedialog.asksaveasfilename(title="导出节假日到...", defaultextension=".json",
-                                              initialfile="holidays_backup.json", filetypes=[("JSON文件", "*.json")])
+                                              initialfile="holidays_backup.json", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
         if filename:
             try:
                 with open(filename, 'w', encoding='utf-8') as f:
@@ -1993,6 +1990,15 @@ class TimedBroadcastApp:
                 self.log(f"已导出 {len(self.holidays)} 个节假日到 {os.path.basename(filename)}")
             except Exception as e:
                 messagebox.showerror("错误", f"导出失败: {e}")
+    
+    def clear_all_holidays(self):
+        if not self.holidays:
+            return
+        if messagebox.askyesno("严重警告", "您确定要清空所有节假日吗？\n此操作不可恢复！"):
+            self.holidays.clear()
+            self.update_holiday_list()
+            self.save_holidays()
+            self.log("已清空所有节假日。")
 
 def main():
     root = tk.Tk()
