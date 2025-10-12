@@ -187,7 +187,6 @@ class TimedBroadcastApp:
         self.top_right_btn_frame = tk.Frame(top_frame, bg='white')
         self.top_right_btn_frame.pack(side=tk.RIGHT)
         
-        # BUGFIX: 增加两个新按钮
         batch_buttons = [
             ("全部启用", self.enable_all_tasks, '#27AE60'),
             ("全部禁用", self.disable_all_tasks, '#F39C12'),
@@ -539,25 +538,23 @@ class TimedBroadcastApp:
             else:
                 messagebox.showerror("错误", "密码不正确！", parent=dialog)
         
-        # BUGFIX: This is the new robust workflow for clearing the password
+        # BUGFIX: This is the final, robust workflow for clearing the password.
         def clear_password_action():
             if not is_password_correct():
                 messagebox.showerror("错误", "密码不正确！无法清除。", parent=dialog)
                 return
             
-            # Step 1: Ask for confirmation, making sure the parent is correct.
             if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。", parent=dialog):
-                # Step 2: If "Yes", run the logic-only function.
+                # Step 1: Run the logic-only function.
                 self._perform_password_clear_logic()
                 
-                # Step 3: Destroy this password dialog.
+                # Step 2: Destroy this password dialog. This releases the "grab".
                 dialog.destroy()
                 
-                # Step 4: Unlock the main UI.
-                self._apply_unlock()
-                
-                # Step 5: Show a final, non-nested confirmation.
-                messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root)
+                # Step 3: Schedule the UI unlock and final message using root.after().
+                # This ensures the UI updates happen cleanly after the dialog is gone.
+                self.root.after(50, self._apply_unlock)
+                self.root.after(100, lambda: messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root))
 
         btn_frame = tk.Frame(dialog); btn_frame.pack(pady=10)
         tk.Button(btn_frame, text="确定", command=confirm, font=('Microsoft YaHei', 11)).pack(side=tk.LEFT, padx=5)
@@ -565,17 +562,22 @@ class TimedBroadcastApp:
         tk.Button(btn_frame, text="取消", command=dialog.destroy, font=('Microsoft YaHei', 11)).pack(side=tk.LEFT, padx=5)
         dialog.bind('<Return>', lambda event: confirm())
 
-    # BUGFIX: New logic-only function for clearing password. No UI elements.
+    # BUGFIX: Logic-only function for clearing password made more robust.
     def _perform_password_clear_logic(self):
         """This method only contains the logic for clearing the password."""
         self.settings["lock_password_b64"] = ""
-        self.lock_on_start_var.set(False)
+        self.settings["lock_on_start"] = False
+        
+        # If the settings page has been created, update its UI variable
+        if hasattr(self, 'lock_on_start_var'):
+            self.lock_on_start_var.set(False)
+            
         self.save_settings()
+        
         if hasattr(self, 'clear_password_btn'):
             self.clear_password_btn.config(state=tk.DISABLED)
         self.log("锁定密码已清除。")
 
-    # BUGFIX: Public function for settings page, now contains the confirmation.
     def clear_lock_password(self):
         """Called by the button on the settings page."""
         if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。", parent=self.root):
@@ -1174,7 +1176,6 @@ class TimedBroadcastApp:
         for i in selection: self.tasks[self.task_tree.index(i)]['status'] = status
         if count > 0: self.update_task_list(); self.save_tasks(); self.log(f"已{status} {count} 个节目")
     
-    # NEW: 新增按类型禁用节目的方法
     def _set_tasks_status_by_type(self, task_type, status):
         """根据任务类型 'audio' 或 'voice' 设置状态"""
         if not self.tasks: return
