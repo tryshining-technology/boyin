@@ -133,7 +133,6 @@ class TimedBroadcastApp:
         self.switch_page("定时广播")
 
     def switch_page(self, page_name):
-        # 【安全修复】锁定后不允许切换到设置页
         if self.is_locked:
             self.log("界面已锁定，请先解锁。")
             return
@@ -174,6 +173,11 @@ class TimedBroadcastApp:
         
         self.top_right_btn_frame = tk.Frame(top_frame, bg='white')
         self.top_right_btn_frame.pack(side=tk.RIGHT)
+
+        # 【新功能】添加“添加节目”按钮
+        add_btn = tk.Button(self.top_right_btn_frame, text="添加节目", command=self.add_task, bg='#3498DB', fg='white',
+                              font=('Microsoft YaHei', 9), bd=0, padx=12, pady=5, cursor='hand2')
+        add_btn.pack(side=tk.LEFT, padx=3)
         
         self.lock_button = tk.Button(self.top_right_btn_frame, text="锁定", command=self.toggle_lock_state, bg='#E74C3C', fg='white',
                                      font=('Microsoft YaHei', 9), bd=0, padx=12, pady=5, cursor='hand2')
@@ -470,7 +474,6 @@ class TimedBroadcastApp:
 
     def _set_widget_state_recursively(self, parent_widget, state):
         for child in parent_widget.winfo_children():
-            # 【安全修复】锁定后，不再对设置按钮做特殊处理，使其一同被禁用
             if child == self.lock_button:
                 continue
             
@@ -604,7 +607,7 @@ class TimedBroadcastApp:
         def select_single_audio():
             filename = filedialog.askopenfilename(title="选择音频文件", initialdir=AUDIO_FOLDER, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")])
             if filename: audio_single_entry.delete(0, tk.END); audio_single_entry.insert(0, filename)
-        tk.Button(audio_single_frame, text="选取...", command=select_single_audio, bg='#D0D0D0', font=font_spec, bd=1, padx=15, pady=3).pack(side=tk.LEFT, padx=5)
+        tk.Button(audio_single_frame, text="选取...", command=select_single_audio, bg='#D0D0D0', font=font_spec, bd=1, padx=18, pady=3).pack(side=tk.LEFT, padx=5)
         tk.Label(content_frame, text="音频文件夹", font=font_spec, bg='#E8E8E8').grid(row=2, column=0, sticky='e', padx=5, pady=5)
         audio_folder_frame = tk.Frame(content_frame, bg='#E8E8E8')
         audio_folder_frame.grid(row=2, column=1, columnspan=3, sticky='ew', padx=5, pady=5)
@@ -614,7 +617,7 @@ class TimedBroadcastApp:
         def select_folder():
             foldername = filedialog.askdirectory(title="选择音频文件夹", initialdir=AUDIO_FOLDER)
             if foldername: audio_folder_entry.delete(0, tk.END); audio_folder_entry.insert(0, foldername)
-        tk.Button(audio_folder_frame, text="选取...", command=select_folder, bg='#D0D0D0', font=font_spec, bd=1, padx=15, pady=3).pack(side=tk.LEFT, padx=5)
+        tk.Button(audio_folder_frame, text="选取...", command=select_folder, bg='#D0D0D0', font=font_spec, bd=1, padx=18, pady=3).pack(side=tk.LEFT, padx=5)
         play_order_frame = tk.Frame(content_frame, bg='#E8E8E8')
         play_order_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=5)
         play_order_var = tk.StringVar(value="sequential")
@@ -632,7 +635,7 @@ class TimedBroadcastApp:
         start_time_entry = tk.Entry(time_frame, font=font_spec, width=50)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
         tk.Label(time_frame, text="《可多个,用英文逗号,隔开》", font=font_spec, bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
-        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=12, pady=2).grid(row=0, column=3, padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=15, pady=2).grid(row=0, column=3, padx=5)
         interval_var = tk.StringVar(value="first")
         interval_frame1 = tk.Frame(time_frame, bg='#E8E8E8')
         interval_frame1.grid(row=1, column=1, columnspan=2, sticky='w', padx=5, pady=5)
@@ -650,7 +653,7 @@ class TimedBroadcastApp:
         tk.Label(time_frame, text="周几/几号:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='e', padx=5, pady=8)
         weekday_entry = tk.Entry(time_frame, font=font_spec, width=50)
         weekday_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=8)
-        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=15, pady=3).grid(row=3, column=3, padx=5)
+        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=18, pady=3).grid(row=3, column=3, padx=5)
         tk.Label(time_frame, text="日期范围:", font=font_spec, bg='#E8E8E8').grid(row=4, column=0, sticky='e', padx=5, pady=8)
         date_range_entry = tk.Entry(time_frame, font=font_spec, width=50)
         date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=8)
@@ -769,18 +772,18 @@ class TimedBroadcastApp:
         start_time_entry = tk.Entry(time_frame, font=font_spec, width=50)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
         tk.Label(time_frame, text="《可多个,用英文逗号,隔开》", font=font_spec, bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
-        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=12, pady=2).grid(row=0, column=3, padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=15, pady=2).grid(row=0, column=3, padx=5)
         tk.Label(time_frame, text="播 n 遍:", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=5)
         repeat_entry = tk.Entry(time_frame, font=font_spec, width=12)
         repeat_entry.grid(row=1, column=1, sticky='w', padx=5, pady=5)
         tk.Label(time_frame, text="周几/几号:", font=font_spec, bg='#E8E8E8').grid(row=2, column=0, sticky='e', padx=5, pady=5)
         weekday_entry = tk.Entry(time_frame, font=font_spec, width=50)
         weekday_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=5)
-        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=12, pady=2).grid(row=2, column=3, padx=5)
+        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=18, pady=2).grid(row=2, column=3, padx=5)
         tk.Label(time_frame, text="日期范围:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='e', padx=5, pady=5)
         date_range_entry = tk.Entry(time_frame, font=font_spec, width=50)
         date_range_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=5)
-        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=12, pady=2).grid(row=3, column=3, padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=15, pady=2).grid(row=3, column=3, padx=5)
         other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=15, pady=15)
         other_frame.grid(row=2, column=0, sticky='ew', pady=10)
         delay_var = tk.StringVar(value="delay")
@@ -1104,13 +1107,11 @@ class TimedBroadcastApp:
         self.task_tree.delete(*self.task_tree.get_children())
         for task in self.tasks:
             content = task.get('content', '')
-            # 【显示优化】修复语音节目文字换行问题
             if task.get('type') == 'audio':
                 content_preview = os.path.basename(content)
             else:
-                clean_content = content.replace('\n', ' ').replace('\r', ' ')
+                clean_content = content.replace('\n', ' ').replace('\r', '')
                 content_preview = (clean_content[:30] + '...') if len(clean_content) > 30 else clean_content
-
             display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
             self.task_tree.insert('', tk.END, values=(task.get('name', ''), task.get('status', ''), task.get('time', ''), display_mode, content_preview, task.get('volume', ''), task.get('weekday', ''), task.get('date_range', '')))
         if selection:
