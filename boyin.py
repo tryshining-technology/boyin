@@ -81,12 +81,15 @@ class TimedBroadcastApp:
         self.tray_icon = None
         self.is_locked = False
         
-        self.drag_start_item = None # For drag-selection logic
+        self.drag_start_item = None
 
         self.is_playing = threading.Event()
         self.playback_queue = []
         self.queue_lock = threading.Lock()
-        self.cleanup_lock = threading.Lock()
+        
+        # --- NEW: Playback Token Mechanism ---
+        self.playback_lock = threading.Lock()
+        self.current_playback_token = None
         
         self.pages = {}
         self.nav_buttons = {}
@@ -249,7 +252,7 @@ class TimedBroadcastApp:
         
         self.task_tree.bind("<Button-3>", self.show_context_menu)
         self.task_tree.bind("<Double-1>", self.on_double_click_edit)
-        self._enable_drag_selection(self.task_tree) # Enable drag selection
+        self._enable_drag_selection(self.task_tree)
 
         playing_frame = tk.LabelFrame(page_frame, text="正在播：", font=('Microsoft YaHei', 11),
                                      bg='white', fg='#2C5F7C', padx=10, pady=5)
@@ -329,7 +332,7 @@ class TimedBroadcastApp:
         
         self.holiday_tree.bind("<Double-1>", lambda e: self.edit_holiday())
         self.holiday_tree.bind("<Button-3>", self.show_holiday_context_menu)
-        self._enable_drag_selection(self.holiday_tree) # Enable drag selection
+        self._enable_drag_selection(self.holiday_tree)
 
         action_frame = tk.Frame(content_frame, bg='white', padx=10)
         action_frame.pack(side=tk.RIGHT, fill=tk.Y)
@@ -640,7 +643,8 @@ class TimedBroadcastApp:
         context_menu.post(event.x_root, event.y_root)
 
     def _stop_and_cleanup_playback(self):
-        with self.cleanup_lock:
+        with self.playback_lock:
+            self.current_playback_token = None
             if not self.is_playing.is_set():
                 return
             if AUDIO_AVAILABLE:
@@ -1529,6 +1533,11 @@ class TimedBroadcastApp:
 
     def _execute_broadcast(self, task, trigger_time):
         self.is_playing.set()
+        
+        token = time.time()
+        with self.playback_lock:
+            self.current_playback_token = token
+            
         self.update_playing_text(f"[{task['name']}] 正在准备播放...")
         self.status_labels[2].config(text="播放状态: 播放中")
         if trigger_time != "manual_play":
@@ -1538,13 +1547,15 @@ class TimedBroadcastApp:
         
         if task.get('type') == 'audio':
             self.log(f"开始音频任务: {task['name']}")
-            threading.Thread(target=self._play_audio_task, args=(task,), daemon=True).start()
+            threading.Thread(target=self._play_audio_task, args=(task, token), daemon=True).start()
         elif task.get('type') == 'voice':
             self.log(f"开始语音任务: {task['name']} (共 {task.get('repeat', 1)} 遍)")
-            threading.Thread(target=self._play_voice_task, args=(task,), daemon=True).start()
+            threading.Thread(target=self._play_voice_task, args=(task, token), daemon=True).start()
 
-    def _play_audio_task(self, task):
+    def _play_audio_task(self, task, token):
         try:
+            if self.current_playback_token != token: return
+
             interval_type, duration_seconds, repeat_count = task.get('interval_type'), int(task.get('interval_seconds', 0)), int(task.get('interval_first', 1))
             playlist = []
             if task.get('audio_type') == 'single':
@@ -1555,40 +1566,58 @@ class TimedBroadcastApp:
                     all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
                     if task.get('play_order') == 'random': random.shuffle(all_files)
                     playlist = all_files[:repeat_count]
+            
             if not playlist: self.log(f"错误: 音频列表为空，任务 '{task['name']}' 无法播放。"); return
+            
             start_time = time.time()
             for audio_path in playlist:
-                if not self.is_playing.is_set(): break
+                with self.playback_lock:
+                    if self.current_playback_token != token:
+                        self.log(f"任务 '{task['name']}' 被新任务中断，停止循环。")
+                        return
+                
                 self.log(f"正在播放: {os.path.basename(audio_path)}")
                 self.update_playing_text(f"[{task['name']}] 正在播放: {os.path.basename(audio_path)}")
                 pygame.mixer.music.load(audio_path)
                 pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
                 pygame.mixer.music.play()
-                while pygame.mixer.music.get_busy() and self.is_playing.is_set():
-                    if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds: pygame.mixer.music.stop(); self.log(f"已达到 {duration_seconds} 秒播放时长限制。"); break
+
+                while pygame.mixer.music.get_busy():
+                    if self.current_playback_token != token:
+                        pygame.mixer.music.stop()
+                        self.log(f"任务 '{task['name']}' 被新任务中断。")
+                        return
+                    if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds: 
+                        pygame.mixer.music.stop(); self.log(f"已达到 {duration_seconds} 秒播放时长限制。"); break
                     time.sleep(0.1)
+                
                 if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds: break
         except Exception as e: self.log(f"音频播放错误: {e}")
         finally:
-            self._stop_and_cleanup_playback()
-            self.root.after(100, self._process_queue)
+            with self.playback_lock:
+                if self.current_playback_token == token:
+                    self._stop_and_cleanup_playback()
+                    self.root.after(100, self._process_queue)
 
-    def _play_voice_task(self, task):
+    def _play_voice_task(self, task, token):
         try:
-            if not self.is_playing.is_set(): return
+            if self.current_playback_token != token: return
+
             if task.get('prompt', 0) and AUDIO_AVAILABLE:
+                if self.current_playback_token != token: return
                 prompt_file, prompt_path = task.get('prompt_file', ''), os.path.join(PROMPT_FOLDER, task.get('prompt_file', ''))
                 if os.path.exists(prompt_path):
-                    if not self.is_playing.is_set(): return
                     self.log(f"播放提示音: {prompt_file}")
                     sound = pygame.mixer.Sound(prompt_path)
                     sound.set_volume(float(task.get('prompt_volume', 80)) / 100.0)
                     channel = sound.play()
                     if channel:
-                        while channel.get_busy() and self.is_playing.is_set(): time.sleep(0.05)
+                        while channel.get_busy():
+                            if self.current_playback_token != token: return
+                            time.sleep(0.05)
                 else: self.log(f"警告: 提示音文件不存在 - {prompt_path}")
 
-            if not self.is_playing.is_set(): return
+            if self.current_playback_token != token: return
             
             if task.get('bgm', 0) and AUDIO_AVAILABLE:
                 bgm_file, bgm_path = task.get('bgm_file', ''), os.path.join(BGM_FOLDER, task.get('bgm_file', ''))
@@ -1608,17 +1637,31 @@ class TimedBroadcastApp:
             repeat_count = int(task.get('repeat', 1))
 
             for i in range(repeat_count):
-                if not self.is_playing.is_set(): break
+                with self.playback_lock:
+                    if self.current_playback_token != token:
+                        self.log(f"任务 '{task['name']}' 被新任务中断，停止循环。")
+                        return
+                
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
                 channel = speech_sound.play()
                 if channel:
-                    while channel.get_busy() and self.is_playing.is_set(): time.sleep(0.1)
-                if i < repeat_count - 1 and self.is_playing.is_set(): time.sleep(0.5)
+                    while channel.get_busy():
+                        if self.current_playback_token != token:
+                            channel.stop()
+                            self.log(f"任务 '{task['name']}' 被新任务中断。")
+                            return
+                        time.sleep(0.1)
+                
+                if i < repeat_count - 1:
+                    if self.current_playback_token != token: return
+                    time.sleep(0.5)
 
         except Exception as e: self.log(f"语音任务播放错误: {e}")
         finally:
-            self._stop_and_cleanup_playback()
-            self.root.after(100, self._process_queue)
+            with self.playback_lock:
+                if self.current_playback_token == token:
+                    self._stop_and_cleanup_playback()
+                    self.root.after(100, self._process_queue)
     
     def log(self, message): self.root.after(0, lambda: self._log_threadsafe(message))
     def _log_threadsafe(self, message):
@@ -1789,8 +1832,6 @@ class TimedBroadcastApp:
         
         def on_press(event):
             self.drag_start_item = tree.identify_row(event.y)
-            if self.drag_start_item:
-                tree.selection_set(self.drag_start_item)
 
         def on_drag(event):
             if not self.drag_start_item:
