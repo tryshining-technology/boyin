@@ -327,28 +327,32 @@ class TimedBroadcastApp:
         self.holiday_tree.bind("<Double-1>", lambda e: self.edit_holiday())
         self.holiday_tree.bind("<Button-3>", self.show_holiday_context_menu)
 
-        # --- Action buttons on the right ---
         action_frame = tk.Frame(content_frame, bg='white', padx=10)
         action_frame.pack(side=tk.RIGHT, fill=tk.Y)
 
         btn_font = ('Microsoft YaHei', 11)
-        btn_width = 12
+        btn_width = 10 
         
-        tk.Button(action_frame, text="添加", command=self.add_holiday, font=btn_font, width=btn_width, pady=5).pack(pady=5)
-        tk.Button(action_frame, text="修改", command=self.edit_holiday, font=btn_font, width=btn_width, pady=5).pack(pady=5)
-        tk.Button(action_frame, text="删除", command=self.delete_holiday, font=btn_font, width=btn_width, pady=5).pack(pady=5)
-        
-        tk.Frame(action_frame, height=20, bg='white').pack() # Spacer
+        buttons_config = [
+            ("添加", self.add_holiday),
+            ("修改", self.edit_holiday),
+            ("删除", self.delete_holiday),
+            (None, None), # Spacer
+            ("全部启用", self.enable_all_holidays),
+            ("全部禁用", self.disable_all_holidays),
+            (None, None), # Spacer
+            ("导入节日", self.import_holidays),
+            ("导出节日", self.export_holidays),
+            ("清空节日", self.clear_all_holidays),
+        ]
 
-        tk.Button(action_frame, text="全部启用", command=self.enable_all_holidays, font=btn_font, width=btn_width, pady=5).pack(pady=5)
-        tk.Button(action_frame, text="全部禁用", command=self.disable_all_holidays, font=btn_font, width=btn_width, pady=5).pack(pady=5)
+        for text, cmd in buttons_config:
+            if text is None:
+                tk.Frame(action_frame, height=20, bg='white').pack()
+                continue
+            
+            tk.Button(action_frame, text=text, command=cmd, font=btn_font, width=btn_width, pady=5).pack(pady=5)
 
-        tk.Frame(action_frame, height=20, bg='white').pack() # Spacer
-
-        tk.Button(action_frame, text="导入节日", command=self.import_holidays, font=btn_font, width=btn_width, pady=5).pack(pady=5)
-        tk.Button(action_frame, text="导出节日", command=self.export_holidays, font=btn_font, width=btn_width, pady=5).pack(pady=5)
-        tk.Button(action_frame, text="清空节日", command=self.clear_all_holidays, font=btn_font, width=btn_width, pady=5, bg='#FFDDDD').pack(pady=5)
-        
         self.update_holiday_list()
         return page_frame
 
@@ -1183,13 +1187,60 @@ class TimedBroadcastApp:
 
     def set_uniform_volume(self):
         if not self.tasks: return
-        volume = simpledialog.askinteger("统一音量", "请输入统一音量值 (0-100):",
-                                         parent=self.root, minvalue=0, maxvalue=100)
+        volume = self._create_custom_input_dialog(
+            title="统一音量",
+            prompt="请输入统一音量值 (0-100):",
+            minvalue=0,
+            maxvalue=100
+        )
         if volume is not None:
             for task in self.tasks: task['volume'] = str(volume)
             self.update_task_list(); self.save_tasks()
             self.log(f"已将全部节目音量统一设置为 {volume}。")
-            
+    
+    def _create_custom_input_dialog(self, title, prompt, minvalue=None, maxvalue=None):
+        """Creates a custom, localized integer input dialog."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title(title)
+        dialog.geometry("350x150")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        self.center_window(dialog, 350, 150)
+
+        result = [None]
+        
+        tk.Label(dialog, text=prompt, font=('Microsoft YaHei', 11)).pack(pady=10)
+        entry = tk.Entry(dialog, font=('Microsoft YaHei', 11), width=15, justify='center')
+        entry.pack(pady=5)
+        entry.focus_set()
+
+        def on_confirm():
+            try:
+                value = int(entry.get())
+                if (minvalue is not None and value < minvalue) or \
+                   (maxvalue is not None and value > maxvalue):
+                    messagebox.showerror("输入错误", f"请输入一个介于 {minvalue} 和 {maxvalue} 之间的整数。", parent=dialog)
+                    return
+                result[0] = value
+                dialog.destroy()
+            except ValueError:
+                messagebox.showerror("输入错误", "请输入一个有效的整数。", parent=dialog)
+
+        def on_cancel():
+            dialog.destroy()
+
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(pady=15)
+        
+        tk.Button(btn_frame, text="确定", command=on_confirm, width=8).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="取消", command=on_cancel, width=8).pack(side=tk.LEFT, padx=10)
+        
+        dialog.bind('<Return>', lambda event: on_confirm())
+        
+        self.root.wait_window(dialog)
+        return result[0]
+
     def clear_all_tasks(self):
         if not self.tasks: return
         if messagebox.askyesno("严重警告", "您确定要清空所有节目吗？\n此操作不可恢复！"):
