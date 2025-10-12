@@ -1,4 +1,4 @@
-mport tkinter as tk
+import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog, simpledialog
 import json
 import threading
