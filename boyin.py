@@ -325,20 +325,28 @@ class TimedBroadcastApp:
         self.holiday_tree.configure(yscrollcommand=scrollbar.set)
         
         self.holiday_tree.bind("<Double-1>", lambda e: self.edit_holiday())
+        self.holiday_tree.bind("<Button-3>", self.show_holiday_context_menu)
 
         # --- Action buttons on the right ---
         action_frame = tk.Frame(content_frame, bg='white', padx=10)
         action_frame.pack(side=tk.RIGHT, fill=tk.Y)
 
         btn_font = ('Microsoft YaHei', 11)
-        tk.Button(action_frame, text="添加", command=self.add_holiday, font=btn_font, width=10, pady=5).pack(pady=5)
-        tk.Button(action_frame, text="修改", command=self.edit_holiday, font=btn_font, width=10, pady=5).pack(pady=5)
-        tk.Button(action_frame, text="删除", command=self.delete_holiday, font=btn_font, width=10, pady=5).pack(pady=5)
+        btn_width = 12
+        
+        tk.Button(action_frame, text="添加", command=self.add_holiday, font=btn_font, width=btn_width, pady=5).pack(pady=5)
+        tk.Button(action_frame, text="修改", command=self.edit_holiday, font=btn_font, width=btn_width, pady=5).pack(pady=5)
+        tk.Button(action_frame, text="删除", command=self.delete_holiday, font=btn_font, width=btn_width, pady=5).pack(pady=5)
         
         tk.Frame(action_frame, height=20, bg='white').pack() # Spacer
 
-        tk.Button(action_frame, text="启用选中", command=lambda: self._set_holiday_status('启用'), font=btn_font, width=10, pady=5).pack(pady=5)
-        tk.Button(action_frame, text="禁用选中", command=lambda: self._set_holiday_status('禁用'), font=btn_font, width=10, pady=5).pack(pady=5)
+        tk.Button(action_frame, text="全部启用", command=self.enable_all_holidays, font=btn_font, width=btn_width, pady=5).pack(pady=5)
+        tk.Button(action_frame, text="全部禁用", command=self.disable_all_holidays, font=btn_font, width=btn_width, pady=5).pack(pady=5)
+
+        tk.Frame(action_frame, height=20, bg='white').pack() # Spacer
+
+        tk.Button(action_frame, text="导入节日", command=self.import_holidays, font=btn_font, width=btn_width, pady=5).pack(pady=5)
+        tk.Button(action_frame, text="导出节日", command=self.export_holidays, font=btn_font, width=btn_width, pady=5).pack(pady=5)
         
         self.update_holiday_list()
         return page_frame
@@ -526,9 +534,10 @@ class TimedBroadcastApp:
                 messagebox.showerror("错误", "密码不正确！无法清除。", parent=dialog)
                 return
             
-            # The confirmation is now handled within the main method
-            # We call it, and if it succeeds, we proceed.
+            # Call the main method, which handles confirmation and logic
             password_was_cleared = self.clear_lock_password()
+            
+            # If the user confirmed and password was cleared, close the dialog and unlock
             if password_was_cleared:
                 dialog.destroy()
                 self._apply_unlock()
@@ -561,28 +570,23 @@ class TimedBroadcastApp:
 
     def _set_ui_lock_state(self, state):
         self._set_widget_state_recursively(self.nav_frame, state)
-        # Lock all children of top_frame except top_right_btn_frame
         for page in self.pages.values():
              if page and page.winfo_exists():
                 self._set_widget_state_recursively(page, state)
     
     def _set_widget_state_recursively(self, parent_widget, state):
         for child in parent_widget.winfo_children():
-            # Special case for the lock button itself, which should always be active
             if child == self.lock_button:
                 continue
             
             try:
-                # ttk widgets use a different state mechanism
                 if isinstance(child, (ttk.Widget, ttk.Treeview)):
                     child.state(['disabled'] if state == tk.DISABLED else ['!disabled'])
                 else:
                     child.config(state=state)
             except tk.TclError:
-                # This widget might not have a 'state' option (e.g., a Frame)
                 pass
             
-            # Recurse into child widgets
             if child.winfo_children():
                 self._set_widget_state_recursively(child, state)
     
@@ -1409,7 +1413,6 @@ class TimedBroadcastApp:
                 if start_dt <= check_time <= end_dt:
                     return True
             except (ValueError, KeyError):
-                # Log error for malformed holiday entry
                 self.log(f"错误：节假日 '{holiday.get('name')}' 日期格式无效，已跳过。")
                 continue
         return False
@@ -1418,7 +1421,6 @@ class TimedBroadcastApp:
         current_date_str = now.strftime("%Y-%m-%d")
         current_time_str = now.strftime("%H:%M:%S")
 
-        # First, check if we are in a holiday period. If so, scheduled tasks are skipped.
         is_holiday_now = self._is_in_holiday(now)
 
         for task in self.tasks:
@@ -1434,10 +1436,9 @@ class TimedBroadcastApp:
             for trigger_time in [t.strip() for t in task.get('time', '').split(',')]:
                 if trigger_time == current_time_str and task.get('last_run', {}).get(trigger_time) != current_date_str:
                     
-                    # Holiday check happens here, before queueing the task
                     if is_holiday_now:
                         self.log(f"任务 '{task['name']}' 因处于节假日期间而被跳过。")
-                        continue # Skip to the next trigger time
+                        continue 
 
                     if task.get('delay') == 'ontime':
                         self.log(f"准时任务 '{task['name']}' 已到时间，执行高优先级中断。")
@@ -1748,7 +1749,7 @@ class TimedBroadcastApp:
             with open(HOLIDAY_FILE, 'r', encoding='utf-8') as f:
                 self.holidays = json.load(f)
             self.log(f"已加载 {len(self.holidays)} 个节假日设置")
-            if hasattr(self, 'holiday_tree'): # if page is already created
+            if hasattr(self, 'holiday_tree'): 
                 self.update_holiday_list()
         except Exception as e:
             self.log(f"加载节假日失败: {e}")
@@ -1756,6 +1757,7 @@ class TimedBroadcastApp:
 
     def update_holiday_list(self):
         if not hasattr(self, 'holiday_tree'): return
+        selection = self.holiday_tree.selection()
         self.holiday_tree.delete(*self.holiday_tree.get_children())
         for holiday in self.holidays:
             self.holiday_tree.insert('', tk.END, values=(
@@ -1764,6 +1766,11 @@ class TimedBroadcastApp:
                 holiday.get('start_datetime', ''),
                 holiday.get('end_datetime', '')
             ))
+        if selection:
+            try:
+                self.holiday_tree.selection_set(selection)
+            except tk.TclError:
+                pass
 
     def add_holiday(self):
         self.open_holiday_dialog()
@@ -1893,6 +1900,99 @@ class TimedBroadcastApp:
         tk.Button(button_frame, text="保存", command=save, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
         tk.Button(button_frame, text="取消", command=dialog.destroy, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
 
+    def show_holiday_context_menu(self, event):
+        if self.is_locked: return
+        iid = self.holiday_tree.identify_row(event.y)
+        if not iid: return
+
+        context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 11))
+        
+        self.holiday_tree.selection_set(iid)
+        
+        context_menu.add_command(label="修改", command=self.edit_holiday)
+        context_menu.add_command(label="删除", command=self.delete_holiday)
+        context_menu.add_separator()
+        context_menu.add_command(label="置顶", command=self.move_holiday_to_top)
+        context_menu.add_command(label="上移", command=lambda: self.move_holiday(-1))
+        context_menu.add_command(label="下移", command=lambda: self.move_holiday(1))
+        context_menu.add_command(label="置末", command=self.move_holiday_to_bottom)
+        context_menu.add_separator()
+        context_menu.add_command(label="启用", command=lambda: self._set_holiday_status('启用'))
+        context_menu.add_command(label="禁用", command=lambda: self._set_holiday_status('禁用'))
+        
+        context_menu.post(event.x_root, event.y_root)
+
+    def move_holiday(self, direction):
+        selection = self.holiday_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.holiday_tree.index(selection[0])
+        new_index = index + direction
+        if 0 <= new_index < len(self.holidays):
+            item = self.holidays.pop(index)
+            self.holidays.insert(new_index, item)
+            self.update_holiday_list(); self.save_holidays()
+            new_selection_id = self.holiday_tree.get_children()[new_index]
+            self.holiday_tree.selection_set(new_selection_id)
+            self.holiday_tree.focus(new_selection_id)
+
+    def move_holiday_to_top(self):
+        selection = self.holiday_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.holiday_tree.index(selection[0])
+        if index > 0:
+            item = self.holidays.pop(index)
+            self.holidays.insert(0, item)
+            self.update_holiday_list(); self.save_holidays()
+            new_selection_id = self.holiday_tree.get_children()[0]
+            self.holiday_tree.selection_set(new_selection_id)
+            self.holiday_tree.focus(new_selection_id)
+
+    def move_holiday_to_bottom(self):
+        selection = self.holiday_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.holiday_tree.index(selection[0])
+        if index < len(self.holidays) - 1:
+            item = self.holidays.pop(index)
+            self.holidays.append(item)
+            self.update_holiday_list(); self.save_holidays()
+            new_selection_id = self.holiday_tree.get_children()[-1]
+            self.holiday_tree.selection_set(new_selection_id)
+            self.holiday_tree.focus(new_selection_id)
+
+    def enable_all_holidays(self):
+        if not self.holidays: return
+        for holiday in self.holidays: holiday['status'] = '启用'
+        self.update_holiday_list(); self.save_holidays(); self.log("已启用全部节假日。")
+
+    def disable_all_holidays(self):
+        if not self.holidays: return
+        for holiday in self.holidays: holiday['status'] = '禁用'
+        self.update_holiday_list(); self.save_holidays(); self.log("已禁用全部节假日。")
+    
+    def import_holidays(self):
+        filename = filedialog.askopenfilename(title="选择导入节假日文件", filetypes=[("JSON文件", "*.json")])
+        if filename:
+            try:
+                with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
+                self.holidays.extend(imported)
+                self.update_holiday_list(); self.save_holidays()
+                self.log(f"已从 {os.path.basename(filename)} 导入 {len(imported)} 个节假日")
+            except Exception as e:
+                messagebox.showerror("错误", f"导入失败: {e}")
+
+    def export_holidays(self):
+        if not self.holidays:
+            messagebox.showwarning("警告", "没有节假日可以导出")
+            return
+        filename = filedialog.asksaveasfilename(title="导出节假日到...", defaultextension=".json",
+                                              initialfile="holidays_backup.json", filetypes=[("JSON文件", "*.json")])
+        if filename:
+            try:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(self.holidays, f, ensure_ascii=False, indent=2)
+                self.log(f"已导出 {len(self.holidays)} 个节假日到 {os.path.basename(filename)}")
+            except Exception as e:
+                messagebox.showerror("错误", f"导出失败: {e}")
 
 def main():
     root = tk.Tk()
