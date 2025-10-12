@@ -11,6 +11,15 @@ import getpass
 import base64
 import queue
 
+# BUGFIX: 导入 winreg 模块用于操作注册表
+try:
+    import winreg
+except ImportError:
+    # 如果不是Windows系统，提供一个空实现，使程序可以运行但密码功能失效
+    print("警告: winreg 模块未找到，密码持久化功能将不可用。")
+    winreg = None
+
+
 # 尝试导入所需库
 TRAY_AVAILABLE = False
 try:
@@ -62,6 +71,9 @@ AUDIO_FOLDER = os.path.join(application_path, "音频文件")
 BGM_FOLDER = os.path.join(application_path, "文稿背景")
 ICON_FILE = resource_path("icon.ico")
 
+# NEW: 定义注册表路径
+REGISTRY_KEY_PATH = r"Software\TimedBroadcastApp"
+
 class TimedBroadcastApp:
     def __init__(self, root):
         self.root = root
@@ -82,6 +94,9 @@ class TimedBroadcastApp:
         self.tray_icon = None
         self.is_locked = False
         
+        # NEW: 用于存储从注册表加载的密码
+        self.lock_password_b64 = ""
+        
         self.drag_start_item = None
         
         self.playback_command_queue = queue.Queue()
@@ -92,6 +107,7 @@ class TimedBroadcastApp:
 
         self.create_folder_structure()
         self.load_settings()
+        self.load_lock_password() # NEW: 从注册表加载密码
         self.create_widgets()
         self.load_tasks()
         self.load_holidays()
@@ -100,11 +116,59 @@ class TimedBroadcastApp:
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
         self.start_tray_icon_thread()
         
-        if self.settings.get("lock_on_start", False) and self.settings.get("lock_password_b64", ""):
+        if self.settings.get("lock_on_start", False) and self.lock_password_b64:
             self.root.after(100, self.perform_initial_lock)
 
         if self.settings.get("start_minimized", False):
             self.root.after(100, self.hide_to_tray)
+
+    # --- 新增：注册表操作方法 ---
+    def _save_password_to_registry(self, password_b64):
+        if not winreg: return False
+        try:
+            # 创建或打开主键
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH)
+            # 设置值
+            winreg.SetValueEx(key, "LockPasswordB64", 0, winreg.REG_SZ, password_b64)
+            winreg.CloseKey(key)
+            self.log("密码已安全存储。")
+            return True
+        except Exception as e:
+            self.log(f"错误: 无法将密码保存到注册表 - {e}")
+            return False
+
+    def _load_password_from_registry(self):
+        if not winreg: return ""
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_READ)
+            password_b64, _ = winreg.GetValueEx(key, "LockPasswordB64")
+            winreg.CloseKey(key)
+            return password_b64
+        except FileNotFoundError:
+            return "" # 键或值不存在，返回空
+        except Exception as e:
+            self.log(f"错误: 无法从注册表加载密码 - {e}")
+            return ""
+
+    def _clear_password_from_registry(self):
+        if not winreg: return False
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_WRITE)
+            winreg.DeleteValue(key, "LockPasswordB64")
+            winreg.CloseKey(key)
+            self.log("安全存储的密码已被清除。")
+            return True
+        except FileNotFoundError:
+            return True # 值本就不存在，也算成功
+        except Exception as e:
+            self.log(f"错误: 无法从注册表清除密码 - {e}")
+            return False
+            
+    def load_lock_password(self):
+        """在初始化时从注册表加载密码"""
+        self.lock_password_b64 = self._load_password_from_registry()
+    
+    # --------------------------------
 
     def create_folder_structure(self):
         """创建所有必要的文件夹"""
@@ -394,7 +458,7 @@ class TimedBroadcastApp:
 
         self.clear_password_btn = tk.Button(general_frame, text="清除锁定密码", font=('Microsoft YaHei', 11), command=self.clear_lock_password)
         self.clear_password_btn.pack(pady=10)
-        if not self.settings.get("lock_password_b64"):
+        if not self.lock_password_b64:
             self.clear_password_btn.config(state=tk.DISABLED)
 
         power_frame = tk.LabelFrame(settings_frame, text="电源管理", font=('Microsoft YaHei', 12, 'bold'),
@@ -452,8 +516,7 @@ class TimedBroadcastApp:
         if self.is_locked:
             self._prompt_for_password_unlock()
         else:
-            password_b64 = self.settings.get("lock_password_b64", "")
-            if not password_b64:
+            if not self.lock_password_b64:
                 self._prompt_for_password_set()
             else:
                 self._apply_lock()
@@ -499,15 +562,17 @@ class TimedBroadcastApp:
             if p1 != p2: messagebox.showerror("错误", "两次输入的密码不一致。", parent=dialog); return
             
             encoded_pass = base64.b64encode(p1.encode('utf-8')).decode('utf-8')
-            self.settings["lock_password_b64"] = encoded_pass
-            self.save_settings()
-            
-            if "设置" in self.pages and hasattr(self, 'clear_password_btn'):
-                self.clear_password_btn.config(state=tk.NORMAL)
+            # NEW: 保存到注册表
+            if self._save_password_to_registry(encoded_pass):
+                self.lock_password_b64 = encoded_pass
+                if "设置" in self.pages and hasattr(self, 'clear_password_btn'):
+                    self.clear_password_btn.config(state=tk.NORMAL)
+                messagebox.showinfo("成功", "密码设置成功，界面即将锁定。", parent=dialog)
+                dialog.destroy()
+                self._apply_lock()
+            else:
+                messagebox.showerror("错误", "无法保存密码，请检查程序权限。", parent=dialog)
 
-            messagebox.showinfo("成功", "密码设置成功，界面即将锁定。", parent=dialog)
-            dialog.destroy()
-            self._apply_lock()
 
         btn_frame = tk.Frame(dialog); btn_frame.pack(pady=20)
         tk.Button(btn_frame, text="确定", command=confirm, font=('Microsoft YaHei', 11)).pack(side=tk.LEFT, padx=10)
@@ -529,7 +594,7 @@ class TimedBroadcastApp:
         def is_password_correct():
             entered_pass = pass_entry.get()
             encoded_entered_pass = base64.b64encode(entered_pass.encode('utf-8')).decode('utf-8')
-            return encoded_entered_pass == self.settings.get("lock_password_b64")
+            return encoded_entered_pass == self.lock_password_b64
 
         def confirm():
             if is_password_correct():
@@ -538,21 +603,15 @@ class TimedBroadcastApp:
             else:
                 messagebox.showerror("错误", "密码不正确！", parent=dialog)
         
-        # BUGFIX: This is the final, robust workflow for clearing the password.
+        # BUGFIX: Final robust workflow for clearing the password.
         def clear_password_action():
             if not is_password_correct():
                 messagebox.showerror("错误", "密码不正确！无法清除。", parent=dialog)
                 return
             
             if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。", parent=dialog):
-                # Step 1: Run the logic-only function.
                 self._perform_password_clear_logic()
-                
-                # Step 2: Destroy this password dialog. This releases the "grab".
                 dialog.destroy()
-                
-                # Step 3: Schedule the UI unlock and final message using root.after().
-                # This ensures the UI updates happen cleanly after the dialog is gone.
                 self.root.after(50, self._apply_unlock)
                 self.root.after(100, lambda: messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root))
 
@@ -562,21 +621,20 @@ class TimedBroadcastApp:
         tk.Button(btn_frame, text="取消", command=dialog.destroy, font=('Microsoft YaHei', 11)).pack(side=tk.LEFT, padx=5)
         dialog.bind('<Return>', lambda event: confirm())
 
-    # BUGFIX: Logic-only function for clearing password made more robust.
     def _perform_password_clear_logic(self):
-        """This method only contains the logic for clearing the password."""
-        self.settings["lock_password_b64"] = ""
-        self.settings["lock_on_start"] = False
-        
-        # If the settings page has been created, update its UI variable
-        if hasattr(self, 'lock_on_start_var'):
-            self.lock_on_start_var.set(False)
+        """Logic for clearing the password from registry and memory."""
+        if self._clear_password_from_registry():
+            self.lock_password_b64 = ""
+            self.settings["lock_on_start"] = False
             
-        self.save_settings()
-        
-        if hasattr(self, 'clear_password_btn'):
-            self.clear_password_btn.config(state=tk.DISABLED)
-        self.log("锁定密码已清除。")
+            if hasattr(self, 'lock_on_start_var'):
+                self.lock_on_start_var.set(False)
+            
+            self.save_settings()
+            
+            if hasattr(self, 'clear_password_btn'):
+                self.clear_password_btn.config(state=tk.DISABLED)
+            self.log("锁定密码已清除。")
 
     def clear_lock_password(self):
         """Called by the button on the settings page."""
@@ -585,7 +643,8 @@ class TimedBroadcastApp:
             messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root)
 
     def _handle_lock_on_start_toggle(self):
-        if not self.settings.get("lock_password_b64"):
+        # NEW: Check self.lock_password_b64 instead of settings
+        if not self.lock_password_b64:
             if self.lock_on_start_var.get():
                 messagebox.showwarning("无法启用", "您还未设置锁定密码。\n\n请返回“定时广播”页面，点击“锁定”按钮来首次设置密码。")
                 self.root.after(50, lambda: self.lock_on_start_var.set(False))
@@ -1546,11 +1605,9 @@ class TimedBroadcastApp:
             self.settings["last_power_action_date"] = current_date_str
             self.save_settings(); os.system(command)
 
-    # BUGFIX: This is the new, simplified, and robust playback worker loop.
     def _playback_worker(self):
         is_playing = False
         while self.running:
-            # Block and wait for a command.
             command, data = self.playback_command_queue.get()
 
             if command == 'PLAY_INTERRUPT':
@@ -1611,7 +1668,6 @@ class TimedBroadcastApp:
                 self.playback_command_queue.put(command_tuple) 
                 return True
             else:
-                # If it's a normal 'PLAY' command, put it back and don't interrupt.
                 self.playback_command_queue.put(command_tuple)
         except queue.Empty:
             return False
@@ -1763,18 +1819,39 @@ class TimedBroadcastApp:
         except Exception as e: self.log(f"加载任务失败: {e}")
 
     def load_settings(self):
-        defaults = {"autostart": False, "start_minimized": False, "lock_on_start": False, "lock_password_b64": "", "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00", "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00", "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00", "last_power_action_date": ""}
+        # BUGFIX: 移除密码相关的默认值，因为它现在由注册表管理
+        defaults = {"autostart": False, "start_minimized": False, "lock_on_start": False, "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00", "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00", "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00", "last_power_action_date": ""}
         if os.path.exists(SETTINGS_FILE):
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as f: self.settings = json.load(f)
+                # 确保所有默认键都存在
                 for key, value in defaults.items(): self.settings.setdefault(key, value)
-            except Exception as e: self.log(f"加载设置失败: {e}, 将使用默认设置。"); self.settings = defaults
-        else: self.settings = defaults
+                # 确保密码字段被移除
+                if "lock_password_b64" in self.settings:
+                    del self.settings["lock_password_b64"]
+            except Exception as e: 
+                self.log(f"加载设置失败: {e}, 将使用默认设置。")
+                self.settings = defaults
+        else:
+            self.settings = defaults
         self.log("系统设置已加载。")
 
     def save_settings(self):
+        # BUGFIX: 不再将密码保存到 settings.json
         if hasattr(self, 'autostart_var'):
-            self.settings.update({"autostart": self.autostart_var.get(), "start_minimized": self.start_minimized_var.get(), "lock_on_start": self.lock_on_start_var.get(), "daily_shutdown_enabled": self.daily_shutdown_enabled_var.get(), "daily_shutdown_time": self.daily_shutdown_time_var.get(), "weekly_shutdown_enabled": self.weekly_shutdown_enabled_var.get(), "weekly_shutdown_days": self.weekly_shutdown_days_var.get(), "weekly_shutdown_time": self.weekly_shutdown_time_var.get(), "weekly_reboot_enabled": self.weekly_reboot_enabled_var.get(), "weekly_reboot_days": self.weekly_reboot_days_var.get(), "weekly_reboot_time": self.weekly_reboot_time_var.get()})
+            self.settings.update({
+                "autostart": self.autostart_var.get(), 
+                "start_minimized": self.start_minimized_var.get(), 
+                "lock_on_start": self.lock_on_start_var.get(), 
+                "daily_shutdown_enabled": self.daily_shutdown_enabled_var.get(), 
+                "daily_shutdown_time": self.daily_shutdown_time_var.get(), 
+                "weekly_shutdown_enabled": self.weekly_shutdown_enabled_var.get(), 
+                "weekly_shutdown_days": self.weekly_shutdown_days_var.get(), 
+                "weekly_shutdown_time": self.weekly_shutdown_time_var.get(), 
+                "weekly_reboot_enabled": self.weekly_reboot_enabled_var.get(), 
+                "weekly_reboot_days": self.weekly_reboot_days_var.get(), 
+                "weekly_reboot_time": self.weekly_reboot_time_var.get()
+            })
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(self.settings, f, ensure_ascii=False, indent=2)
         except Exception as e: self.log(f"保存设置失败: {e}")
