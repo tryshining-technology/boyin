@@ -82,7 +82,7 @@ class TimedBroadcastApp:
         self.is_playing = threading.Event()
         self.playback_queue = []
         self.queue_lock = threading.Lock()
-        self.cleanup_lock = threading.Lock() # 【重构】新增锁，用于确保清理工作的原子性
+        self.cleanup_lock = threading.Lock()
         
         self.pages = {}
         self.nav_buttons = {}
@@ -525,23 +525,15 @@ class TimedBroadcastApp:
         context_menu.add_separator()
         context_menu.add_command(label="停止当前播放", command=self.stop_current_playback)
         context_menu.post(event.x_root, event.y_root)
-    
-    # 【重构】全新的中央清理函数
+
     def _stop_and_cleanup_playback(self):
-        """
-        停止所有音频并重置播放状态。这是唯一负责清理的函数。
-        """
         with self.cleanup_lock:
             if not self.is_playing.is_set():
-                return  # 如果已经停止，则无需操作
-
+                return
             if AUDIO_AVAILABLE:
                 pygame.mixer.music.stop()
                 pygame.mixer.stop()
-            
             self.is_playing.clear()
-            
-            # 使用 after 确保UI更新在主线程中执行
             self.root.after(0, lambda: self.status_labels[2].config(text="播放状态: 待机"))
             self.root.after(0, lambda: self.update_playing_text("等待播放..."))
             self.log("播放已停止。")
@@ -549,24 +541,21 @@ class TimedBroadcastApp:
     def play_now(self):
         selection = self.task_tree.selection()
         if not selection: messagebox.showwarning("提示", "请先选择一个要立即播放的节目。"); return
-        
-        self._stop_and_cleanup_playback() # 【重构】先停止当前所有播放
-        
+        self._stop_and_cleanup_playback()
         with self.queue_lock:
             self.playback_queue.clear()
             index = self.task_tree.index(selection[0])
             task = self.tasks[index]
             self.playback_queue.insert(0, (task, "manual_play"))
             self.log(f"手动触发高优先级播放: {task['name']}")
-        
-        self.root.after(10, self._process_queue) # 稍作延迟以确保状态完全更新
+        self.root.after(10, self._process_queue)
 
     def stop_current_playback(self):
         self.log("手动触发“停止当前播放”...")
         with self.queue_lock:
-            self.playback_queue.clear() # 清空等待队列
+            self.playback_queue.clear()
             self.log("等待播放的队列也已清空。")
-        self._stop_and_cleanup_playback() # 【重构】调用中央清理函数
+        self._stop_and_cleanup_playback()
 
     def add_task(self):
         choice_dialog = tk.Toplevel(self.root)
@@ -1263,11 +1252,11 @@ class TimedBroadcastApp:
                 if trigger_time == current_time_str and task.get('last_run', {}).get(trigger_time) != current_date_str:
                     if task.get('delay') == 'ontime':
                         self.log(f"准时任务 '{task['name']}' 已到时间，执行高优先级中断。")
-                        self._stop_and_cleanup_playback() # 【重构】调用中央清理
+                        self._stop_and_cleanup_playback()
                         with self.queue_lock:
                             self.playback_queue.clear()
                             self.playback_queue.insert(0, (task, trigger_time))
-                        self.root.after(10, self._process_queue) # 立即调度新任务
+                        self.root.after(10, self._process_queue)
                     else:
                         with self.queue_lock: self.playback_queue.append((task, trigger_time))
                         self.log(f"延时任务 '{task['name']}' 已到时间，加入播放队列。")
@@ -1316,20 +1305,81 @@ class TimedBroadcastApp:
 
     def _play_audio_task(self, task):
         try:
-            # ... (rest of the function is unchanged)
+            interval_type, duration_seconds, repeat_count = task.get('interval_type'), int(task.get('interval_seconds', 0)), int(task.get('interval_first', 1))
+            playlist = []
+            if task.get('audio_type') == 'single':
+                if os.path.exists(task['content']): playlist = [task['content']] * repeat_count
+            else:
+                folder_path = task['content']
+                if os.path.isdir(folder_path):
+                    all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
+                    if task.get('play_order') == 'random': random.shuffle(all_files)
+                    playlist = all_files[:repeat_count]
+            if not playlist: self.log(f"错误: 音频列表为空，任务 '{task['name']}' 无法播放。"); return
+            start_time = time.time()
+            for audio_path in playlist:
+                if not self.is_playing.is_set(): break
+                self.log(f"正在播放: {os.path.basename(audio_path)}")
+                self.update_playing_text(f"[{task['name']}] 正在播放: {os.path.basename(audio_path)}")
+                pygame.mixer.music.load(audio_path)
+                pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
+                pygame.mixer.music.play()
+                while pygame.mixer.music.get_busy() and self.is_playing.is_set():
+                    if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds: pygame.mixer.music.stop(); self.log(f"已达到 {duration_seconds} 秒播放时长限制。"); break
+                    time.sleep(0.1)
+                if interval_type == 'seconds' and (time.time() - start_time) > duration_seconds: break
+        except Exception as e: self.log(f"音频播放错误: {e}")
         finally:
-            self._stop_and_cleanup_playback() # 【重构】
-            self.root.after(100, self._process_queue) # 【重构】
+            self._stop_and_cleanup_playback()
+            self.root.after(100, self._process_queue)
 
     def _play_voice_task(self, task):
         try:
-            # ... (rest of the function is unchanged)
-        finally:
-            self._stop_and_cleanup_playback() # 【重构】
-            self.root.after(100, self._process_queue) # 【重构】
-            
-    # 【重构】删除了 on_playback_finished
+            if not self.is_playing.is_set(): return
+            if task.get('prompt', 0) and AUDIO_AVAILABLE:
+                prompt_file, prompt_path = task.get('prompt_file', ''), os.path.join(PROMPT_FOLDER, task.get('prompt_file', ''))
+                if os.path.exists(prompt_path):
+                    if not self.is_playing.is_set(): return
+                    self.log(f"播放提示音: {prompt_file}")
+                    sound = pygame.mixer.Sound(prompt_path)
+                    sound.set_volume(float(task.get('prompt_volume', 80)) / 100.0)
+                    channel = sound.play()
+                    if channel:
+                        while channel.get_busy() and self.is_playing.is_set(): time.sleep(0.05)
+                else: self.log(f"警告: 提示音文件不存在 - {prompt_path}")
 
+            if not self.is_playing.is_set(): return
+            
+            if task.get('bgm', 0) and AUDIO_AVAILABLE:
+                bgm_file, bgm_path = task.get('bgm_file', ''), os.path.join(BGM_FOLDER, task.get('bgm_file', ''))
+                if os.path.exists(bgm_path):
+                    self.log(f"播放背景音乐: {bgm_file}")
+                    pygame.mixer.music.load(bgm_path)
+                    pygame.mixer.music.set_volume(float(task.get('bgm_volume', 40)) / 100.0)
+                    pygame.mixer.music.play(-1)
+                else: self.log(f"警告: 背景音乐文件不存在 - {bgm_path}")
+
+            speech_path = task.get('content', '')
+            if not os.path.exists(speech_path):
+                self.log(f"错误: 语音文件不存在 - {speech_path}"); return
+
+            speech_sound = pygame.mixer.Sound(speech_path)
+            speech_sound.set_volume(float(task.get('volume', 80)) / 100.0)
+            repeat_count = int(task.get('repeat', 1))
+
+            for i in range(repeat_count):
+                if not self.is_playing.is_set(): break
+                self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
+                channel = speech_sound.play()
+                if channel:
+                    while channel.get_busy() and self.is_playing.is_set(): time.sleep(0.1)
+                if i < repeat_count - 1 and self.is_playing.is_set(): time.sleep(0.5)
+
+        except Exception as e: self.log(f"语音任务播放错误: {e}")
+        finally:
+            self._stop_and_cleanup_playback()
+            self.root.after(100, self._process_queue)
+    
     def log(self, message): self.root.after(0, lambda: self._log_threadsafe(message))
     def _log_threadsafe(self, message):
         self.log_text.config(state='normal')
