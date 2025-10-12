@@ -186,10 +186,13 @@ class TimedBroadcastApp:
 
         self.top_right_btn_frame = tk.Frame(top_frame, bg='white')
         self.top_right_btn_frame.pack(side=tk.RIGHT)
-
+        
+        # BUGFIX: 增加两个新按钮
         batch_buttons = [
             ("全部启用", self.enable_all_tasks, '#27AE60'),
             ("全部禁用", self.disable_all_tasks, '#F39C12'),
+            ("禁音频节目", lambda: self._set_tasks_status_by_type('audio', '禁用'), '#E67E22'),
+            ("禁语音节目", lambda: self._set_tasks_status_by_type('voice', '禁用'), '#D35400'),
             ("统一音量", self.set_uniform_volume, '#8E44AD'),
             ("清空节目", self.clear_all_tasks, '#C0392B')
         ]
@@ -1170,7 +1173,28 @@ class TimedBroadcastApp:
         count = sum(1 for i in selection if self.tasks[self.task_tree.index(i)]['status'] != status)
         for i in selection: self.tasks[self.task_tree.index(i)]['status'] = status
         if count > 0: self.update_task_list(); self.save_tasks(); self.log(f"已{status} {count} 个节目")
+    
+    # NEW: 新增按类型禁用节目的方法
+    def _set_tasks_status_by_type(self, task_type, status):
+        """根据任务类型 'audio' 或 'voice' 设置状态"""
+        if not self.tasks: return
         
+        type_name = "音频" if task_type == 'audio' else "语音"
+        status_name = "启用" if status == '启用' else "禁用"
+        
+        count = 0
+        for task in self.tasks:
+            if task.get('type') == task_type and task.get('status') != status:
+                task['status'] = status
+                count += 1
+        
+        if count > 0:
+            self.update_task_list()
+            self.save_tasks()
+            self.log(f"已将 {count} 个{type_name}节目设置为“{status_name}”状态。")
+        else:
+            self.log(f"没有需要状态更新的{type_name}节目。")
+
     def enable_all_tasks(self):
         if not self.tasks: return
         for task in self.tasks: task['status'] = '启用'
