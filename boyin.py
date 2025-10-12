@@ -9,7 +9,7 @@ import random
 import sys
 import getpass
 import base64
-import queue # NEW: For thread-safe command queue
+import queue
 
 # 尝试导入所需库
 TRAY_AVAILABLE = False
@@ -84,15 +84,7 @@ class TimedBroadcastApp:
         
         self.drag_start_item = None
         
-        # NEW: Central playback command queue
         self.playback_command_queue = queue.Queue()
-
-        # REMOVED: Old threading events and locks
-        # self.is_playing = threading.Event()
-        # self.playback_queue = []
-        # self.queue_lock = threading.Lock()
-        # self.playback_lock = threading.Lock()
-        # self.current_playback_token = None
         
         self.pages = {}
         self.nav_buttons = {}
@@ -104,7 +96,7 @@ class TimedBroadcastApp:
         self.load_tasks()
         self.load_holidays()
         
-        self.start_background_threads() # MODIFIED
+        self.start_background_threads()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
         self.start_tray_icon_thread()
         
@@ -549,12 +541,12 @@ class TimedBroadcastApp:
                 messagebox.showerror("错误", "密码不正确！无法清除。", parent=dialog)
                 return
             
-            password_was_cleared = self.clear_lock_password()
+            # BUGFIX: Pass the current dialog as the parent for the confirmation box
+            password_was_cleared = self.clear_lock_password(parent_dialog=dialog)
             
             if password_was_cleared:
                 dialog.destroy()
                 self._apply_unlock()
-                # BUGFIX: Show info message AFTER unlocking and destroying the dialog
                 messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root)
 
         btn_frame = tk.Frame(dialog); btn_frame.pack(pady=10)
@@ -563,15 +555,16 @@ class TimedBroadcastApp:
         tk.Button(btn_frame, text="取消", command=dialog.destroy, font=('Microsoft YaHei', 11)).pack(side=tk.LEFT, padx=5)
         dialog.bind('<Return>', lambda event: confirm())
 
-    def clear_lock_password(self):
-        if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。"):
+    # BUGFIX: Added 'parent_dialog' parameter
+    def clear_lock_password(self, parent_dialog=None):
+        # BUGFIX: Ensure the confirmation dialog is a child of the current dialog
+        if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。", parent=parent_dialog if parent_dialog else self.root):
             self.settings["lock_password_b64"] = ""
             self.lock_on_start_var.set(False)
             self.save_settings()
             if hasattr(self, 'clear_password_btn'):
                 self.clear_password_btn.config(state=tk.DISABLED)
             self.log("锁定密码已清除。")
-            # BUGFIX: Removed showinfo from here to prevent modal dialog nesting
             return True 
         return False 
 
@@ -647,7 +640,6 @@ class TimedBroadcastApp:
         context_menu.add_command(label="停止当前播放", command=self.stop_current_playback)
         context_menu.post(event.x_root, event.y_root)
 
-    # MODIFIED: This function is now only for sending commands to the playback thread
     def play_now(self):
         selection = self.task_tree.selection()
         if not selection: 
@@ -656,14 +648,8 @@ class TimedBroadcastApp:
         index = self.task_tree.index(selection[0])
         task = self.tasks[index]
         self.log(f"手动触发高优先级播放: {task['name']}")
-        # Send STOP first to interrupt current playback, then PLAY
-        self.playback_command_queue.put(('STOP', None))
-        self.playback_command_queue.put(('PLAY', (task, "manual_play")))
+        self.playback_command_queue.put(('PLAY_INTERRUPT', (task, "manual_play")))
 
-    # DEPRECATED: This logic is now part of the command queue
-    # def play_task_immediately(self, task): ...
-
-    # MODIFIED: This function now only sends a STOP command
     def stop_current_playback(self):
         self.log("手动触发“停止当前播放”...")
         self.playback_command_queue.put(('STOP', None))
@@ -824,8 +810,7 @@ class TimedBroadcastApp:
             self.update_task_list(); self.save_tasks(); dialog.destroy()
 
             if play_this_task_now:
-                self.playback_command_queue.put(('STOP', None))
-                self.playback_command_queue.put(('PLAY', (new_task_data, "manual_play")))
+                self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
 
         button_text = "保存修改" if is_edit_mode else "添加"
         tk.Button(button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
@@ -990,8 +975,7 @@ class TimedBroadcastApp:
                 self.update_task_list(); self.save_tasks(); dialog.destroy()
 
                 if play_this_task_now:
-                    self.playback_command_queue.put(('STOP', None))
-                    self.playback_command_queue.put(('PLAY', (new_task_data, "manual_play")))
+                    self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
 
             threading.Thread(target=self._synthesis_worker, args=(text_content, voice_params, output_path, _on_synthesis_complete), daemon=True).start()
 
@@ -1440,14 +1424,10 @@ class TimedBroadcastApp:
         self.status_labels[1].config(text="系统状态: 运行中")
         self.root.after(1000, self.update_status_bar)
 
-    # MODIFIED: Renamed and split into two separate threads
     def start_background_threads(self):
-        # This thread is for checking task schedules and power management
         threading.Thread(target=self._scheduler_worker, daemon=True).start()
-        # This NEW thread is exclusively for handling audio playback
         threading.Thread(target=self._playback_worker, daemon=True).start()
 
-    # MODIFIED: This thread now only schedules tasks, not executes them
     def _scheduler_worker(self):
         while self.running:
             now = datetime.now()
@@ -1475,7 +1455,6 @@ class TimedBroadcastApp:
 
         is_holiday_now = self._is_in_holiday(now)
         
-        # MODIFIED: This is now a list of tasks to be queued
         tasks_to_play = []
 
         for task in self.tasks:
@@ -1500,19 +1479,14 @@ class TimedBroadcastApp:
         if not tasks_to_play:
             return
 
-        # Prioritize 'ontime' tasks
         ontime_tasks = [t for t in tasks_to_play if t[0].get('delay') == 'ontime']
         delay_tasks = [t for t in tasks_to_play if t[0].get('delay') != 'ontime']
 
         if ontime_tasks:
-            # If there's an 'ontime' task, it interrupts everything.
-            # We only play the first 'ontime' task to avoid conflicts.
             task, trigger_time = ontime_tasks[0]
             self.log(f"准时任务 '{task['name']}' 已到时间，执行高优先级中断。")
-            self.playback_command_queue.put(('STOP', None))
-            self.playback_command_queue.put(('PLAY', (task, trigger_time)))
+            self.playback_command_queue.put(('PLAY_INTERRUPT', (task, trigger_time)))
         
-        # Queue all 'delay' tasks. They will play if nothing else is playing.
         for task, trigger_time in delay_tasks:
             self.log(f"延时任务 '{task['name']}' 已到时间，加入播放队列。")
             self.playback_command_queue.put(('PLAY', (task, trigger_time)))
@@ -1536,52 +1510,39 @@ class TimedBroadcastApp:
             self.settings["last_power_action_date"] = current_date_str
             self.save_settings(); os.system(command)
 
-    # --- NEW: SINGLE DEDICATED PLAYBACK WORKER ---
+    # BUGFIX: This is the new, simplified, and robust playback worker loop.
     def _playback_worker(self):
-        """
-        This is the single consumer thread. It waits for commands from the queue
-        and is the ONLY thread that touches pygame.mixer.
-        """
-        current_task_playing = False
-
+        is_playing = False
         while self.running:
-            try:
-                # If a task is playing, don't block. Check for interrupt commands.
-                # If nothing is playing, block until a command arrives.
-                if current_task_playing:
-                    command, data = self.playback_command_queue.get_nowait()
-                else:
-                    command, data = self.playback_command_queue.get() # Blocks here
-            except queue.Empty:
-                # This only happens if a task is playing and there are no new commands
-                time.sleep(0.1)
-                continue
+            # Block and wait for a command.
+            command, data = self.playback_command_queue.get()
 
-            if command == 'PLAY':
-                # If a 'delay' task arrives while another is playing, put it back.
-                task, trigger_time = data
-                if current_task_playing and task.get('delay') != 'ontime':
-                    # Optional: Add logic to not re-queue if it's already there
-                    self.playback_command_queue.put(('PLAY', data))
-                    time.sleep(0.5) # Wait a bit before checking again
-                    continue
-                
-                # --- Start playing the new task ---
-                current_task_playing = True
-                self._execute_broadcast(task, trigger_time)
-                current_task_playing = False # Playback finished
+            if command == 'PLAY_INTERRUPT':
+                # This command clears the queue and plays immediately.
+                is_playing = True
+                while not self.playback_command_queue.empty():
+                    try: self.playback_command_queue.get_nowait()
+                    except queue.Empty: break
+                self._execute_broadcast(data[0], data[1])
+                is_playing = False
+
+            elif command == 'PLAY':
+                # This command only plays if nothing else is currently playing.
+                if not is_playing:
+                    is_playing = True
+                    self._execute_broadcast(data[0], data[1])
+                    is_playing = False
 
             elif command == 'STOP':
-                # This command is handled inside the playback loops by checking the queue.
-                # Here, we just ensure any residual sounds are stopped if somehow a STOP
-                # command is processed between playbacks.
-                if AUDIO_AVAILABLE:
-                    pygame.mixer.music.stop()
-                    pygame.mixer.stop()
-                self.log("播放已停止。")
+                # The STOP command's real power is in the _is_interrupted() check,
+                # which running tasks call. This block is for cleaning up.
+                is_playing = False # Mark as stopped
+                pygame.mixer.music.stop()
+                pygame.mixer.stop()
+                self.log("STOP 命令已处理，所有播放已停止。")
                 self.update_playing_text("等待播放...")
                 self.status_labels[2].config(text="播放状态: 待机")
-                # Clear the rest of the queue
+                # Clear any pending tasks in the queue.
                 while not self.playback_command_queue.empty():
                     try: self.playback_command_queue.get_nowait()
                     except queue.Empty: break
@@ -1591,8 +1552,7 @@ class TimedBroadcastApp:
         self.status_labels[2].config(text="播放状态: 播放中")
         
         if trigger_time != "manual_play":
-            if not isinstance(task.get('last_run'), dict): task['last_run'] = {}
-            task['last_run'][trigger_time] = datetime.now().strftime("%Y-%m-%d")
+            task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
             self.save_tasks()
         
         try:
@@ -1605,25 +1565,25 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"播放任务 '{task['name']}' 时发生严重错误: {e}")
         finally:
-            # Cleanup after any task, successful or not
-            if AUDIO_AVAILABLE:
-                pygame.mixer.music.stop()
-                pygame.mixer.stop()
+            pygame.mixer.music.stop()
+            pygame.mixer.stop()
             self.update_playing_text("等待播放...")
             self.status_labels[2].config(text="播放状态: 待机")
             self.log(f"任务 '{task['name']}' 播放结束。")
 
     def _is_interrupted(self):
-        """Check for a new command in the queue without blocking."""
+        """Checks for an interrupt command without blocking."""
         try:
-            # If there's a command, put it back for the main loop to process and signal an interrupt.
-            command = self.playback_command_queue.get_nowait()
-            self.playback_command_queue.put(command)
-            return True
+            command, _ = self.playback_command_queue.get_nowait()
+            if command in ['STOP', 'PLAY_INTERRUPT']:
+                self.playback_command_queue.put((command, _)) # Put it back for the worker
+                return True
         except queue.Empty:
             return False
+        return False
 
     def _play_audio_task_internal(self, task):
+        # (This function's internal logic remains largely the same, but now relies on _is_interrupted)
         interval_type = task.get('interval_type', 'first')
         duration_seconds = int(task.get('interval_seconds', 0))
         repeat_count = int(task.get('interval_first', 1))
@@ -1659,7 +1619,6 @@ class TimedBroadcastApp:
                 while pygame.mixer.music.get_busy():
                     if self._is_interrupted():
                         pygame.mixer.music.stop()
-                        self.log(f"任务 '{task['name']}' 被新指令中断。")
                         return
                     if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
                         pygame.mixer.music.stop()
@@ -1668,13 +1627,13 @@ class TimedBroadcastApp:
                     time.sleep(0.1)
                 
                 if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
-                    return # Exit after duration is met
+                    return
             except Exception as e:
                 self.log(f"播放音频文件 {os.path.basename(audio_path)} 失败: {e}")
-                continue # Try next file in playlist
+                continue
 
     def _play_voice_task_internal(self, task):
-        # 1. Play prompt tone (if any)
+        # (This function's internal logic remains largely the same, but now relies on _is_interrupted)
         if task.get('prompt', 0) and AUDIO_AVAILABLE:
             if self._is_interrupted(): return
             prompt_file = task.get('prompt_file', '')
@@ -1693,7 +1652,6 @@ class TimedBroadcastApp:
             else:
                 self.log(f"警告: 提示音文件不存在 - {prompt_path}")
 
-        # 2. Start background music (if any)
         if task.get('bgm', 0) and AUDIO_AVAILABLE:
             if self._is_interrupted(): return
             bgm_file = task.get('bgm_file', '')
@@ -1703,13 +1661,12 @@ class TimedBroadcastApp:
                     self.log(f"播放背景音乐: {bgm_file}")
                     pygame.mixer.music.load(bgm_path)
                     pygame.mixer.music.set_volume(float(task.get('bgm_volume', 40)) / 100.0)
-                    pygame.mixer.music.play(-1) # Loop indefinitely
+                    pygame.mixer.music.play(-1)
                 except Exception as e:
                     self.log(f"播放背景音乐失败: {e}")
             else:
                 self.log(f"警告: 背景音乐文件不存在 - {bgm_path}")
 
-        # 3. Play main speech content
         speech_path = task.get('content', '')
         if not os.path.exists(speech_path):
             self.log(f"错误: 语音文件不存在 - {speech_path}")
@@ -1733,7 +1690,6 @@ class TimedBroadcastApp:
                         return
                     time.sleep(0.1)
                 
-                # Pause between repeats, but not after the last one
                 if i < repeat_count - 1:
                     time.sleep(0.5)
         except Exception as e:
@@ -1883,7 +1839,6 @@ class TimedBroadcastApp:
     def quit_app(self, icon=None, item=None):
         if self.tray_icon: self.tray_icon.stop()
         self.running = False
-        # Send a final STOP command to allow the playback worker to gracefully exit its loop
         self.playback_command_queue.put(('STOP', None))
         self.save_tasks()
         self.save_settings()
@@ -1904,8 +1859,6 @@ class TimedBroadcastApp:
             threading.Thread(target=self.tray_icon.run, daemon=True).start()
             self.log("系统托盘图标已启动。")
     
-    # --- UI Enhancement Methods ---
-
     def _enable_drag_selection(self, tree):
         
         def on_press(event):
@@ -1937,8 +1890,6 @@ class TimedBroadcastApp:
         tree.bind("<B1-Motion>", on_drag, True)
         tree.bind("<ButtonRelease-1>", on_release, True)
 
-    # --- HOLIDAY-SPECIFIC METHODS ---
-    
     def save_holidays(self):
         try:
             with open(HOLIDAY_FILE, 'w', encoding='utf-8') as f:
