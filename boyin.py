@@ -11,13 +11,18 @@ import getpass
 import base64
 import queue
 
-# BUGFIX: 导入 winreg 模块用于操作注册表
-try:
-    import winreg
-except ImportError:
-    # 如果不是Windows系统，提供一个空实现，使程序可以运行但密码功能失效
-    print("警告: winreg 模块未找到，密码持久化功能将不可用。")
+# BUGFIX: 导入 winreg 模块，并增加平台兼容性检查
+REGISTRY_AVAILABLE = sys.platform == 'win32'
+if REGISTRY_AVAILABLE:
+    try:
+        import winreg
+    except ImportError:
+        REGISTRY_AVAILABLE = False # 如果在win32上都导入失败，则禁用
+else:
     winreg = None
+
+if not REGISTRY_AVAILABLE:
+    print("警告: 当前非Windows系统或winreg模块不可用，密码持久化功能将禁用。")
 
 
 # 尝试导入所需库
@@ -71,7 +76,7 @@ AUDIO_FOLDER = os.path.join(application_path, "音频文件")
 BGM_FOLDER = os.path.join(application_path, "文稿背景")
 ICON_FILE = resource_path("icon.ico")
 
-# NEW: 定义注册表路径
+# 定义注册表路径
 REGISTRY_KEY_PATH = r"Software\TimedBroadcastApp"
 
 class TimedBroadcastApp:
@@ -94,7 +99,6 @@ class TimedBroadcastApp:
         self.tray_icon = None
         self.is_locked = False
         
-        # NEW: 用于存储从注册表加载的密码
         self.lock_password_b64 = ""
         
         self.drag_start_item = None
@@ -107,7 +111,7 @@ class TimedBroadcastApp:
 
         self.create_folder_structure()
         self.load_settings()
-        self.load_lock_password() # NEW: 从注册表加载密码
+        self.load_lock_password()
         self.create_widgets()
         self.load_tasks()
         self.load_holidays()
@@ -122,13 +126,11 @@ class TimedBroadcastApp:
         if self.settings.get("start_minimized", False):
             self.root.after(100, self.hide_to_tray)
 
-    # --- 新增：注册表操作方法 ---
+    # --- 注册表操作方法 ---
     def _save_password_to_registry(self, password_b64):
-        if not winreg: return False
+        if not REGISTRY_AVAILABLE: return False
         try:
-            # 创建或打开主键
             key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH)
-            # 设置值
             winreg.SetValueEx(key, "LockPasswordB64", 0, winreg.REG_SZ, password_b64)
             winreg.CloseKey(key)
             self.log("密码已安全存储。")
@@ -138,20 +140,20 @@ class TimedBroadcastApp:
             return False
 
     def _load_password_from_registry(self):
-        if not winreg: return ""
+        if not REGISTRY_AVAILABLE: return ""
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_READ)
             password_b64, _ = winreg.GetValueEx(key, "LockPasswordB64")
             winreg.CloseKey(key)
             return password_b64
         except FileNotFoundError:
-            return "" # 键或值不存在，返回空
+            return ""
         except Exception as e:
             self.log(f"错误: 无法从注册表加载密码 - {e}")
             return ""
 
     def _clear_password_from_registry(self):
-        if not winreg: return False
+        if not REGISTRY_AVAILABLE: return False
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_WRITE)
             winreg.DeleteValue(key, "LockPasswordB64")
@@ -159,7 +161,7 @@ class TimedBroadcastApp:
             self.log("安全存储的密码已被清除。")
             return True
         except FileNotFoundError:
-            return True # 值本就不存在，也算成功
+            return True
         except Exception as e:
             self.log(f"错误: 无法从注册表清除密码 - {e}")
             return False
@@ -267,6 +269,9 @@ class TimedBroadcastApp:
         self.lock_button = tk.Button(self.top_right_btn_frame, text="锁定", command=self.toggle_lock_state, bg='#E74C3C', fg='white',
                                      font=font_11, bd=0, padx=12, pady=5, cursor='hand2')
         self.lock_button.pack(side=tk.LEFT, padx=3)
+        # BUGFIX: 禁用非Windows系统上的锁定按钮
+        if not REGISTRY_AVAILABLE:
+            self.lock_button.config(state=tk.DISABLED, text="锁定(Win)")
 
         io_buttons = [("导入节目单", self.import_tasks, '#1ABC9C'), ("导出节目单", self.export_tasks, '#1ABC9C')]
         for text, cmd, color in io_buttons:
@@ -453,12 +458,14 @@ class TimedBroadcastApp:
                        font=('Microsoft YaHei', 11), bg='white', anchor='w',
                        command=self._handle_lock_on_start_toggle)
         self.lock_on_start_cb.pack(side=tk.LEFT)
+        if not REGISTRY_AVAILABLE:
+            self.lock_on_start_cb.config(state=tk.DISABLED)
         
         tk.Label(lock_frame, text="(请先在主界面设置锁定密码)", font=('Microsoft YaHei', 9), bg='white', fg='grey').pack(side=tk.LEFT, padx=5)
 
         self.clear_password_btn = tk.Button(general_frame, text="清除锁定密码", font=('Microsoft YaHei', 11), command=self.clear_lock_password)
         self.clear_password_btn.pack(pady=10)
-        if not self.lock_password_b64:
+        if not self.lock_password_b64 or not REGISTRY_AVAILABLE:
             self.clear_password_btn.config(state=tk.DISABLED)
 
         power_frame = tk.LabelFrame(settings_frame, text="电源管理", font=('Microsoft YaHei', 12, 'bold'),
@@ -562,7 +569,6 @@ class TimedBroadcastApp:
             if p1 != p2: messagebox.showerror("错误", "两次输入的密码不一致。", parent=dialog); return
             
             encoded_pass = base64.b64encode(p1.encode('utf-8')).decode('utf-8')
-            # NEW: 保存到注册表
             if self._save_password_to_registry(encoded_pass):
                 self.lock_password_b64 = encoded_pass
                 if "设置" in self.pages and hasattr(self, 'clear_password_btn'):
@@ -571,8 +577,7 @@ class TimedBroadcastApp:
                 dialog.destroy()
                 self._apply_lock()
             else:
-                messagebox.showerror("错误", "无法保存密码，请检查程序权限。", parent=dialog)
-
+                messagebox.showerror("功能受限", "无法保存密码。\n此功能仅在Windows系统上受支持。", parent=dialog)
 
         btn_frame = tk.Frame(dialog); btn_frame.pack(pady=20)
         tk.Button(btn_frame, text="确定", command=confirm, font=('Microsoft YaHei', 11)).pack(side=tk.LEFT, padx=10)
@@ -603,7 +608,6 @@ class TimedBroadcastApp:
             else:
                 messagebox.showerror("错误", "密码不正确！", parent=dialog)
         
-        # BUGFIX: Final robust workflow for clearing the password.
         def clear_password_action():
             if not is_password_correct():
                 messagebox.showerror("错误", "密码不正确！无法清除。", parent=dialog)
@@ -643,7 +647,6 @@ class TimedBroadcastApp:
             messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root)
 
     def _handle_lock_on_start_toggle(self):
-        # NEW: Check self.lock_password_b64 instead of settings
         if not self.lock_password_b64:
             if self.lock_on_start_var.get():
                 messagebox.showwarning("无法启用", "您还未设置锁定密码。\n\n请返回“定时广播”页面，点击“锁定”按钮来首次设置密码。")
@@ -1819,14 +1822,11 @@ class TimedBroadcastApp:
         except Exception as e: self.log(f"加载任务失败: {e}")
 
     def load_settings(self):
-        # BUGFIX: 移除密码相关的默认值，因为它现在由注册表管理
         defaults = {"autostart": False, "start_minimized": False, "lock_on_start": False, "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00", "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00", "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00", "last_power_action_date": ""}
         if os.path.exists(SETTINGS_FILE):
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as f: self.settings = json.load(f)
-                # 确保所有默认键都存在
                 for key, value in defaults.items(): self.settings.setdefault(key, value)
-                # 确保密码字段被移除
                 if "lock_password_b64" in self.settings:
                     del self.settings["lock_password_b64"]
             except Exception as e: 
@@ -1837,7 +1837,6 @@ class TimedBroadcastApp:
         self.log("系统设置已加载。")
 
     def save_settings(self):
-        # BUGFIX: 不再将密码保存到 settings.json
         if hasattr(self, 'autostart_var'):
             self.settings.update({
                 "autostart": self.autostart_var.get(), 
