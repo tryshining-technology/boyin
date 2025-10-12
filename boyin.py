@@ -109,7 +109,6 @@ class TimedBroadcastApp:
                 os.makedirs(folder)
 
     def create_widgets(self):
-        # 【布局调整】导航栏宽度改回160
         self.nav_frame = tk.Frame(self.root, bg='#A8D8E8', width=160)
         self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
@@ -174,7 +173,6 @@ class TimedBroadcastApp:
         self.top_right_btn_frame = tk.Frame(top_frame, bg='white')
         self.top_right_btn_frame.pack(side=tk.RIGHT)
 
-        # 【新功能】添加“添加节目”按钮
         add_btn = tk.Button(self.top_right_btn_frame, text="添加节目", command=self.add_task, bg='#3498DB', fg='white',
                               font=('Microsoft YaHei', 9), bd=0, padx=12, pady=5, cursor='hand2')
         add_btn.pack(side=tk.LEFT, padx=3)
@@ -530,8 +528,9 @@ class TimedBroadcastApp:
     def _force_stop_playback(self):
         if self.is_playing.is_set():
             self.log("接收到中断指令，正在停止当前播放...")
-            if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
+            if AUDIO_AVAILABLE:
                 pygame.mixer.music.stop()
+                pygame.mixer.stop() # 停止所有通道的声音，包括Sound对象
             self.on_playback_finished()
     
     def play_now(self):
@@ -796,7 +795,7 @@ class TimedBroadcastApp:
         if is_edit_mode:
             task = task_to_edit
             name_entry.insert(0, task.get('name', ''))
-            content_text.insert('1.0', task.get('content', ''))
+            content_text.insert('1.0', task.get('source_text', '')) # 修改：加载原始文本
             voice_var.set(task.get('voice', ''))
             speed_entry.insert(0, task.get('speed', '0'))
             pitch_entry.insert(0, task.get('pitch', '0'))
@@ -815,14 +814,50 @@ class TimedBroadcastApp:
 
         button_frame = tk.Frame(main_frame, bg='#E8E8E8')
         button_frame.grid(row=3, column=0, pady=20)
+        
         def save_task():
-            content = content_text.get('1.0', tk.END).strip()
-            if not content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
+            text_content = content_text.get('1.0', tk.END).strip()
+            if not text_content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
             if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
             is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
             if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
-            new_task_data = {'name': name_entry.get().strip(), 'time': time_msg, 'content': content, 'type': 'voice', 'voice': voice_var.get(), 'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0", 'volume': volume_entry.get().strip() or "80", 'prompt': prompt_var.get(), 'prompt_file': prompt_file_var.get(), 'prompt_volume': prompt_volume_var.get(), 'bgm': bgm_var.get(), 'bgm_file': bgm_file_var.get(), 'bgm_volume': bgm_volume_var.get(), 'repeat': repeat_entry.get().strip() or "1", 'weekday': weekday_entry.get().strip(), 'date_range': date_msg, 'delay': delay_var.get(), 'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {})}
+
+            # --- 语音合成核心逻辑 ---
+            wav_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.wav"
+            output_path = os.path.join(AUDIO_FOLDER, wav_filename)
+            voice_params = {'voice': voice_var.get(), 'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0", 'volume': volume_entry.get().strip() or "80"}
+            
+            try:
+                self.root.config(cursor="watch")
+                self.root.update()
+                success = self._synthesize_text_to_wav(text_content, voice_params, output_path)
+                if not success: raise Exception("语音合成失败")
+                self.log(f"语音已成功合成到文件: {wav_filename}")
+            except Exception as e:
+                messagebox.showerror("错误", f"无法生成语音文件: {e}", parent=dialog)
+                return
+            finally:
+                self.root.config(cursor="")
+            
+            # 如果是编辑模式，删除旧的WAV文件
+            if is_edit_mode and 'wav_filename' in task_to_edit:
+                old_wav_path = os.path.join(AUDIO_FOLDER, task_to_edit['wav_filename'])
+                if os.path.exists(old_wav_path):
+                    try: os.remove(old_wav_path); self.log(f"已删除旧语音文件: {task_to_edit['wav_filename']}")
+                    except Exception as e: self.log(f"删除旧语音文件失败: {e}")
+
+            new_task_data = {'name': name_entry.get().strip(), 'time': time_msg, 'type': 'voice',
+                             'content': output_path, # 存储完整路径
+                             'wav_filename': wav_filename, # 存储文件名用于管理
+                             'source_text': text_content, # 存储原始文本用于编辑
+                             'voice': voice_params['voice'], 'speed': voice_params['speed'], 'pitch': voice_params['pitch'], 'volume': voice_params['volume'],
+                             'prompt': prompt_var.get(), 'prompt_file': prompt_file_var.get(), 'prompt_volume': prompt_volume_var.get(),
+                             'bgm': bgm_var.get(), 'bgm_file': bgm_file_var.get(), 'bgm_volume': bgm_volume_var.get(),
+                             'repeat': repeat_entry.get().strip() or "1", 'weekday': weekday_entry.get().strip(), 'date_range': date_msg, 'delay': delay_var.get(), 
+                             'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 
+                             'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {})}
+            
             if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
             if is_edit_mode: self.tasks[index] = new_task_data; self.log(f"已修改语音节目: {new_task_data['name']}")
             else: self.tasks.append(new_task_data); self.log(f"已添加语音节目: {new_task_data['name']}")
@@ -832,6 +867,39 @@ class TimedBroadcastApp:
         tk.Button(button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
         tk.Button(button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
         content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
+
+    def _synthesize_text_to_wav(self, text, voice_params, output_path):
+        """将文本合成为WAV文件"""
+        if not WIN32COM_AVAILABLE:
+            raise ImportError("pywin32 模块未安装，无法进行语音合成。")
+        
+        pythoncom.CoInitialize()
+        try:
+            speaker = win32com.client.Dispatch("SAPI.SpVoice")
+            stream = win32com.client.Dispatch("SAPI.SpFileStream")
+            
+            # 使用常量 3 (SPSM_Create) 来创建和写入文件
+            stream.Open(output_path, 3, False)
+            speaker.AudioOutputStream = stream
+            
+            all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
+            if (selected_voice_desc := voice_params.get('voice')) in all_voices:
+                speaker.Voice = all_voices[selected_voice_desc]
+
+            speaker.Volume = int(voice_params.get('volume', 80))
+            escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("'", "&apos;").replace('"', "&quot;")
+            xml_text = f"<rate absspeed='{voice_params.get('speed', '0')}'><pitch middle='{voice_params.get('pitch', '0')}'>{escaped_text}</pitch></rate>"
+            
+            speaker.Speak(xml_text, 1) # 使用异步标志 1 (SVSF_ASYNC)
+            speaker.WaitUntilDone(-1) # 等待直到合成完成
+            
+            stream.Close()
+            return True
+        except Exception as e:
+            self.log(f"语音合成到文件时出错: {e}")
+            return False
+        finally:
+            pythoncom.CoUninitialize()
 
     def get_available_voices(self):
         if not WIN32COM_AVAILABLE: return []
@@ -854,7 +922,15 @@ class TimedBroadcastApp:
         if not selections: messagebox.showwarning("警告", "请先选择要删除的节目"); return
         if messagebox.askyesno("确认", f"确定要删除选中的 {len(selections)} 个节目吗？"):
             indices = sorted([self.task_tree.index(s) for s in selections], reverse=True)
-            for index in indices: self.log(f"已删除节目: {self.tasks.pop(index)['name']}")
+            for index in indices:
+                task_to_delete = self.tasks[index]
+                # 删除关联的WAV文件
+                if task_to_delete.get('type') == 'voice' and 'wav_filename' in task_to_delete:
+                    wav_path = os.path.join(AUDIO_FOLDER, task_to_delete['wav_filename'])
+                    if os.path.exists(wav_path):
+                        try: os.remove(wav_path); self.log(f"已删除语音文件: {task_to_delete['wav_filename']}")
+                        except Exception as e: self.log(f"删除语音文件失败: {e}")
+                self.log(f"已删除节目: {self.tasks.pop(index)['name']}")
             self.update_task_list(); self.save_tasks()
 
     def edit_task(self):
@@ -880,6 +956,22 @@ class TimedBroadcastApp:
             original = self.tasks[self.task_tree.index(sel)]
             copy = json.loads(json.dumps(original))
             copy['name'] += " (副本)"; copy['last_run'] = {}
+
+            # 如果是语音任务，需要重新生成WAV文件
+            if copy.get('type') == 'voice' and 'source_text' in copy:
+                wav_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.wav"
+                output_path = os.path.join(AUDIO_FOLDER, wav_filename)
+                voice_params = {'voice': copy.get('voice'), 'speed': copy.get('speed'), 'pitch': copy.get('pitch'), 'volume': copy.get('volume')}
+                try:
+                    success = self._synthesize_text_to_wav(copy['source_text'], voice_params, output_path)
+                    if not success: raise Exception("语音合成失败")
+                    copy['content'] = output_path
+                    copy['wav_filename'] = wav_filename
+                    self.log(f"已为副本生成新语音文件: {wav_filename}")
+                except Exception as e:
+                    self.log(f"为副本生成语音文件失败: {e}")
+                    continue # 跳过这个失败的复制
+
             self.tasks.append(copy)
             self.log(f"已复制节目: {original['name']}")
         self.update_task_list(); self.save_tasks()
@@ -1107,11 +1199,13 @@ class TimedBroadcastApp:
         self.task_tree.delete(*self.task_tree.get_children())
         for task in self.tasks:
             content = task.get('content', '')
-            if task.get('type') == 'audio':
-                content_preview = os.path.basename(content)
-            else:
-                clean_content = content.replace('\n', ' ').replace('\r', '')
+            if task.get('type') == 'voice':
+                source_text = task.get('source_text', '')
+                clean_content = source_text.replace('\n', ' ').replace('\r', '')
                 content_preview = (clean_content[:30] + '...') if len(clean_content) > 30 else clean_content
+            else: # 'audio' type
+                content_preview = os.path.basename(content)
+                
             display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
             self.task_tree.insert('', tk.END, values=(task.get('name', ''), task.get('status', ''), task.get('time', ''), display_mode, content_preview, task.get('volume', ''), task.get('weekday', ''), task.get('date_range', '')))
         if selection:
@@ -1195,14 +1289,16 @@ class TimedBroadcastApp:
             if not isinstance(task.get('last_run'), dict): task['last_run'] = {}
             task['last_run'][trigger_time] = datetime.now().strftime("%Y-%m-%d")
             self.save_tasks()
+        
+        # 统一播放逻辑
         if task.get('type') == 'audio':
             self.log(f"开始音频任务: {task['name']}")
-            threading.Thread(target=self._play_audio, args=(task,), daemon=True).start()
-        else:
+            threading.Thread(target=self._play_audio_task, args=(task,), daemon=True).start()
+        elif task.get('type') == 'voice':
             self.log(f"开始语音任务: {task['name']} (共 {task.get('repeat', 1)} 遍)")
-            threading.Thread(target=self._speak, args=(task.get('content', ''), task), daemon=True).start()
+            threading.Thread(target=self._play_voice_task, args=(task,), daemon=True).start()
 
-    def _play_audio(self, task):
+    def _play_audio_task(self, task):
         try:
             interval_type, duration_seconds, repeat_count = task.get('interval_type'), int(task.get('interval_seconds', 0)), int(task.get('interval_first', 1))
             playlist = []
@@ -1230,41 +1326,59 @@ class TimedBroadcastApp:
         except Exception as e: self.log(f"音频播放错误: {e}")
         finally: self.root.after(0, self.on_playback_finished)
 
-    def _speak(self, text, task):
-        if not WIN32COM_AVAILABLE: self.log("错误: pywin32库不可用，无法执行语音播报。"); self.root.after(0, self.on_playback_finished); return
-        pythoncom.CoInitialize()
+    def _play_voice_task(self, task):
         try:
             if not self.is_playing.is_set(): return
-            if task.get('bgm', 0) and AUDIO_AVAILABLE:
-                bgm_file, bgm_path = task.get('bgm_file', ''), os.path.join(BGM_FOLDER, task.get('bgm_file', ''))
-                if os.path.exists(bgm_path): self.log(f"播放背景音乐: {bgm_file}"); pygame.mixer.music.load(bgm_path); pygame.mixer.music.set_volume(float(task.get('bgm_volume', 40)) / 100.0); pygame.mixer.music.play(-1)
-                else: self.log(f"警告: 背景音乐文件不存在 - {bgm_path}")
+            
+            # 1. 播放提示音
             if task.get('prompt', 0) and AUDIO_AVAILABLE:
                 prompt_file, prompt_path = task.get('prompt_file', ''), os.path.join(PROMPT_FOLDER, task.get('prompt_file', ''))
                 if os.path.exists(prompt_path):
                     if not self.is_playing.is_set(): return
-                    self.log(f"播放提示音: {prompt_file}"); sound = pygame.mixer.Sound(prompt_path); sound.set_volume(float(task.get('prompt_volume', 80)) / 100.0); channel = sound.play()
+                    self.log(f"播放提示音: {prompt_file}")
+                    sound = pygame.mixer.Sound(prompt_path)
+                    sound.set_volume(float(task.get('prompt_volume', 80)) / 100.0)
+                    channel = sound.play()
                     if channel:
                         while channel.get_busy() and self.is_playing.is_set(): time.sleep(0.05)
                 else: self.log(f"警告: 提示音文件不存在 - {prompt_path}")
+
             if not self.is_playing.is_set(): return
-            try: speaker = win32com.client.Dispatch("SAPI.SpVoice")
-            except com_error as e: self.log(f"严重错误: 无法初始化语音引擎! 错误: {e}"); raise
-            all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
-            if (selected_voice_desc := task.get('voice')) in all_voices: speaker.Voice = all_voices[selected_voice_desc]
-            speaker.Volume = int(task.get('volume', 80))
-            escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("'", "&apos;").replace('"', "&quot;")
-            xml_text = f"<rate absspeed='{task.get('speed', '0')}'><pitch middle='{task.get('pitch', '0')}'>{escaped_text}</pitch></rate>"
+            
+            # 2. 播放背景音乐
+            if task.get('bgm', 0) and AUDIO_AVAILABLE:
+                bgm_file, bgm_path = task.get('bgm_file', ''), os.path.join(BGM_FOLDER, task.get('bgm_file', ''))
+                if os.path.exists(bgm_path):
+                    self.log(f"播放背景音乐: {bgm_file}")
+                    pygame.mixer.music.load(bgm_path)
+                    pygame.mixer.music.set_volume(float(task.get('bgm_volume', 40)) / 100.0)
+                    pygame.mixer.music.play(-1) # 循环播放
+                else: self.log(f"警告: 背景音乐文件不存在 - {bgm_path}")
+
+            # 3. 播放合成的语音WAV文件
+            speech_path = task.get('content', '')
+            if not os.path.exists(speech_path):
+                self.log(f"错误: 语音文件不存在 - {speech_path}"); return
+
+            speech_sound = pygame.mixer.Sound(speech_path)
+            speech_sound.set_volume(float(task.get('volume', 80)) / 100.0)
             repeat_count = int(task.get('repeat', 1))
-            self.log(f"准备播报 {repeat_count} 遍...")
+
             for i in range(repeat_count):
                 if not self.is_playing.is_set(): break
-                self.log(f"正在播报第 {i+1}/{repeat_count} 遍"); speaker.Speak(xml_text, 8) 
+                self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
+                channel = speech_sound.play()
+                if channel:
+                    while channel.get_busy() and self.is_playing.is_set(): time.sleep(0.1)
                 if i < repeat_count - 1 and self.is_playing.is_set(): time.sleep(0.5)
-        except Exception as e: self.log(f"播报错误: {e}")
+
+        except Exception as e: self.log(f"语音任务播放错误: {e}")
         finally:
-            if AUDIO_AVAILABLE and pygame.mixer.music.get_busy(): pygame.mixer.music.stop(); self.log("背景音乐已停止。")
-            pythoncom.CoUninitialize(); self.root.after(0, self.on_playback_finished)
+            if AUDIO_AVAILABLE:
+                pygame.mixer.music.stop()
+                pygame.mixer.stop()
+            self.root.after(0, self.on_playback_finished)
+
 
     def on_playback_finished(self):
         if self.is_playing.is_set():
@@ -1299,7 +1413,14 @@ class TimedBroadcastApp:
             for task in self.tasks:
                 if 'delay' not in task: task['delay'] = 'delay' if task.get('type') == 'voice' else 'ontime'; migrated = True
                 if not isinstance(task.get('last_run'), dict): task['last_run'] = {}; migrated = True
-            if migrated: self.log("旧版任务数据已迁移。"); self.save_tasks()
+                # 数据迁移：为旧的语音任务补充字段
+                if task.get('type') == 'voice' and 'source_text' not in task:
+                    task['source_text'] = task.get('content', '') # 旧的content是文本
+                    # 标记为需要重新生成
+                    task['wav_filename'] = 'needs_regeneration'
+                    migrated = True
+
+            if migrated: self.log("旧版任务数据已迁移，部分语音节目首次播放前可能需要重新编辑保存。"); self.save_tasks()
             self.update_task_list(); self.log(f"已加载 {len(self.tasks)} 个节目")
         except Exception as e: self.log(f"加载任务失败: {e}")
 
