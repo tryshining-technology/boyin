@@ -117,14 +117,17 @@ class TimedBroadcastApp:
             self.root.after(100, self.hide_to_tray)
 
     # --- 注册表操作方法 ---
-    def _save_password_to_registry(self, password_b64):
+     def _save_password_to_registry(self, password_b64):
         # 使用 WIN32COM_AVAILABLE 进行判断
         if not WIN32COM_AVAILABLE: return False
         try:
             # 使用 win32api.RegCreateKeyEx 创建或打开注册表键
             # KEY_WRITE 权限允许创建和写入值
             key, _ = win32api.RegCreateKeyEx(win32con.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, win32con.KEY_WRITE)
+            
+            # 关键修改：将第三个参数从 0 改为 None 来避免类型错误
             win32api.RegSetValueEx(key, "LockPasswordB64", None, win32con.REG_SZ, password_b64)
+            
             win32api.RegCloseKey(key)
             self.log("密码已安全存储。")
             return True
