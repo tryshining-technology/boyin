@@ -582,7 +582,8 @@ class TimedBroadcastApp:
         is_edit_mode = task_to_edit is not None
         dialog = tk.Toplevel(self.root)
         dialog.title("修改音频节目" if is_edit_mode else "添加音频节目")
-        dialog.geometry("850x800")
+        # 【修复】增加窗口宽度
+        dialog.geometry("950x800")
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#E8E8E8')
         main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=15)
@@ -606,7 +607,6 @@ class TimedBroadcastApp:
         def select_single_audio():
             filename = filedialog.askopenfilename(title="选择音频文件", initialdir=AUDIO_FOLDER, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")])
             if filename: audio_single_entry.delete(0, tk.END); audio_single_entry.insert(0, filename)
-        # 【修复】增加按钮内边距
         tk.Button(audio_single_frame, text="选取...", command=select_single_audio, bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=3).pack(side=tk.LEFT, padx=5)
         tk.Label(content_frame, text="音频文件夹", font=font_spec, bg='#E8E8E8').grid(row=2, column=0, sticky='e', padx=5, pady=5)
         audio_folder_frame = tk.Frame(content_frame, bg='#E8E8E8')
@@ -711,7 +711,8 @@ class TimedBroadcastApp:
         is_edit_mode = task_to_edit is not None
         dialog = tk.Toplevel(self.root)
         dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
-        dialog.geometry("850x850")
+        # 【修复】增加窗口宽度
+        dialog.geometry("950x850")
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#E8E8E8')
         main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=15)
@@ -817,7 +818,6 @@ class TimedBroadcastApp:
         button_frame.grid(row=3, column=0, pady=20)
         
         def save_task():
-            # --- 验证输入 ---
             text_content = content_text.get('1.0', tk.END).strip()
             if not text_content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
@@ -825,7 +825,6 @@ class TimedBroadcastApp:
             is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
             if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
 
-            # --- 显示进度窗口 ---
             progress_dialog = tk.Toplevel(dialog)
             progress_dialog.title("请稍候")
             progress_dialog.geometry("300x100")
@@ -835,18 +834,16 @@ class TimedBroadcastApp:
             self.center_window(progress_dialog, 300, 100)
             dialog.update_idletasks()
             
-            # --- 准备合成参数 ---
             wav_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.wav"
             output_path = os.path.join(AUDIO_FOLDER, wav_filename)
             voice_params = {'voice': voice_var.get(), 'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0", 'volume': volume_entry.get().strip() or "80"}
 
             def _on_synthesis_complete(result):
-                progress_dialog.destroy() # 首先关闭进度窗口
+                progress_dialog.destroy()
                 if not result['success']:
                     messagebox.showerror("错误", f"无法生成语音文件: {result['error']}", parent=dialog)
                     return
 
-                # 如果是编辑模式，删除旧的WAV文件
                 if is_edit_mode and 'wav_filename' in task_to_edit:
                     old_wav_path = os.path.join(AUDIO_FOLDER, task_to_edit['wav_filename'])
                     if os.path.exists(old_wav_path):
@@ -861,7 +858,6 @@ class TimedBroadcastApp:
                 
                 self.update_task_list(); self.save_tasks(); dialog.destroy()
 
-            # --- 在后台线程中执行合成 ---
             threading.Thread(target=self._synthesis_worker, args=(text_content, voice_params, output_path, _on_synthesis_complete), daemon=True).start()
 
         button_text = "保存修改" if is_edit_mode else "添加"
