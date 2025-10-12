@@ -536,17 +536,24 @@ class TimedBroadcastApp:
             else:
                 messagebox.showerror("错误", "密码不正确！", parent=dialog)
         
+        # BUGFIX: This is the new robust workflow for clearing the password
         def clear_password_action():
             if not is_password_correct():
                 messagebox.showerror("错误", "密码不正确！无法清除。", parent=dialog)
                 return
             
-            # BUGFIX: Pass the current dialog as the parent for the confirmation box
-            password_was_cleared = self.clear_lock_password(parent_dialog=dialog)
-            
-            if password_was_cleared:
+            # Step 1: Ask for confirmation, making sure the parent is correct.
+            if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。", parent=dialog):
+                # Step 2: If "Yes", run the logic-only function.
+                self._perform_password_clear_logic()
+                
+                # Step 3: Destroy this password dialog.
                 dialog.destroy()
+                
+                # Step 4: Unlock the main UI.
                 self._apply_unlock()
+                
+                # Step 5: Show a final, non-nested confirmation.
                 messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root)
 
         btn_frame = tk.Frame(dialog); btn_frame.pack(pady=10)
@@ -555,18 +562,22 @@ class TimedBroadcastApp:
         tk.Button(btn_frame, text="取消", command=dialog.destroy, font=('Microsoft YaHei', 11)).pack(side=tk.LEFT, padx=5)
         dialog.bind('<Return>', lambda event: confirm())
 
-    # BUGFIX: Added 'parent_dialog' parameter
-    def clear_lock_password(self, parent_dialog=None):
-        # BUGFIX: Ensure the confirmation dialog is a child of the current dialog
-        if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。", parent=parent_dialog if parent_dialog else self.root):
-            self.settings["lock_password_b64"] = ""
-            self.lock_on_start_var.set(False)
-            self.save_settings()
-            if hasattr(self, 'clear_password_btn'):
-                self.clear_password_btn.config(state=tk.DISABLED)
-            self.log("锁定密码已清除。")
-            return True 
-        return False 
+    # BUGFIX: New logic-only function for clearing password. No UI elements.
+    def _perform_password_clear_logic(self):
+        """This method only contains the logic for clearing the password."""
+        self.settings["lock_password_b64"] = ""
+        self.lock_on_start_var.set(False)
+        self.save_settings()
+        if hasattr(self, 'clear_password_btn'):
+            self.clear_password_btn.config(state=tk.DISABLED)
+        self.log("锁定密码已清除。")
+
+    # BUGFIX: Public function for settings page, now contains the confirmation.
+    def clear_lock_password(self):
+        """Called by the button on the settings page."""
+        if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。", parent=self.root):
+            self._perform_password_clear_logic()
+            messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root)
 
     def _handle_lock_on_start_toggle(self):
         if not self.settings.get("lock_password_b64"):
@@ -1518,7 +1529,6 @@ class TimedBroadcastApp:
             command, data = self.playback_command_queue.get()
 
             if command == 'PLAY_INTERRUPT':
-                # This command clears the queue and plays immediately.
                 is_playing = True
                 while not self.playback_command_queue.empty():
                     try: self.playback_command_queue.get_nowait()
@@ -1527,22 +1537,18 @@ class TimedBroadcastApp:
                 is_playing = False
 
             elif command == 'PLAY':
-                # This command only plays if nothing else is currently playing.
                 if not is_playing:
                     is_playing = True
                     self._execute_broadcast(data[0], data[1])
                     is_playing = False
 
             elif command == 'STOP':
-                # The STOP command's real power is in the _is_interrupted() check,
-                # which running tasks call. This block is for cleaning up.
-                is_playing = False # Mark as stopped
+                is_playing = False
                 pygame.mixer.music.stop()
                 pygame.mixer.stop()
                 self.log("STOP 命令已处理，所有播放已停止。")
                 self.update_playing_text("等待播放...")
                 self.status_labels[2].config(text="播放状态: 待机")
-                # Clear any pending tasks in the queue.
                 while not self.playback_command_queue.empty():
                     try: self.playback_command_queue.get_nowait()
                     except queue.Empty: break
@@ -1574,16 +1580,19 @@ class TimedBroadcastApp:
     def _is_interrupted(self):
         """Checks for an interrupt command without blocking."""
         try:
-            command, _ = self.playback_command_queue.get_nowait()
+            command_tuple = self.playback_command_queue.get_nowait()
+            command = command_tuple[0]
             if command in ['STOP', 'PLAY_INTERRUPT']:
-                self.playback_command_queue.put((command, _)) # Put it back for the worker
+                self.playback_command_queue.put(command_tuple) 
                 return True
+            else:
+                # If it's a normal 'PLAY' command, put it back and don't interrupt.
+                self.playback_command_queue.put(command_tuple)
         except queue.Empty:
             return False
         return False
 
     def _play_audio_task_internal(self, task):
-        # (This function's internal logic remains largely the same, but now relies on _is_interrupted)
         interval_type = task.get('interval_type', 'first')
         duration_seconds = int(task.get('interval_seconds', 0))
         repeat_count = int(task.get('interval_first', 1))
@@ -1633,7 +1642,6 @@ class TimedBroadcastApp:
                 continue
 
     def _play_voice_task_internal(self, task):
-        # (This function's internal logic remains largely the same, but now relies on _is_interrupted)
         if task.get('prompt', 0) and AUDIO_AVAILABLE:
             if self._is_interrupted(): return
             prompt_file = task.get('prompt_file', '')
