@@ -80,6 +80,8 @@ class TimedBroadcastApp:
         self.running = True
         self.tray_icon = None
         self.is_locked = False
+        
+        self.drag_start_item = None # For drag-selection logic
 
         self.is_playing = threading.Event()
         self.playback_queue = []
@@ -217,7 +219,7 @@ class TimedBroadcastApp:
         table_frame = tk.Frame(page_frame, bg='white')
         table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         columns = ('节目名称', '状态', '开始时间', '模式', '音频或文字', '音量', '周几/几号', '日期范围')
-        self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12)
+        self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12, selectmode='extended')
         
         style = ttk.Style()
         style.configure("Treeview.Heading", font=('Microsoft YaHei', 11, 'bold'))
@@ -247,6 +249,7 @@ class TimedBroadcastApp:
         
         self.task_tree.bind("<Button-3>", self.show_context_menu)
         self.task_tree.bind("<Double-1>", self.on_double_click_edit)
+        self._enable_drag_selection(self.task_tree) # Enable drag selection
 
         playing_frame = tk.LabelFrame(page_frame, text="正在播：", font=('Microsoft YaHei', 11),
                                      bg='white', fg='#2C5F7C', padx=10, pady=5)
@@ -308,7 +311,7 @@ class TimedBroadcastApp:
         table_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         columns = ('节假日名称', '状态', '开始日期时间', '结束日期时间')
-        self.holiday_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15)
+        self.holiday_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended')
         
         self.holiday_tree.heading('节假日名称', text='节假日名称')
         self.holiday_tree.column('节假日名称', width=250, anchor='w')
@@ -326,6 +329,7 @@ class TimedBroadcastApp:
         
         self.holiday_tree.bind("<Double-1>", lambda e: self.edit_holiday())
         self.holiday_tree.bind("<Button-3>", self.show_holiday_context_menu)
+        self._enable_drag_selection(self.holiday_tree) # Enable drag selection
 
         action_frame = tk.Frame(content_frame, bg='white', padx=10)
         action_frame.pack(side=tk.RIGHT, fill=tk.Y)
@@ -1199,7 +1203,6 @@ class TimedBroadcastApp:
             self.log(f"已将全部节目音量统一设置为 {volume}。")
     
     def _create_custom_input_dialog(self, title, prompt, minvalue=None, maxvalue=None):
-        """Creates a custom, localized integer input dialog."""
         dialog = tk.Toplevel(self.root)
         dialog.title(title)
         dialog.geometry("350x150")
@@ -1780,6 +1783,41 @@ class TimedBroadcastApp:
             threading.Thread(target=self.tray_icon.run, daemon=True).start()
             self.log("系统托盘图标已启动。")
     
+    # --- UI Enhancement Methods ---
+
+    def _enable_drag_selection(self, tree):
+        
+        def on_press(event):
+            self.drag_start_item = tree.identify_row(event.y)
+            if self.drag_start_item:
+                tree.selection_set(self.drag_start_item)
+
+        def on_drag(event):
+            if not self.drag_start_item:
+                return
+
+            current_item = tree.identify_row(event.y)
+            if not current_item:
+                return
+
+            start_index = tree.index(self.drag_start_item)
+            current_index = tree.index(current_item)
+
+            min_idx = min(start_index, current_index)
+            max_idx = max(start_index, current_index)
+
+            all_items = tree.get_children('')
+            items_to_select = all_items[min_idx : max_idx + 1]
+            
+            tree.selection_set(items_to_select)
+
+        def on_release(event):
+            self.drag_start_item = None
+
+        tree.bind("<ButtonPress-1>", on_press, True)
+        tree.bind("<B1-Motion>", on_drag, True)
+        tree.bind("<ButtonRelease-1>", on_release, True)
+
     # --- HOLIDAY-SPECIFIC METHODS ---
     
     def save_holidays(self):
