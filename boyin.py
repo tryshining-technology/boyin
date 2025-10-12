@@ -530,7 +530,7 @@ class TimedBroadcastApp:
             self.log("接收到中断指令，正在停止当前播放...")
             if AUDIO_AVAILABLE:
                 pygame.mixer.music.stop()
-                pygame.mixer.stop() # 停止所有通道的声音，包括Sound对象
+                pygame.mixer.stop()
             self.on_playback_finished()
     
     def play_now(self):
@@ -606,7 +606,8 @@ class TimedBroadcastApp:
         def select_single_audio():
             filename = filedialog.askopenfilename(title="选择音频文件", initialdir=AUDIO_FOLDER, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")])
             if filename: audio_single_entry.delete(0, tk.END); audio_single_entry.insert(0, filename)
-        tk.Button(audio_single_frame, text="选取...", command=select_single_audio, bg='#D0D0D0', font=font_spec, bd=1, padx=18, pady=3).pack(side=tk.LEFT, padx=5)
+        # 【修复】增加按钮内边距
+        tk.Button(audio_single_frame, text="选取...", command=select_single_audio, bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=3).pack(side=tk.LEFT, padx=5)
         tk.Label(content_frame, text="音频文件夹", font=font_spec, bg='#E8E8E8').grid(row=2, column=0, sticky='e', padx=5, pady=5)
         audio_folder_frame = tk.Frame(content_frame, bg='#E8E8E8')
         audio_folder_frame.grid(row=2, column=1, columnspan=3, sticky='ew', padx=5, pady=5)
@@ -616,7 +617,7 @@ class TimedBroadcastApp:
         def select_folder():
             foldername = filedialog.askdirectory(title="选择音频文件夹", initialdir=AUDIO_FOLDER)
             if foldername: audio_folder_entry.delete(0, tk.END); audio_folder_entry.insert(0, foldername)
-        tk.Button(audio_folder_frame, text="选取...", command=select_folder, bg='#D0D0D0', font=font_spec, bd=1, padx=18, pady=3).pack(side=tk.LEFT, padx=5)
+        tk.Button(audio_folder_frame, text="选取...", command=select_folder, bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=3).pack(side=tk.LEFT, padx=5)
         play_order_frame = tk.Frame(content_frame, bg='#E8E8E8')
         play_order_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=5)
         play_order_var = tk.StringVar(value="sequential")
@@ -634,7 +635,7 @@ class TimedBroadcastApp:
         start_time_entry = tk.Entry(time_frame, font=font_spec, width=50)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
         tk.Label(time_frame, text="《可多个,用英文逗号,隔开》", font=font_spec, bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
-        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=15, pady=2).grid(row=0, column=3, padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=2).grid(row=0, column=3, padx=5)
         interval_var = tk.StringVar(value="first")
         interval_frame1 = tk.Frame(time_frame, bg='#E8E8E8')
         interval_frame1.grid(row=1, column=1, columnspan=2, sticky='w', padx=5, pady=5)
@@ -652,11 +653,11 @@ class TimedBroadcastApp:
         tk.Label(time_frame, text="周几/几号:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='e', padx=5, pady=8)
         weekday_entry = tk.Entry(time_frame, font=font_spec, width=50)
         weekday_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=8)
-        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=18, pady=3).grid(row=3, column=3, padx=5)
+        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=3).grid(row=3, column=3, padx=5)
         tk.Label(time_frame, text="日期范围:", font=font_spec, bg='#E8E8E8').grid(row=4, column=0, sticky='e', padx=5, pady=8)
         date_range_entry = tk.Entry(time_frame, font=font_spec, width=50)
         date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=8)
-        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=15, pady=3).grid(row=4, column=3, padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=3).grid(row=4, column=3, padx=5)
         other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=10)
         other_frame.grid(row=2, column=0, sticky='ew', pady=5)
         delay_var = tk.StringVar(value="ontime")
@@ -771,18 +772,18 @@ class TimedBroadcastApp:
         start_time_entry = tk.Entry(time_frame, font=font_spec, width=50)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
         tk.Label(time_frame, text="《可多个,用英文逗号,隔开》", font=font_spec, bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
-        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=15, pady=2).grid(row=0, column=3, padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=2).grid(row=0, column=3, padx=5)
         tk.Label(time_frame, text="播 n 遍:", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=5)
         repeat_entry = tk.Entry(time_frame, font=font_spec, width=12)
         repeat_entry.grid(row=1, column=1, sticky='w', padx=5, pady=5)
         tk.Label(time_frame, text="周几/几号:", font=font_spec, bg='#E8E8E8').grid(row=2, column=0, sticky='e', padx=5, pady=5)
         weekday_entry = tk.Entry(time_frame, font=font_spec, width=50)
         weekday_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=5)
-        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=18, pady=2).grid(row=2, column=3, padx=5)
+        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=2).grid(row=2, column=3, padx=5)
         tk.Label(time_frame, text="日期范围:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='e', padx=5, pady=5)
         date_range_entry = tk.Entry(time_frame, font=font_spec, width=50)
         date_range_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=5)
-        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=15, pady=2).grid(row=3, column=3, padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=2).grid(row=3, column=3, padx=5)
         other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=15, pady=15)
         other_frame.grid(row=2, column=0, sticky='ew', pady=10)
         delay_var = tk.StringVar(value="delay")
@@ -795,7 +796,7 @@ class TimedBroadcastApp:
         if is_edit_mode:
             task = task_to_edit
             name_entry.insert(0, task.get('name', ''))
-            content_text.insert('1.0', task.get('source_text', '')) # 修改：加载原始文本
+            content_text.insert('1.0', task.get('source_text', ''))
             voice_var.set(task.get('voice', ''))
             speed_entry.insert(0, task.get('speed', '0'))
             pitch_entry.insert(0, task.get('pitch', '0'))
@@ -816,6 +817,7 @@ class TimedBroadcastApp:
         button_frame.grid(row=3, column=0, pady=20)
         
         def save_task():
+            # --- 验证输入 ---
             text_content = content_text.get('1.0', tk.END).strip()
             if not text_content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
@@ -823,50 +825,60 @@ class TimedBroadcastApp:
             is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
             if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
 
-            # --- 语音合成核心逻辑 ---
+            # --- 显示进度窗口 ---
+            progress_dialog = tk.Toplevel(dialog)
+            progress_dialog.title("请稍候")
+            progress_dialog.geometry("300x100")
+            progress_dialog.resizable(False, False)
+            progress_dialog.transient(dialog); progress_dialog.grab_set()
+            tk.Label(progress_dialog, text="语音文件生成中，请稍后...", font=font_spec).pack(expand=True)
+            self.center_window(progress_dialog, 300, 100)
+            dialog.update_idletasks()
+            
+            # --- 准备合成参数 ---
             wav_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.wav"
             output_path = os.path.join(AUDIO_FOLDER, wav_filename)
             voice_params = {'voice': voice_var.get(), 'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0", 'volume': volume_entry.get().strip() or "80"}
-            
-            try:
-                self.root.config(cursor="watch")
-                self.root.update()
-                success = self._synthesize_text_to_wav(text_content, voice_params, output_path)
-                if not success: raise Exception("语音合成失败")
-                self.log(f"语音已成功合成到文件: {wav_filename}")
-            except Exception as e:
-                messagebox.showerror("错误", f"无法生成语音文件: {e}", parent=dialog)
-                return
-            finally:
-                self.root.config(cursor="")
-            
-            # 如果是编辑模式，删除旧的WAV文件
-            if is_edit_mode and 'wav_filename' in task_to_edit:
-                old_wav_path = os.path.join(AUDIO_FOLDER, task_to_edit['wav_filename'])
-                if os.path.exists(old_wav_path):
-                    try: os.remove(old_wav_path); self.log(f"已删除旧语音文件: {task_to_edit['wav_filename']}")
-                    except Exception as e: self.log(f"删除旧语音文件失败: {e}")
 
-            new_task_data = {'name': name_entry.get().strip(), 'time': time_msg, 'type': 'voice',
-                             'content': output_path, # 存储完整路径
-                             'wav_filename': wav_filename, # 存储文件名用于管理
-                             'source_text': text_content, # 存储原始文本用于编辑
-                             'voice': voice_params['voice'], 'speed': voice_params['speed'], 'pitch': voice_params['pitch'], 'volume': voice_params['volume'],
-                             'prompt': prompt_var.get(), 'prompt_file': prompt_file_var.get(), 'prompt_volume': prompt_volume_var.get(),
-                             'bgm': bgm_var.get(), 'bgm_file': bgm_file_var.get(), 'bgm_volume': bgm_volume_var.get(),
-                             'repeat': repeat_entry.get().strip() or "1", 'weekday': weekday_entry.get().strip(), 'date_range': date_msg, 'delay': delay_var.get(), 
-                             'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 
-                             'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {})}
-            
-            if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
-            if is_edit_mode: self.tasks[index] = new_task_data; self.log(f"已修改语音节目: {new_task_data['name']}")
-            else: self.tasks.append(new_task_data); self.log(f"已添加语音节目: {new_task_data['name']}")
-            self.update_task_list(); self.save_tasks(); dialog.destroy()
-        
+            def _on_synthesis_complete(result):
+                progress_dialog.destroy() # 首先关闭进度窗口
+                if not result['success']:
+                    messagebox.showerror("错误", f"无法生成语音文件: {result['error']}", parent=dialog)
+                    return
+
+                # 如果是编辑模式，删除旧的WAV文件
+                if is_edit_mode and 'wav_filename' in task_to_edit:
+                    old_wav_path = os.path.join(AUDIO_FOLDER, task_to_edit['wav_filename'])
+                    if os.path.exists(old_wav_path):
+                        try: os.remove(old_wav_path); self.log(f"已删除旧语音文件: {task_to_edit['wav_filename']}")
+                        except Exception as e: self.log(f"删除旧语音文件失败: {e}")
+
+                new_task_data = {'name': name_entry.get().strip(), 'time': time_msg, 'type': 'voice', 'content': output_path, 'wav_filename': wav_filename, 'source_text': text_content, 'voice': voice_params['voice'], 'speed': voice_params['speed'], 'pitch': voice_params['pitch'], 'volume': voice_params['volume'], 'prompt': prompt_var.get(), 'prompt_file': prompt_file_var.get(), 'prompt_volume': prompt_volume_var.get(), 'bgm': bgm_var.get(), 'bgm_file': bgm_file_var.get(), 'bgm_volume': bgm_volume_var.get(), 'repeat': repeat_entry.get().strip() or "1", 'weekday': weekday_entry.get().strip(), 'date_range': date_msg, 'delay': delay_var.get(), 'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {})}
+                if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
+                
+                if is_edit_mode: self.tasks[index] = new_task_data; self.log(f"已修改语音节目: {new_task_data['name']}")
+                else: self.tasks.append(new_task_data); self.log(f"已添加语音节目: {new_task_data['name']}")
+                
+                self.update_task_list(); self.save_tasks(); dialog.destroy()
+
+            # --- 在后台线程中执行合成 ---
+            threading.Thread(target=self._synthesis_worker, args=(text_content, voice_params, output_path, _on_synthesis_complete), daemon=True).start()
+
         button_text = "保存修改" if is_edit_mode else "添加"
         tk.Button(button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
         tk.Button(button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
         content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
+
+    def _synthesis_worker(self, text, voice_params, output_path, callback):
+        """后台线程工作函数，用于语音合成"""
+        try:
+            success = self._synthesize_text_to_wav(text, voice_params, output_path)
+            if success:
+                self.root.after(0, callback, {'success': True})
+            else:
+                raise Exception("合成过程返回失败")
+        except Exception as e:
+            self.root.after(0, callback, {'success': False, 'error': str(e)})
 
     def _synthesize_text_to_wav(self, text, voice_params, output_path):
         """将文本合成为WAV文件"""
@@ -877,8 +889,6 @@ class TimedBroadcastApp:
         try:
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
             stream = win32com.client.Dispatch("SAPI.SpFileStream")
-            
-            # 使用常量 3 (SPSM_Create) 来创建和写入文件
             stream.Open(output_path, 3, False)
             speaker.AudioOutputStream = stream
             
@@ -890,9 +900,8 @@ class TimedBroadcastApp:
             escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("'", "&apos;").replace('"', "&quot;")
             xml_text = f"<rate absspeed='{voice_params.get('speed', '0')}'><pitch middle='{voice_params.get('pitch', '0')}'>{escaped_text}</pitch></rate>"
             
-            speaker.Speak(xml_text, 1) # 使用异步标志 1 (SVSF_ASYNC)
-            speaker.WaitUntilDone(-1) # 等待直到合成完成
-            
+            speaker.Speak(xml_text, 1)
+            speaker.WaitUntilDone(-1)
             stream.Close()
             return True
         except Exception as e:
@@ -924,7 +933,6 @@ class TimedBroadcastApp:
             indices = sorted([self.task_tree.index(s) for s in selections], reverse=True)
             for index in indices:
                 task_to_delete = self.tasks[index]
-                # 删除关联的WAV文件
                 if task_to_delete.get('type') == 'voice' and 'wav_filename' in task_to_delete:
                     wav_path = os.path.join(AUDIO_FOLDER, task_to_delete['wav_filename'])
                     if os.path.exists(wav_path):
@@ -957,7 +965,6 @@ class TimedBroadcastApp:
             copy = json.loads(json.dumps(original))
             copy['name'] += " (副本)"; copy['last_run'] = {}
 
-            # 如果是语音任务，需要重新生成WAV文件
             if copy.get('type') == 'voice' and 'source_text' in copy:
                 wav_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.wav"
                 output_path = os.path.join(AUDIO_FOLDER, wav_filename)
@@ -970,7 +977,7 @@ class TimedBroadcastApp:
                     self.log(f"已为副本生成新语音文件: {wav_filename}")
                 except Exception as e:
                     self.log(f"为副本生成语音文件失败: {e}")
-                    continue # 跳过这个失败的复制
+                    continue
 
             self.tasks.append(copy)
             self.log(f"已复制节目: {original['name']}")
@@ -1203,7 +1210,7 @@ class TimedBroadcastApp:
                 source_text = task.get('source_text', '')
                 clean_content = source_text.replace('\n', ' ').replace('\r', '')
                 content_preview = (clean_content[:30] + '...') if len(clean_content) > 30 else clean_content
-            else: # 'audio' type
+            else:
                 content_preview = os.path.basename(content)
                 
             display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
@@ -1290,7 +1297,6 @@ class TimedBroadcastApp:
             task['last_run'][trigger_time] = datetime.now().strftime("%Y-%m-%d")
             self.save_tasks()
         
-        # 统一播放逻辑
         if task.get('type') == 'audio':
             self.log(f"开始音频任务: {task['name']}")
             threading.Thread(target=self._play_audio_task, args=(task,), daemon=True).start()
@@ -1329,8 +1335,6 @@ class TimedBroadcastApp:
     def _play_voice_task(self, task):
         try:
             if not self.is_playing.is_set(): return
-            
-            # 1. 播放提示音
             if task.get('prompt', 0) and AUDIO_AVAILABLE:
                 prompt_file, prompt_path = task.get('prompt_file', ''), os.path.join(PROMPT_FOLDER, task.get('prompt_file', ''))
                 if os.path.exists(prompt_path):
@@ -1345,17 +1349,15 @@ class TimedBroadcastApp:
 
             if not self.is_playing.is_set(): return
             
-            # 2. 播放背景音乐
             if task.get('bgm', 0) and AUDIO_AVAILABLE:
                 bgm_file, bgm_path = task.get('bgm_file', ''), os.path.join(BGM_FOLDER, task.get('bgm_file', ''))
                 if os.path.exists(bgm_path):
                     self.log(f"播放背景音乐: {bgm_file}")
                     pygame.mixer.music.load(bgm_path)
                     pygame.mixer.music.set_volume(float(task.get('bgm_volume', 40)) / 100.0)
-                    pygame.mixer.music.play(-1) # 循环播放
+                    pygame.mixer.music.play(-1)
                 else: self.log(f"警告: 背景音乐文件不存在 - {bgm_path}")
 
-            # 3. 播放合成的语音WAV文件
             speech_path = task.get('content', '')
             if not os.path.exists(speech_path):
                 self.log(f"错误: 语音文件不存在 - {speech_path}"); return
@@ -1378,7 +1380,6 @@ class TimedBroadcastApp:
                 pygame.mixer.music.stop()
                 pygame.mixer.stop()
             self.root.after(0, self.on_playback_finished)
-
 
     def on_playback_finished(self):
         if self.is_playing.is_set():
@@ -1413,10 +1414,8 @@ class TimedBroadcastApp:
             for task in self.tasks:
                 if 'delay' not in task: task['delay'] = 'delay' if task.get('type') == 'voice' else 'ontime'; migrated = True
                 if not isinstance(task.get('last_run'), dict): task['last_run'] = {}; migrated = True
-                # 数据迁移：为旧的语音任务补充字段
                 if task.get('type') == 'voice' and 'source_text' not in task:
-                    task['source_text'] = task.get('content', '') # 旧的content是文本
-                    # 标记为需要重新生成
+                    task['source_text'] = task.get('content', '')
                     task['wav_filename'] = 'needs_regeneration'
                     migrated = True
 
