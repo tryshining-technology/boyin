@@ -168,10 +168,23 @@ class TimedBroadcastApp:
                 os.makedirs(folder)
 
     def create_widgets(self):
+        # --- 整体布局调整 ---
+        # 1. 状态栏在底部
+        self.status_frame = tk.Frame(self.root, bg='#E8F4F8', height=30)
+        self.status_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        self.status_frame.pack_propagate(False)
+        self.create_status_bar_content()
+
+        # 2. 导航栏在左侧
         self.nav_frame = tk.Frame(self.root, bg='#A8D8E8', width=160)
         self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
+        
+        # 3. 页面容器填充剩余空间
+        self.page_container = tk.Frame(self.root)
+        self.page_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        # --- 填充导航栏 ---
         nav_button_titles = ["定时广播", "节假日", "设置", "注册软件", "超级管理"]
         
         for i, title in enumerate(nav_button_titles):
@@ -190,12 +203,37 @@ class TimedBroadcastApp:
             btn.pack(fill=tk.X)
             self.nav_buttons[title] = btn
         
-        self.main_frame = tk.Frame(self.root, bg='white')
+        # --- 创建初始页面 ---
+        self.main_frame = tk.Frame(self.page_container, bg='white')
         self.pages["定时广播"] = self.main_frame
         self.create_scheduled_broadcast_page()
 
         self.current_page = self.main_frame
         self.switch_page("定时广播")
+        
+        self.update_status_bar()
+        self.log("定时播音软件已启动")
+
+    def create_status_bar_content(self):
+        self.status_labels = []
+        status_texts = ["当前时间", "系统状态", "播放状态", "任务数量"]
+        font_11 = ('Microsoft YaHei', 11)
+
+        copyright_label = tk.Label(self.status_frame, text="© 创翔科技", font=font_11,
+                                   bg='#5DADE2', fg='white', padx=15)
+        copyright_label.pack(side=tk.RIGHT, padx=2)
+        
+        # 新增的解锁按钮，初始不显示
+        self.statusbar_unlock_button = tk.Button(self.status_frame, text="🔓 解锁", font=font_11,
+                                                 bg='#2ECC71', fg='white', bd=0, padx=15, cursor='hand2',
+                                                 command=self._prompt_for_password_unlock)
+        # self.statusbar_unlock_button will be packed/unpacked in _apply_lock/unlock
+
+        for i, text in enumerate(status_texts):
+            label = tk.Label(self.status_frame, text=f"{text}: --", font=font_11,
+                           bg='#5DADE2' if i % 2 == 0 else '#7EC8E3', fg='white', padx=15, pady=5)
+            label.pack(side=tk.LEFT, padx=2)
+            self.status_labels.append(label)
 
     def switch_page(self, page_name):
         if self.is_app_locked_down and page_name not in ["注册软件", "超级管理"]:
@@ -240,7 +278,8 @@ class TimedBroadcastApp:
             target_frame = self.pages["定时广播"]
             page_name = "定时广播"
 
-        target_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # 页面现在被打包到 page_container 中
+        target_frame.pack(in_=self.page_container, fill=tk.BOTH, expand=True)
         self.current_page = target_frame
         
         selected_btn = self.nav_buttons[page_name]
@@ -289,7 +328,8 @@ class TimedBroadcastApp:
             self.log("尝试进入超级管理模块失败：密码错误。")
 
     def create_registration_page(self):
-        page_frame = tk.Frame(self.root, bg='white')
+        # 页面父容器修改
+        page_frame = tk.Frame(self.page_container, bg='white')
         title_label = tk.Label(page_frame, text="注册软件", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#2980B9')
         title_label.pack(anchor='w', padx=20, pady=20)
         
@@ -312,15 +352,44 @@ class TimedBroadcastApp:
         tk.Label(reg_code_frame, text="注册码:", font=font_spec, bg='white').pack(side=tk.LEFT)
         self.reg_code_entry = tk.Entry(reg_code_frame, font=font_spec, width=30)
         self.reg_code_entry.pack(side=tk.LEFT, padx=10)
+        
+        btn_container = tk.Frame(main_content_frame, bg='white')
+        btn_container.pack(pady=20)
 
-        register_btn = tk.Button(main_content_frame, text="注 册", font=('Microsoft YaHei', 12, 'bold'), 
+        register_btn = tk.Button(btn_container, text="注 册", font=('Microsoft YaHei', 12, 'bold'), 
                                  bg='#27AE60', fg='white', width=15, pady=5, command=self.attempt_registration)
-        register_btn.pack(pady=20)
+        register_btn.pack(pady=5)
+        
+        # 新增取消注册按钮
+        cancel_reg_btn = tk.Button(btn_container, text="取消注册", font=('Microsoft YaHei', 12, 'bold'),
+                                   bg='#E74C3C', fg='white', width=15, pady=5, command=self.cancel_registration)
+        cancel_reg_btn.pack(pady=5)
         
         info_text = "请将您的机器码发送给软件提供商以获取注册码。\n注册码分为月度授权和永久授权两种。"
         tk.Label(main_content_frame, text=info_text, font=('Microsoft YaHei', 10), bg='white', fg='grey').pack(pady=10)
 
         return page_frame
+
+    def cancel_registration(self):
+        if not messagebox.askyesno("确认操作", "您确定要取消当前注册吗？\n取消后，软件将恢复到试用或过期状态。"):
+            return
+        
+        self.log("用户请求取消注册...")
+        self._save_to_registry('RegistrationStatus', '')
+        self._save_to_registry('RegistrationDate', '')
+
+        self.check_authorization()  # 重新评估授权状态
+
+        messagebox.showinfo("操作完成", f"注册已成功取消。\n当前授权状态: {self.auth_info['message']}")
+        self.log(f"注册已取消。新状态: {self.auth_info['message']}")
+        
+        if self.is_app_locked_down:
+            # 如果试用期已过，则执行锁定流程
+            self.perform_lockdown()
+        else:
+            # 如果仍在试用期，确保功能可用并可以切换到主页面
+            if self.current_page == self.pages.get("注册软件"):
+                 self.switch_page("定时广播")
 
     def get_machine_code(self):
         if self.machine_code:
@@ -464,7 +533,8 @@ class TimedBroadcastApp:
         self.root.title(f"定时播音 ({self.auth_info['message']})")
     
     def create_super_admin_page(self):
-        page_frame = tk.Frame(self.root, bg='white')
+        # 页面父容器修改
+        page_frame = tk.Frame(self.page_container, bg='white')
         title_label = tk.Label(page_frame, text="超级管理", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#C0392B')
         title_label.pack(anchor='w', padx=20, pady=20)
         desc_label = tk.Label(page_frame, text="警告：此处的任何操作都可能导致数据丢失或配置重置，请谨慎操作。",
@@ -611,6 +681,7 @@ class TimedBroadcastApp:
             self.log(f"重置失败: {e}"); messagebox.showerror("重置失败", f"发生错误: {e}")
 
     def create_scheduled_broadcast_page(self):
+        # 父容器是 self.main_frame
         page_frame = self.pages["定时广播"]
         font_11 = ('Microsoft YaHei', 11)
 
@@ -719,27 +790,11 @@ class TimedBroadcastApp:
                                                  bg='#F9F9F9', wrap=tk.WORD, state='disabled')
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
-        status_frame = tk.Frame(page_frame, bg='#E8F4F8', height=30)
-        status_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        status_frame.pack_propagate(False)
-        self.status_labels = []
-        status_texts = ["当前时间", "系统状态", "播放状态", "任务数量"]
-        
-        copyright_label = tk.Label(status_frame, text="© 创翔科技", font=font_11,
-                                   bg='#5DADE2', fg='white', padx=15)
-        copyright_label.pack(side=tk.RIGHT, padx=2)
-        
-        for i, text in enumerate(status_texts):
-            label = tk.Label(status_frame, text=f"{text}: --", font=font_11,
-                           bg='#5DADE2' if i % 2 == 0 else '#7EC8E3', fg='white', padx=15, pady=5)
-            label.pack(side=tk.LEFT, padx=2)
-            self.status_labels.append(label)
-
-        self.update_status_bar()
-        self.log("定时播音软件已启动")
+        # 状态栏相关代码已移至 create_widgets 和 create_status_bar_content
     
     def create_holiday_page(self):
-        page_frame = tk.Frame(self.root, bg='white')
+        # 页面父容器修改
+        page_frame = tk.Frame(self.page_container, bg='white')
 
         top_frame = tk.Frame(page_frame, bg='white')
         top_frame.pack(fill=tk.X, padx=10, pady=10)
@@ -803,7 +858,8 @@ class TimedBroadcastApp:
         return page_frame
 
     def create_settings_page(self):
-        settings_frame = tk.Frame(self.root, bg='white')
+        # 页面父容器修改
+        settings_frame = tk.Frame(self.page_container, bg='white')
 
         title_label = tk.Label(settings_frame, text="系统设置", font=('Microsoft YaHei', 14, 'bold'),
                                bg='white', fg='#2C5F7C')
@@ -1054,16 +1110,16 @@ class TimedBroadcastApp:
         self.is_locked = True
         self.lock_button.config(text="解锁", bg='#2ECC71')
         self._set_ui_lock_state(tk.DISABLED)
-        if self.tray_icon: # 更新托盘菜单
-            self.tray_icon.menu = self.locked_menu
+        # 在状态栏显示解锁按钮
+        self.statusbar_unlock_button.pack(side=tk.RIGHT, padx=5)
         self.log("界面已锁定。")
 
     def _apply_unlock(self):
         self.is_locked = False
         self.lock_button.config(text="锁定", bg='#E74C3C')
         self._set_ui_lock_state(tk.NORMAL)
-        if self.tray_icon: # 更新托盘菜单
-            self.tray_icon.menu = self.unlocked_menu
+        # 从状态栏隐藏解锁按钮
+        self.statusbar_unlock_button.pack_forget()
         self.log("界面已解锁。")
 
     def perform_initial_lock(self):
@@ -2701,13 +2757,13 @@ class TimedBroadcastApp:
         try: image = Image.open(ICON_FILE)
         except Exception as e: image = Image.new('RGB', (64, 64), 'white'); print(f"警告: 未找到或无法加载图标文件 '{ICON_FILE}': {e}")
         
-        # 定义动态菜单
-        self.unlocked_menu = (item('显示', self.show_from_tray, default=True), item('退出', self.quit_app))
-        unlock_callback = lambda: self.root.after(0, self._prompt_for_password_unlock)
-        self.locked_menu = (item('解锁', unlock_callback, default=True), item('退出', self.quit_app))
+        # 定义统一的菜单，不再根据锁定状态切换
+        menu = (
+            item('显示', self.show_from_tray, default=True),
+            item('退出', self.quit_app)
+        )
         
-        initial_menu = self.locked_menu if self.is_locked else self.unlocked_menu
-        self.tray_icon = Icon("boyin", image, "定时播音", initial_menu)
+        self.tray_icon = Icon("boyin", image, "定时播音", menu)
 
     def start_tray_icon_thread(self):
         if TRAY_AVAILABLE and self.tray_icon is None:
