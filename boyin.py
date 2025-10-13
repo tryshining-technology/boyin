@@ -25,12 +25,11 @@ try:
     import win32com.client
     import pythoncom
     from pywintypes import com_error
-    # --- START: MODIFIED CODE ---
     # 使用 Python 内置的 winreg 库进行注册表操作，它比 pywin32 更稳定
     import winreg
-    # --- END: MODIFIED CODE ---
     WIN32COM_AVAILABLE = True
 except ImportError:
+    # 统一警告信息，涵盖所有 pywin32 提供的功能
     print("警告: pywin32 未安装，语音、开机启动和密码持久化功能将受限。")
 
 AUDIO_AVAILABLE = False
@@ -101,7 +100,7 @@ class TimedBroadcastApp:
 
         self.create_folder_structure()
         self.load_settings()
-        self.load_lock_password()
+        self.load_lock_password() # 在此处加载密码
         self.create_widgets()
         self.load_tasks()
         self.load_holidays()
@@ -116,13 +115,11 @@ class TimedBroadcastApp:
         if self.settings.get("start_minimized", False):
             self.root.after(100, self.hide_to_tray)
 
-    # --- START: MODIFIED REGISTRY METHODS using winreg ---
+    # --- 使用 winreg 的注册表操作方法 ---
     def _save_password_to_registry(self, password_b64):
         if not WIN32COM_AVAILABLE: return False
         try:
-            # 创建或打开主键
             key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH)
-            # 设置值，winreg.SetValueEx 的参数顺序和类型要求非常清晰
             winreg.SetValueEx(key, "LockPasswordB64", 0, winreg.REG_SZ, password_b64)
             winreg.CloseKey(key)
             self.log("密码已安全存储。")
@@ -134,14 +131,11 @@ class TimedBroadcastApp:
     def _load_password_from_registry(self):
         if not WIN32COM_AVAILABLE: return ""
         try:
-            # 打开键
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_READ)
-            # 读取值
             password_b64, _ = winreg.QueryValueEx(key, "LockPasswordB64")
             winreg.CloseKey(key)
             return password_b64
         except FileNotFoundError:
-            # 如果键或值不存在，这是正常情况
             return ""
         except Exception as e:
             self.log(f"错误: 无法从注册表加载密码 - {e}")
@@ -150,27 +144,21 @@ class TimedBroadcastApp:
     def _clear_password_from_registry(self):
         if not WIN32COM_AVAILABLE: return False
         try:
-            # 打开键
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_WRITE)
-            # 删除值
             winreg.DeleteValue(key, "LockPasswordB64")
             winreg.CloseKey(key)
             self.log("安全存储的密码已被清除。")
             return True
         except FileNotFoundError:
-            # 如果要删除的值本就不存在，也视为成功
             return True
         except Exception as e:
             self.log(f"错误: 无法从注册表清除密码 - {e}")
             return False
-    # --- END: MODIFIED REGISTRY METHODS ---
             
     def load_lock_password(self):
         """在初始化时从注册表加载密码"""
         self.lock_password_b64 = self._load_password_from_registry()
     
-    # ... [THE REST OF YOUR CODE REMAINS EXACTLY THE SAME] ...
-    # ... [从这里开始，后面的所有代码都无需改动，保持原样即可] ...
     # --------------------------------
 
     def create_folder_structure(self):
@@ -1009,16 +997,72 @@ class TimedBroadcastApp:
         
         def save_task():
             text_content = content_text.get('1.0', tk.END).strip()
-            if not text_content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
-            is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
-            if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
-            is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
-            if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
-            
-            play_mode = delay_var.get()
-            play_this_task_now = (play_mode == 'immediate')
-            saved_delay_type = 'delay' if play_mode == 'immediate' else play_mode
+            if not text_content:
+                messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog)
+                return
 
+            is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
+            if not is_valid_time:
+                messagebox.showwarning("格式错误", time_msg, parent=dialog)
+                return
+            is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
+            if not is_valid_date:
+                messagebox.showwarning("格式错误", date_msg, parent=dialog)
+                return
+
+            # 检查是否需要重新生成语音文件
+            regeneration_needed = True  # 默认为需要
+            if is_edit_mode:
+                original_task = task_to_edit
+                # 比较所有影响语音合成的参数
+                if (text_content == original_task.get('source_text') and
+                    voice_var.get() == original_task.get('voice') and
+                    speed_entry.get().strip() == original_task.get('speed', '0') and
+                    pitch_entry.get().strip() == original_task.get('pitch', '0') and
+                    volume_entry.get().strip() == original_task.get('volume', '80')):
+                    regeneration_needed = False
+                    self.log("语音内容未变更，跳过重新生成WAV文件。")
+
+            # 构建通用的任务数据字典的辅助函数
+            def build_task_data(wav_path, wav_filename_str):
+                play_mode = delay_var.get()
+                play_this_task_now = (play_mode == 'immediate')
+                # 立即播模式本身不应改变任务的常规调度行为
+                saved_delay_type = 'delay' if play_mode == 'immediate' and not is_edit_mode else task_to_edit.get('delay', 'delay') if is_edit_mode else play_mode
+                
+                return {
+                    'name': name_entry.get().strip(), 'time': time_msg, 'type': 'voice', 
+                    'content': wav_path, 'wav_filename': wav_filename_str, 
+                    'source_text': text_content, 'voice': voice_var.get(), 
+                    'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0", 
+                    'volume': volume_entry.get().strip() or "80", 
+                    'prompt': prompt_var.get(), 'prompt_file': prompt_file_var.get(), 
+                    'prompt_volume': prompt_volume_var.get(), 'bgm': bgm_var.get(), 
+                    'bgm_file': bgm_file_var.get(), 'bgm_volume': bgm_volume_var.get(), 
+                    'repeat': repeat_entry.get().strip() or "1", 'weekday': weekday_entry.get().strip(), 
+                    'date_range': date_msg, 'delay': saved_delay_type, 
+                    'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 
+                    'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {})
+                }
+
+            # 如果不需要重新生成，直接保存并返回
+            if not regeneration_needed:
+                new_task_data = build_task_data(
+                    task_to_edit.get('content'), 
+                    task_to_edit.get('wav_filename')
+                )
+                if not new_task_data['name'] or not new_task_data['time']:
+                    messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
+                
+                self.tasks[index] = new_task_data
+                self.log(f"已修改语音节目(未重新生成语音): {new_task_data['name']}")
+                self.update_task_list(); self.save_tasks(); dialog.destroy()
+                
+                if delay_var.get() == 'immediate':
+                     self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
+                return
+
+            # --- 如果需要重新生成，执行以下流程 ---
             progress_dialog = tk.Toplevel(dialog)
             progress_dialog.title("请稍候")
             progress_dialog.geometry("300x100")
@@ -1028,9 +1072,12 @@ class TimedBroadcastApp:
             self.center_window(progress_dialog, 300, 100)
             dialog.update_idletasks()
             
-            wav_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.wav"
-            output_path = os.path.join(AUDIO_FOLDER, wav_filename)
-            voice_params = {'voice': voice_var.get(), 'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0", 'volume': volume_entry.get().strip() or "80"}
+            new_wav_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.wav"
+            output_path = os.path.join(AUDIO_FOLDER, new_wav_filename)
+            voice_params = {
+                'voice': voice_var.get(), 'speed': speed_entry.get().strip() or "0", 
+                'pitch': pitch_entry.get().strip() or "0", 'volume': volume_entry.get().strip() or "80"
+            }
 
             def _on_synthesis_complete(result):
                 progress_dialog.destroy()
@@ -1044,17 +1091,22 @@ class TimedBroadcastApp:
                         try: os.remove(old_wav_path); self.log(f"已删除旧语音文件: {task_to_edit['wav_filename']}")
                         except Exception as e: self.log(f"删除旧语音文件失败: {e}")
 
-                new_task_data = {'name': name_entry.get().strip(), 'time': time_msg, 'type': 'voice', 'content': output_path, 'wav_filename': wav_filename, 'source_text': text_content, 'voice': voice_params['voice'], 'speed': voice_params['speed'], 'pitch': voice_params['pitch'], 'volume': voice_params['volume'], 'prompt': prompt_var.get(), 'prompt_file': prompt_file_var.get(), 'prompt_volume': prompt_volume_var.get(), 'bgm': bgm_var.get(), 'bgm_file': bgm_file_var.get(), 'bgm_volume': bgm_volume_var.get(), 'repeat': repeat_entry.get().strip() or "1", 'weekday': weekday_entry.get().strip(), 'date_range': date_msg, 'delay': saved_delay_type, 'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {})}
-                if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
+                new_task_data = build_task_data(output_path, new_wav_filename)
+                if not new_task_data['name'] or not new_task_data['time']:
+                    messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
                 
-                if is_edit_mode: self.tasks[index] = new_task_data; self.log(f"已修改语音节目: {new_task_data['name']}")
-                else: self.tasks.append(new_task_data); self.log(f"已添加语音节目: {new_task_data['name']}")
+                if is_edit_mode:
+                    self.tasks[index] = new_task_data
+                    self.log(f"已修改语音节目(并重新生成语音): {new_task_data['name']}")
+                else:
+                    self.tasks.append(new_task_data)
+                    self.log(f"已添加语音节目: {new_task_data['name']}")
                 
                 self.update_task_list(); self.save_tasks(); dialog.destroy()
 
-                if play_this_task_now:
+                if delay_var.get() == 'immediate':
                     self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
-            
+
             synthesis_thread = threading.Thread(target=self._synthesis_worker, 
                                                 args=(text_content, voice_params, output_path, _on_synthesis_complete))
             synthesis_thread.daemon = True
