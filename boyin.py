@@ -450,13 +450,13 @@ class TimedBroadcastApp:
         other_macs.sort(key=lambda x: x['is_up'], reverse=True)
         
         if wired_macs:
-            self.log(f"找到有线网卡 MAC: {wired_macs[0]['mac']} (来自: {wired_macs[0]['name']})")
+            # self.log(f"找到有线网卡 MAC: {wired_macs[0]['mac']} (来自: {wired_macs[0]['name']})")
             return wired_macs[0]['mac']
         if wireless_macs:
-            self.log(f"找到无线网卡 MAC: {wireless_macs[0]['mac']} (来自: {wireless_macs[0]['name']})")
+            # self.log(f"找到无线网卡 MAC: {wireless_macs[0]['mac']} (来自: {wireless_macs[0]['name']})")
             return wireless_macs[0]['mac']
         if other_macs:
-            self.log(f"找到其他类型网卡 MAC: {other_macs[0]['mac']} (来自: {other_macs[0]['name']})")
+            # self.log(f"找到其他类型网卡 MAC: {other_macs[0]['mac']} (来自: {other_macs[0]['name']})")
             return other_macs[0]['mac']
             
         for name, addrs in interfaces.items():
@@ -464,10 +464,10 @@ class TimedBroadcastApp:
                 if addr.family == psutil.AF_LINK:
                     mac = addr.address.replace(':', '').replace('-', '').upper()
                     if len(mac) == 12 and mac != '000000000000':
-                         self.log(f"备用方案找到 MAC: {mac} (来自: {name})")
+                         # self.log(f"备用方案找到 MAC: {mac} (来自: {name})")
                          return mac
 
-        self.log("错误: 未能找到任何有效的网络适配器 MAC 地址。")
+        # self.log("错误: 未能找到任何有效的网络适配器 MAC 地址。")
         return None
 
     def _calculate_reg_codes(self, numeric_mac_str):
@@ -907,7 +907,8 @@ class TimedBroadcastApp:
         playing_frame = tk.LabelFrame(page_frame, text="正在播：", font=('Microsoft YaHei', 11),
                                      bg='white', fg='#2C5F7C', padx=10, pady=5)
         playing_frame.pack(fill=tk.X, padx=10, pady=5)
-        self.playing_text = scrolledtext.ScrolledText(playing_frame, height=3, font=('Microsoft YaHei', 11),
+        # --- MODIFICATION: Changed height from 3 to 2 ---
+        self.playing_text = scrolledtext.ScrolledText(playing_frame, height=2, font=('Microsoft YaHei', 11),
                                                      bg='#FFFEF0', wrap=tk.WORD, state='disabled')
         self.playing_text.pack(fill=tk.BOTH, expand=True)
         self.update_playing_text("等待播放...")
