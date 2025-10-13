@@ -100,7 +100,7 @@ class TimedBroadcastApp:
 
         self.create_folder_structure()
         self.load_settings()
-        self.load_lock_password() # 在此处加载密码
+        self.load_lock_password()
         self.create_widgets()
         self.load_tasks()
         self.load_holidays()
@@ -172,14 +172,23 @@ class TimedBroadcastApp:
         self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
 
-        nav_button_titles = ["定时广播", "节假日", "设置"]
+        # --- NEW: 添加 "超级管理" ---
+        nav_button_titles = ["定时广播", "节假日", "设置", "超级管理"]
         
         for i, title in enumerate(nav_button_titles):
             btn_frame = tk.Frame(self.nav_frame, bg='#A8D8E8')
             btn_frame.pack(fill=tk.X, pady=1)
+
+            # --- NEW: 为 "超级管理" 设置特殊命令 ---
+            cmd = None
+            if title == "超级管理":
+                cmd = self._prompt_for_super_admin_password
+            else:
+                cmd = lambda t=title: self.switch_page(t)
+
             btn = tk.Button(btn_frame, text=title, bg='#A8D8E8',
                           fg='black', font=('Microsoft YaHei', 22, 'bold'),
-                          bd=0, padx=10, pady=8, anchor='w', command=lambda t=title: self.switch_page(t))
+                          bd=0, padx=10, pady=8, anchor='w', command=cmd)
             btn.pack(fill=tk.X)
             self.nav_buttons[title] = btn
         
@@ -191,6 +200,7 @@ class TimedBroadcastApp:
         self.switch_page("定时广播")
 
     def switch_page(self, page_name):
+        # 这个检查对 "超级管理" 无效，因为它不通过此函数调用
         if self.is_locked:
             self.log("界面已锁定，请先解锁。")
             return
@@ -213,9 +223,14 @@ class TimedBroadcastApp:
             if page_name not in self.pages:
                 self.pages[page_name] = self.create_settings_page()
             target_frame = self.pages[page_name]
-        else: # Fallback for pages not yet implemented
+        # --- NEW: 超级管理页面的创建和切换逻辑 ---
+        elif page_name == "超级管理":
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_super_admin_page()
+            target_frame = self.pages[page_name]
+        else:
             self.log(f"功能开发中: {page_name}")
-            target_frame = self.pages["定时广播"] # default to main page
+            target_frame = self.pages["定时广播"]
             page_name = "定时广播"
 
         target_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -224,6 +239,185 @@ class TimedBroadcastApp:
         selected_btn = self.nav_buttons[page_name]
         selected_btn.config(bg='#5DADE2', fg='white')
         selected_btn.master.config(bg='#5DADE2')
+
+    # --- NEW: 所有超级管理相关的新方法 ---
+    def _prompt_for_super_admin_password(self):
+        """弹出动态密码输入框，验证成功后切换到超级管理页面"""
+        correct_password = datetime.now().strftime('%Y%m%d')
+        
+        entered_password = simpledialog.askstring("身份验证", "请输入超级管理员密码:", show='*')
+        
+        if entered_password == correct_password:
+            self.log("超级管理员密码正确，进入管理模块。")
+            # 手动执行页面切换，绕过常规的 switch_page 中的锁定检查
+            if self.current_page:
+                self.current_page.pack_forget()
+            for title, btn in self.nav_buttons.items():
+                btn.config(bg='#A8D8E8', fg='black')
+                btn.master.config(bg='#A8D8E8')
+            
+            page_name = "超级管理"
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_super_admin_page()
+            target_frame = self.pages[page_name]
+            
+            target_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+            self.current_page = target_frame
+            
+            selected_btn = self.nav_buttons[page_name]
+            selected_btn.config(bg='#5DADE2', fg='white')
+            selected_btn.master.config(bg='#5DADE2')
+
+        elif entered_password is not None: # 用户输入了但密码错误
+            messagebox.showerror("验证失败", "密码错误！")
+            self.log("尝试进入超级管理模块失败：密码错误。")
+    
+    def create_super_admin_page(self):
+        """创建超级管理页面的UI"""
+        page_frame = tk.Frame(self.root, bg='white')
+
+        title_label = tk.Label(page_frame, text="超级管理", font=('Microsoft YaHei', 14, 'bold'),
+                               bg='white', fg='#C0392B')
+        title_label.pack(anchor='w', padx=20, pady=20)
+
+        desc_label = tk.Label(page_frame, text="警告：此处的任何操作都可能导致数据丢失或配置重置，请谨慎操作。",
+                              font=('Microsoft YaHei', 11), bg='white', fg='red', wraplength=700)
+        desc_label.pack(anchor='w', padx=20, pady=(0, 20))
+
+        btn_frame = tk.Frame(page_frame, bg='white')
+        btn_frame.pack(padx=20, pady=10, fill=tk.X)
+
+        btn_font = ('Microsoft YaHei', 12, 'bold')
+        btn_width = 20
+        btn_pady = 10
+
+        tk.Button(btn_frame, text="备份所有设置", command=self._backup_all_settings,
+                  font=btn_font, width=btn_width, pady=btn_pady, bg='#2980B9', fg='white').pack(pady=10)
+        
+        tk.Button(btn_frame, text="还原所有设置", command=self._restore_all_settings,
+                  font=btn_font, width=btn_width, pady=btn_pady, bg='#27AE60', fg='white').pack(pady=10)
+
+        tk.Button(btn_frame, text="重置软件", command=self._reset_software,
+                  font=btn_font, width=btn_width, pady=btn_pady, bg='#E74C3C', fg='white').pack(pady=10)
+
+        return page_frame
+
+    def _backup_all_settings(self):
+        """备份所有数据到一个JSON文件"""
+        self.log("开始备份所有设置...")
+        try:
+            backup_data = {
+                'backup_date': datetime.now().isoformat(),
+                'tasks': self.tasks,
+                'holidays': self.holidays,
+                'settings': self.settings,
+                'lock_password_b64': self._load_password_from_registry()
+            }
+            
+            filename = filedialog.asksaveasfilename(
+                title="备份所有设置到...",
+                defaultextension=".json",
+                initialfile=f"boyin_backup_{datetime.now().strftime('%Y%m%d')}.json",
+                filetypes=[("JSON Backup", "*.json")],
+                initialdir=application_path
+            )
+            
+            if filename:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(backup_data, f, ensure_ascii=False, indent=2)
+                self.log(f"所有设置已成功备份到: {os.path.basename(filename)}")
+                messagebox.showinfo("备份成功", f"所有设置已成功备份到:\n{filename}")
+        except Exception as e:
+            self.log(f"备份失败: {e}")
+            messagebox.showerror("备份失败", f"发生错误: {e}")
+
+    def _restore_all_settings(self):
+        """从备份文件还原所有数据"""
+        if not messagebox.askyesno("严重警告", "您确定要还原所有设置吗？\n当前所有配置将被覆盖，且软件将在还原后提示您重启。"):
+            return
+            
+        self.log("开始还原所有设置...")
+        filename = filedialog.askopenfilename(
+            title="选择要还原的备份文件",
+            filetypes=[("JSON Backup", "*.json")],
+            initialdir=application_path
+        )
+        
+        if not filename:
+            return
+
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                backup_data = json.load(f)
+
+            # 验证备份文件的基本结构
+            required_keys = ['tasks', 'holidays', 'settings', 'lock_password_b64']
+            if not all(key in backup_data for key in required_keys):
+                messagebox.showerror("还原失败", "备份文件格式无效或已损坏。")
+                return
+
+            # 写入文件
+            with open(TASK_FILE, 'w', encoding='utf-8') as f:
+                json.dump(backup_data['tasks'], f, ensure_ascii=False, indent=2)
+            with open(HOLIDAY_FILE, 'w', encoding='utf-8') as f:
+                json.dump(backup_data['holidays'], f, ensure_ascii=False, indent=2)
+            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(backup_data['settings'], f, ensure_ascii=False, indent=2)
+            
+            # 写入注册表
+            password_b64 = backup_data['lock_password_b64']
+            if password_b64:
+                self._save_password_to_registry(password_b64)
+            else:
+                self._clear_password_from_registry()
+            
+            self.log("所有设置已从备份文件成功还原。软件需要重启。")
+            messagebox.showinfo("还原成功", "所有设置已成功还原。\n\n请点击“确定”后手动关闭并重新启动软件以应用所有更改。")
+            # 提示用户重启是确保所有状态被正确加载的最安全方式
+            
+        except Exception as e:
+            self.log(f"还原失败: {e}")
+            messagebox.showerror("还原失败", f"发生错误: {e}")
+
+    def _reset_software(self):
+        """重置软件到初始状态"""
+        if not messagebox.askyesno(
+            "！！！最终确认！！！",
+            "您真的要重置整个软件吗？\n\n此操作将：\n- 清空所有节目单\n- 清空所有节假日\n- 清除锁定密码\n- 重置所有系统设置\n\n此操作【无法恢复】！软件将在重置后提示您重启。"
+        ):
+            return
+
+        self.log("开始执行软件重置...")
+        try:
+            # 1. 清空节目 (调用现有方法，它会处理WAV文件)
+            # 临时修改messagebox以避免二次确认
+            original_askyesno = messagebox.askyesno
+            messagebox.askyesno = lambda title, message: True
+            self.clear_all_tasks()
+            self.clear_all_holidays()
+            messagebox.askyesno = original_askyesno # 恢复
+
+            # 2. 清除密码
+            self._clear_password_from_registry()
+
+            # 3. 重置设置文件
+            default_settings = {
+                "autostart": False, "start_minimized": False, "lock_on_start": False,
+                "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00",
+                "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00",
+                "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00",
+                "last_power_action_date": ""
+            }
+            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(default_settings, f, ensure_ascii=False, indent=2)
+            
+            self.log("软件已成功重置。软件需要重启。")
+            messagebox.showinfo("重置成功", "软件已恢复到初始状态。\n\n请点击“确定”后手动关闭并重新启动软件。")
+        except Exception as e:
+            self.log(f"重置失败: {e}")
+            messagebox.showerror("重置失败", f"发生错误: {e}")
+
+    # --- END: 超级管理相关方法 ---
 
     def create_scheduled_broadcast_page(self):
         page_frame = self.pages["定时广播"]
@@ -646,6 +840,10 @@ class TimedBroadcastApp:
         self._set_widget_state_recursively(self.nav_frame, state)
         for page in self.pages.values():
              if page and page.winfo_exists():
+                # 超级管理页面不受锁定影响
+                if page_name := [k for k, v in self.pages.items() if v == page]:
+                    if page_name[0] == "超级管理":
+                        continue
                 self._set_widget_state_recursively(page, state)
     
     def _set_widget_state_recursively(self, parent_widget, state):
@@ -1014,7 +1212,6 @@ class TimedBroadcastApp:
             regeneration_needed = True  # 默认为需要
             if is_edit_mode:
                 original_task = task_to_edit
-                # 比较所有影响语音合成的参数
                 if (text_content == original_task.get('source_text') and
                     voice_var.get() == original_task.get('voice') and
                     speed_entry.get().strip() == original_task.get('speed', '0') and
@@ -1028,7 +1225,7 @@ class TimedBroadcastApp:
                 play_mode = delay_var.get()
                 play_this_task_now = (play_mode == 'immediate')
                 # 立即播模式本身不应改变任务的常规调度行为
-                saved_delay_type = 'delay' if play_mode == 'immediate' and not is_edit_mode else task_to_edit.get('delay', 'delay') if is_edit_mode else play_mode
+                saved_delay_type = task_to_edit.get('delay', 'delay') if is_edit_mode else play_mode
                 
                 return {
                     'name': name_entry.get().strip(), 'time': time_msg, 'type': 'voice', 
@@ -1381,16 +1578,26 @@ class TimedBroadcastApp:
     def clear_all_tasks(self):
         if not self.tasks: return
         if messagebox.askyesno("严重警告", "您确定要清空所有节目吗？\n此操作不可恢复！"):
+            # 先收集需要删除的文件列表
+            files_to_delete = []
             for task in self.tasks:
                 if task.get('type') == 'voice' and 'wav_filename' in task:
                     wav_path = os.path.join(AUDIO_FOLDER, task['wav_filename'])
                     if os.path.exists(wav_path):
-                        try: os.remove(wav_path)
-                        except Exception as e: self.log(f"删除语音文件失败: {e}")
+                        files_to_delete.append(wav_path)
             
+            # 清空内存中的任务列表
             self.tasks.clear()
-            self.update_task_list(); self.save_tasks()
+            self.update_task_list()
+            self.save_tasks()
             self.log("已清空所有节目。")
+
+            # 在任务数据保存后再删除文件，更安全
+            for f in files_to_delete:
+                try:
+                    os.remove(f)
+                except Exception as e:
+                    self.log(f"删除语音文件失败: {e}")
 
     def show_time_settings_dialog(self, time_entry):
         dialog = tk.Toplevel(self.root)
@@ -1684,8 +1891,9 @@ class TimedBroadcastApp:
 
             elif command == 'STOP':
                 is_playing = False
-                pygame.mixer.music.stop()
-                pygame.mixer.stop()
+                if AUDIO_AVAILABLE:
+                    pygame.mixer.music.stop()
+                    pygame.mixer.stop()
                 self.log("STOP 命令已处理，所有播放已停止。")
                 self.update_playing_text("等待播放...")
                 self.status_labels[2].config(text="播放状态: 待机")
@@ -1711,8 +1919,9 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"播放任务 '{task['name']}' 时发生严重错误: {e}")
         finally:
-            pygame.mixer.music.stop()
-            pygame.mixer.stop()
+            if AUDIO_AVAILABLE:
+                pygame.mixer.music.stop()
+                pygame.mixer.stop()
             self.update_playing_text("等待播放...")
             self.status_labels[2].config(text="播放状态: 待机")
             self.log(f"任务 '{task['name']}' 播放结束。")
@@ -1732,6 +1941,10 @@ class TimedBroadcastApp:
         return False
 
     def _play_audio_task_internal(self, task):
+        if not AUDIO_AVAILABLE:
+            self.log("错误: Pygame未初始化，无法播放音频。")
+            return
+
         interval_type = task.get('interval_type', 'first')
         duration_seconds = int(task.get('interval_seconds', 0))
         repeat_count = int(task.get('interval_first', 1))
@@ -1781,7 +1994,11 @@ class TimedBroadcastApp:
                 continue
 
     def _play_voice_task_internal(self, task):
-        if task.get('prompt', 0) and AUDIO_AVAILABLE:
+        if not AUDIO_AVAILABLE:
+            self.log("错误: Pygame未初始化，无法播放语音。")
+            return
+
+        if task.get('prompt', 0):
             if self._is_interrupted(): return
             prompt_file = task.get('prompt_file', '')
             prompt_path = os.path.join(PROMPT_FOLDER, prompt_file)
@@ -1799,7 +2016,7 @@ class TimedBroadcastApp:
             else:
                 self.log(f"警告: 提示音文件不存在 - {prompt_path}")
 
-        if task.get('bgm', 0) and AUDIO_AVAILABLE:
+        if task.get('bgm', 0):
             if self._is_interrupted(): return
             bgm_file = task.get('bgm_file', '')
             bgm_path = os.path.join(BGM_FOLDER, bgm_file)
