@@ -11,12 +11,12 @@ jobs:
       matrix:
         include:
           # 配置 1: 用于 Windows 7 (32位)
-          - python-version: '3.8.10' # 修改点：精确指定版本
+          - python-version: '3.8.10'
             architecture: 'x86'
             artifact-name: 'boyin-Windows-x86-for-Win7'
 
           # 配置 2: 用于 Windows 7 (64位)
-          - python-version: '3.8.10' # 修改点：精确指定版本
+          - python-version: '3.8.10'
             architecture: 'x64'
             artifact-name: 'boyin-Windows-x64-for-Win7'
 
@@ -37,7 +37,6 @@ jobs:
           python-version: '${{ matrix.python-version }}'
           architecture: '${{ matrix.architecture }}'
           
-      # 新增点：为 pip 依赖设置缓存
       - name: Cache pip dependencies
         uses: actions/cache@v4
         with:
@@ -51,11 +50,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
-          python Scripts/pywin32_postinstall.py -install
+          # --- 修改点在这里 ---
+          # 使用 -m 模块化调用，让Python自己寻找脚本，更稳定
+          python -m pywin32_postinstall -install
 
       - name: Build application with PyInstaller
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico --add-data "icon.ico;." boyin.py
+          pyinstaller --noconfirm --onefile --windowed --name boyin --icon=ico.ico --add-data "ico.ico;." boyin.py
 
       - name: Upload artifact (${{ matrix.artifact-name }})
         uses: actions/upload-artifact@v4
