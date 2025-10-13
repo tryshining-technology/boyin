@@ -904,13 +904,13 @@ class TimedBroadcastApp:
         self.task_tree.bind("<Double-1>", self.on_double_click_edit)
         self._enable_drag_selection(self.task_tree)
 
+        # --- MODIFICATION: Replaced ScrolledText with a standard Label for a tighter fit ---
         playing_frame = tk.LabelFrame(page_frame, text="正在播：", font=('Microsoft YaHei', 11),
-                                     bg='white', fg='#2C5F7C', padx=10, pady=5)
+                                     bg='white', fg='#2C5F7C', padx=10, pady=2) # Reduced pady
         playing_frame.pack(fill=tk.X, padx=10, pady=5)
-        # --- MODIFICATION: Changed height from 3 to 2 ---
-        self.playing_text = scrolledtext.ScrolledText(playing_frame, height=2, font=('Microsoft YaHei', 11),
-                                                     bg='#FFFEF0', wrap=tk.WORD, state='disabled')
-        self.playing_text.pack(fill=tk.BOTH, expand=True)
+        self.playing_label = tk.Label(playing_frame, text="等待播放...", font=('Microsoft YaHei', 11),
+                                      bg='#FFFEF0', anchor='w', justify=tk.LEFT, padx=5)
+        self.playing_label.pack(fill=tk.X, expand=True, ipady=4) # ipady adds vertical padding inside the label
         self.update_playing_text("等待播放...")
 
         log_frame = tk.LabelFrame(page_frame, text="", font=('Microsoft YaHei', 11),
@@ -2641,29 +2641,51 @@ class TimedBroadcastApp:
             return
             
         start_time = time.time()
-        for audio_path in playlist:
+        for i, audio_path in enumerate(playlist):
             if self._is_interrupted():
                 self.log(f"任务 '{task['name']}' 被新指令中断。")
                 return
             
-            self.log(f"正在播放: {os.path.basename(audio_path)}")
-            self.update_playing_text(f"[{task['name']}] 正在播放: {os.path.basename(audio_path)}")
+            # --- MODIFICATION: Set initial status text based on play mode ---
+            if interval_type == 'first':
+                status_msg = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)} ({i+1}/{len(playlist)})"
+                self.update_playing_text(status_msg)
+            # For 'seconds' mode, the text will be updated inside the loop
+            
+            self.log(f"正在播放: {os.path.basename(audio_path)} ({i+1}/{len(playlist)})")
             
             try:
                 pygame.mixer.music.load(audio_path)
                 pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
                 pygame.mixer.music.play()
 
+                last_text_update_time = 0 
+
                 while pygame.mixer.music.get_busy():
                     if self._is_interrupted():
                         pygame.mixer.music.stop()
                         return
-                    if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
-                        pygame.mixer.music.stop()
-                        self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
-                        return
+
+                    # --- MODIFICATION: Add periodic text update for timed playback ---
+                    if interval_type == 'seconds':
+                        now = time.time()
+                        elapsed = now - start_time
+
+                        if elapsed >= duration_seconds:
+                            pygame.mixer.music.stop()
+                            self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
+                            return
+
+                        # Update text roughly once per second
+                        if now - last_text_update_time >= 1.0:
+                            remaining_seconds = int(duration_seconds - elapsed)
+                            status_msg = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)} (剩余 {remaining_seconds} 秒)"
+                            self.update_playing_text(status_msg)
+                            last_text_update_time = now
+                    
                     time.sleep(0.1)
                 
+                # If the loop finishes, check the timer again in case the song was very short
                 if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
                     return
             except Exception as e:
@@ -2743,10 +2765,11 @@ class TimedBroadcastApp:
         self.log_text.see(tk.END); self.log_text.config(state='disabled')
 
     def update_playing_text(self, message): self.root.after(0, lambda: self._update_playing_text_threadsafe(message))
+    
     def _update_playing_text_threadsafe(self, message):
-        self.playing_text.config(state='normal')
-        self.playing_text.delete('1.0', tk.END); self.playing_text.insert('1.0', message)
-        self.playing_text.config(state='disabled')
+        # --- MODIFICATION: Logic changed to update a Label instead of ScrolledText ---
+        if hasattr(self, 'playing_label') and self.playing_label.winfo_exists():
+            self.playing_label.config(text=message)
 
     def save_tasks(self):
         try:
