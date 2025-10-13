@@ -10,6 +10,7 @@ import sys
 import getpass
 import base64
 import queue
+import shutil
 
 # 尝试导入所需库
 TRAY_AVAILABLE = False
@@ -71,6 +72,9 @@ BGM_FOLDER = os.path.join(application_path, "文稿背景")
 VOICE_SCRIPT_FOLDER = os.path.join(application_path, "语音文稿")
 ICON_FILE = resource_path("icon.ico")
 
+# 新增整点报时文件夹路径
+CHIME_FOLDER = os.path.join(AUDIO_FOLDER, "整点报时")
+
 # 定义注册表路径
 REGISTRY_KEY_PATH = r"Software\创翔科技\TimedBroadcastApp"
 
@@ -92,8 +96,8 @@ class TimedBroadcastApp:
         self.settings = {}
         self.running = True
         self.tray_icon = None
-        self.is_locked = False  # 用户手动锁定状态
-        self.is_app_locked_down = False # 因授权问题导致的软件锁定状态
+        self.is_locked = False
+        self.is_app_locked_down = False
         
         self.auth_info = {'status': 'Unregistered', 'message': '正在验证授权...'}
         self.machine_code = None
@@ -108,11 +112,12 @@ class TimedBroadcastApp:
         self.nav_buttons = {}
         self.current_page = None
 
+        self.last_chime_hour = -1 # 用于防止整点报时重复触发
+
         self.create_folder_structure()
         self.load_settings()
         self.load_lock_password()
         
-        # 授权检查必须在加载控件和数据之前
         self.check_authorization()
 
         self.create_widgets()
@@ -198,15 +203,12 @@ class TimedBroadcastApp:
         self.switch_page("定时广播")
 
     def switch_page(self, page_name):
-        # 授权锁定下，只允许进入注册和超管页面
         if self.is_app_locked_down and page_name not in ["注册软件", "超级管理"]:
             self.log("软件授权已过期，请先注册。")
-            # 确保强制停留在注册页面
             if self.current_page != self.pages.get("注册软件"):
                 self.root.after(10, lambda: self.switch_page("注册软件"))
             return
 
-        # 用户手动锁定下，只允许进入超管和注册页面
         if self.is_locked and page_name not in ["超级管理", "注册软件"]:
             self.log("界面已锁定，请先解锁。")
             return
@@ -228,6 +230,8 @@ class TimedBroadcastApp:
         elif page_name == "设置":
             if page_name not in self.pages:
                 self.pages[page_name] = self.create_settings_page()
+            # 每次切换到设置页面时都刷新UI
+            self._refresh_settings_ui()
             target_frame = self.pages[page_name]
         elif page_name == "注册软件":
             if page_name not in self.pages:
@@ -250,7 +254,6 @@ class TimedBroadcastApp:
         selected_btn.master.config(bg='#5DADE2')
 
     def _prompt_for_super_admin_password(self):
-        # 使用自定义对话框替代 simpledialog
         dialog = tk.Toplevel(self.root)
         dialog.title("身份验证")
         dialog.geometry("350x180")
@@ -287,7 +290,7 @@ class TimedBroadcastApp:
         if entered_password == correct_password:
             self.log("超级管理员密码正确，进入管理模块。")
             self.switch_page("超级管理")
-        elif entered_password is not None: # 如果用户输入了但密码错误
+        elif entered_password is not None:
             messagebox.showerror("验证失败", "密码错误！")
             self.log("尝试进入超级管理模块失败：密码错误。")
 
@@ -303,7 +306,6 @@ class TimedBroadcastApp:
 
         font_spec = ('Microsoft YaHei', 12)
         
-        # 显示机器码
         machine_code_frame = tk.Frame(main_content_frame, bg='white')
         machine_code_frame.pack(fill=tk.X, pady=10)
         tk.Label(machine_code_frame, text="机器码:", font=font_spec, bg='white').pack(side=tk.LEFT)
@@ -313,19 +315,16 @@ class TimedBroadcastApp:
         machine_code_entry.insert(0, machine_code_val)
         machine_code_entry.config(state='readonly')
 
-        # 输入注册码
         reg_code_frame = tk.Frame(main_content_frame, bg='white')
         reg_code_frame.pack(fill=tk.X, pady=10)
         tk.Label(reg_code_frame, text="注册码:", font=font_spec, bg='white').pack(side=tk.LEFT)
         self.reg_code_entry = tk.Entry(reg_code_frame, font=font_spec, width=30)
         self.reg_code_entry.pack(side=tk.LEFT, padx=10)
 
-        # 注册按钮
         register_btn = tk.Button(main_content_frame, text="注 册", font=('Microsoft YaHei', 12, 'bold'), 
                                  bg='#27AE60', fg='white', width=15, pady=5, command=self.attempt_registration)
         register_btn.pack(pady=20)
         
-        # 提示信息
         info_text = "请将您的机器码发送给软件提供商以获取注册码。\n注册码分为月度授权和永久授权两种。"
         tk.Label(main_content_frame, text=info_text, font=('Microsoft YaHei', 10), bg='white', fg='grey').pack(pady=10)
 
@@ -343,7 +342,6 @@ class TimedBroadcastApp:
         try:
             mac = self._get_mac_address()
             if mac:
-                # 将MAC地址中的A-F替换为1-6
                 substitution = str.maketrans("ABCDEF", "123456")
                 numeric_mac = mac.upper().translate(substitution)
                 self.machine_code = numeric_mac
@@ -356,7 +354,6 @@ class TimedBroadcastApp:
             sys.exit()
 
     def _get_mac_address(self):
-        """优先获取有线网卡，其次是无线网卡的MAC地址"""
         interfaces = psutil.net_if_addrs()
         
         wired_macs = []
@@ -366,29 +363,23 @@ class TimedBroadcastApp:
             for addr in addrs:
                 if addr.family == psutil.AF_LINK:
                     mac = addr.address.replace(':', '').replace('-', '').upper()
-                    # 确保是12位MAC地址
                     if len(mac) == 12:
                         if 'ethernet' in name.lower() or 'eth' in name.lower():
                             wired_macs.append(mac)
                         elif 'wi-fi' in name.lower() or 'wlan' in name.lower():
                             wireless_macs.append(mac)
         
-        # 优先返回有线网卡
         if wired_macs:
             return wired_macs[0]
-        # 其次返回无线网卡
         if wireless_macs:
             return wireless_macs[0]
             
         return None
 
     def _calculate_reg_codes(self, numeric_mac_str):
-        """根据纯数字的机器码计算月度和永久注册码"""
         try:
-            # 1. 计算月度码
             monthly_code = int(int(numeric_mac_str) * 3.14)
             
-            # 2. 计算永久码
             reversed_mac_str = numeric_mac_str[::-1]
             permanent_val = int(reversed_mac_str) / 3.14
             permanent_code = f"{permanent_val:.2f}"
@@ -412,17 +403,16 @@ class TimedBroadcastApp:
             self._save_to_registry('RegistrationStatus', 'Monthly')
             self._save_to_registry('RegistrationDate', today_str)
             messagebox.showinfo("注册成功", "恭喜您，月度授权已成功激活！")
-            self.check_authorization() # 重新检查授权并解锁
+            self.check_authorization()
         elif entered_code == correct_codes['permanent']:
             self._save_to_registry('RegistrationStatus', 'Permanent')
             self._save_to_registry('RegistrationDate', today_str)
             messagebox.showinfo("注册成功", "恭喜您，永久授权已成功激活！")
-            self.check_authorization() # 重新检查授权并解锁
+            self.check_authorization()
         else:
             messagebox.showerror("注册失败", "您输入的注册码无效，请重新核对。")
 
     def check_authorization(self):
-        """核心授权检查逻辑"""
         today = datetime.now().date()
         status = self._load_from_registry('RegistrationStatus')
         reg_date_str = self._load_from_registry('RegistrationDate')
@@ -444,7 +434,7 @@ class TimedBroadcastApp:
             except (TypeError, ValueError):
                 self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
                 self.is_app_locked_down = True
-        else: # 未注册
+        else:
             first_run_date_str = self._load_from_registry('FirstRunDate')
             if not first_run_date_str:
                 self._save_to_registry('FirstRunDate', today.strftime('%Y-%m-%d'))
@@ -468,17 +458,14 @@ class TimedBroadcastApp:
         self.update_title_bar()
 
     def perform_lockdown(self):
-        """执行软件授权锁定"""
         messagebox.showerror("授权过期", "您的软件试用期或授权已到期，功能已受限。\n请在“注册软件”页面输入有效注册码以继续使用。")
         self.log("软件因授权问题被锁定。")
         
-        # 禁用所有任务
         for task in self.tasks:
             task['status'] = '禁用'
         self.update_task_list()
         self.save_tasks()
         
-        # 强制切换到注册页面
         self.switch_page("注册软件")
 
     def update_title_bar(self):
@@ -543,13 +530,11 @@ class TimedBroadcastApp:
             if not all(key in backup_data for key in required_keys):
                 messagebox.showerror("还原失败", "备份文件格式无效或已损坏。"); return
 
-            # 1. 更新内存中的状态
             self.tasks = backup_data['tasks']
             self.holidays = backup_data['holidays']
             self.settings = backup_data['settings']
             self.lock_password_b64 = backup_data['lock_password_b64']
             
-            # 2. 将更新后的状态持久化到文件和注册表
             self.save_tasks()
             self.save_holidays()
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -558,9 +543,8 @@ class TimedBroadcastApp:
             if self.lock_password_b64:
                 self._save_to_registry("LockPasswordB64", self.lock_password_b64)
             else:
-                self._save_to_registry("LockPasswordB64", "") # 清空
+                self._save_to_registry("LockPasswordB64", "")
 
-            # 3. 刷新所有UI界面
             self.update_task_list()
             self.update_holiday_list()
             self._refresh_settings_ui()
@@ -589,6 +573,10 @@ class TimedBroadcastApp:
         self.weekly_reboot_time_var.set(self.settings.get("weekly_reboot_time", "22:00:00"))
         self.weekly_reboot_days_var.set(self.settings.get("weekly_reboot_days", "每周:67"))
 
+        # 新增：刷新整点报时UI
+        self.time_chime_enabled_var.set(self.settings.get("time_chime_enabled", False))
+        self.time_chime_voice_var.set(self.settings.get("time_chime_voice", ""))
+        
         if self.lock_password_b64 and WIN32COM_AVAILABLE:
             self.clear_password_btn.config(state=tk.NORMAL)
         else:
@@ -608,14 +596,20 @@ class TimedBroadcastApp:
             self.clear_all_holidays()
             messagebox.askyesno = original_askyesno
 
-            self._save_to_registry("LockPasswordB64", "") # 清空密码
+            self._save_to_registry("LockPasswordB64", "")
+
+            # 重置时也要删除整点报时文件
+            if os.path.exists(CHIME_FOLDER):
+                shutil.rmtree(CHIME_FOLDER)
+                self.log("已删除整点报时缓存文件。")
 
             default_settings = {
                 "autostart": False, "start_minimized": False, "lock_on_start": False,
                 "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00",
                 "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00",
                 "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00",
-                "last_power_action_date": ""
+                "last_power_action_date": "",
+                "time_chime_enabled": False, "time_chime_voice": "" # 新增
             }
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(default_settings, f, ensure_ascii=False, indent=2)
@@ -762,7 +756,7 @@ class TimedBroadcastApp:
                               bg='white', fg='#2C5F7C')
         title_label.pack(side=tk.LEFT)
         
-        desc_label = tk.Label(page_frame, text="节假日不播放 (手动和立即播任务除外)", font=('Microsoft YaHei', 11),
+        desc_label = tk.Label(page_frame, text="节假日不播放 (手动和立即播任务除外)，整点报时也受此约束", font=('Microsoft YaHei', 11),
                               bg='white', fg='#555')
         desc_label.pack(anchor='w', padx=10, pady=(0, 10))
 
@@ -803,10 +797,10 @@ class TimedBroadcastApp:
             ("添加", self.add_holiday),
             ("修改", self.edit_holiday),
             ("删除", self.delete_holiday),
-            (None, None), # Spacer
+            (None, None),
             ("全部启用", self.enable_all_holidays),
             ("全部禁用", self.disable_all_holidays),
-            (None, None), # Spacer
+            (None, None),
             ("导入节日", self.import_holidays),
             ("导出节日", self.export_holidays),
             ("清空节日", self.clear_all_holidays),
@@ -861,6 +855,32 @@ class TimedBroadcastApp:
         if not self.lock_password_b64 or not WIN32COM_AVAILABLE:
             self.clear_password_btn.config(state=tk.DISABLED)
 
+        # --- 新增：整点报时功能 ---
+        time_chime_frame = tk.LabelFrame(settings_frame, text="整点报时", font=('Microsoft YaHei', 12, 'bold'),
+                                         bg='white', padx=15, pady=10)
+        time_chime_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        self.time_chime_enabled_var = tk.BooleanVar(value=self.settings.get("time_chime_enabled", False))
+        self.time_chime_voice_var = tk.StringVar(value=self.settings.get("time_chime_voice", ""))
+        
+        chime_control_frame = tk.Frame(time_chime_frame, bg='white')
+        chime_control_frame.pack(fill=tk.X, pady=5)
+
+        tk.Checkbutton(chime_control_frame, text="启用整点报时功能", variable=self.time_chime_enabled_var, 
+                       font=('Microsoft YaHei', 11), bg='white', anchor='w',
+                       command=self._handle_time_chime_toggle).pack(side=tk.LEFT)
+
+        available_voices = self.get_available_voices()
+        self.chime_voice_combo = ttk.Combobox(chime_control_frame, textvariable=self.time_chime_voice_var, 
+                                              values=available_voices, font=('Microsoft YaHei', 10), 
+                                              width=40, state='readonly')
+        self.chime_voice_combo.pack(side=tk.LEFT, padx=10)
+        self.chime_voice_combo.bind("<<ComboboxSelected>>", self._on_chime_voice_selected)
+
+        if not available_voices:
+            self.time_chime_enabled_var.set(False)
+            # 可以在这里放一个Label提示用户没有可用语音
+        
         power_frame = tk.LabelFrame(settings_frame, text="电源管理", font=('Microsoft YaHei', 12, 'bold'),
                                     bg='white', padx=15, pady=10)
         power_frame.pack(fill=tk.X, padx=20, pady=10)
@@ -911,6 +931,115 @@ class TimedBroadcastApp:
             "设置每周重启", self.weekly_reboot_days_var, self.weekly_reboot_time_var)).pack(side=tk.LEFT)
 
         return settings_frame
+
+    # --- 新增：整点报时处理逻辑 ---
+    def _on_chime_voice_selected(self, event):
+        """当用户在下拉列表中选择新语音时，如果报时已启用，则重新生成文件"""
+        self.save_settings()
+        if self.time_chime_enabled_var.get():
+            if messagebox.askyesno("确认", "您更改了播音员，需要重新生成全部24个报时文件。\n是否立即开始？"):
+                self._handle_time_chime_toggle(force_regenerate=True)
+            else:
+                # 用户取消，恢复到之前的设置
+                self.time_chime_voice_var.set(self.settings.get("time_chime_voice", ""))
+
+    def _handle_time_chime_toggle(self, force_regenerate=False):
+        """处理整点报时复选框的点击事件"""
+        is_enabled = self.time_chime_enabled_var.get()
+        
+        if is_enabled:
+            selected_voice = self.time_chime_voice_var.get()
+            if not selected_voice:
+                messagebox.showwarning("操作失败", "请先从右侧列表中选择一个播音员。")
+                self.time_chime_enabled_var.set(False)
+                return
+
+            self.save_settings()
+            self.log("准备启用整点报时功能，开始生成语音文件...")
+            
+            progress_dialog = tk.Toplevel(self.root)
+            progress_dialog.title("请稍候")
+            progress_dialog.geometry("350x120")
+            progress_dialog.resizable(False, False)
+            progress_dialog.transient(self.root); progress_dialog.grab_set()
+            self.center_window(progress_dialog, 350, 120)
+            
+            tk.Label(progress_dialog, text="正在生成整点报时文件 (0/24)...", font=('Microsoft YaHei', 11)).pack(pady=10)
+            progress_label = tk.Label(progress_dialog, text="", font=('Microsoft YaHei', 10))
+            progress_label.pack(pady=5)
+            
+            threading.Thread(target=self._generate_chime_files_worker, 
+                             args=(selected_voice, progress_dialog, progress_label), daemon=True).start()
+
+        elif not force_regenerate: # 仅在非强制生成时（即用户手动取消勾选）才执行删除
+            if messagebox.askyesno("确认操作", "您确定要禁用整点报时功能吗？\n这将删除所有已生成的报时音频文件。"):
+                self.save_settings()
+                threading.Thread(target=self._delete_chime_files_worker, daemon=True).start()
+            else:
+                # 用户取消，保持勾选状态
+                self.time_chime_enabled_var.set(True)
+    
+    def _get_time_period_string(self, hour):
+        """根据小时（0-23）返回中文时间段"""
+        if 0 <= hour < 6: return "凌晨"
+        elif 6 <= hour < 9: return "早上"
+        elif 9 <= hour < 12: return "上午"
+        elif 12 <= hour < 14: return "中午"
+        elif 14 <= hour < 18: return "下午"
+        else: return "晚上"
+
+    def _generate_chime_files_worker(self, voice, progress_dialog, progress_label):
+        """在后台线程中生成24个报时文件"""
+        if not os.path.exists(CHIME_FOLDER):
+            os.makedirs(CHIME_FOLDER)
+        
+        success = True
+        try:
+            for hour in range(24):
+                period = self._get_time_period_string(hour)
+                display_hour = hour
+                if period == "下午" and hour > 12: display_hour -= 12
+                elif period == "晚上" and hour > 12: display_hour -= 12
+
+                text = f"现在时刻,北京时间{period}{display_hour}点整"
+                output_path = os.path.join(CHIME_FOLDER, f"{hour:02d}.wav")
+                
+                # 更新UI
+                progress_text = f"正在生成：{hour:02d}.wav ({hour + 1}/24)"
+                self.root.after(0, lambda p=progress_text: progress_label.config(text=p))
+                
+                voice_params = {'voice': voice, 'speed': '0', 'pitch': '0', 'volume': '100'}
+                if not self._synthesize_text_to_wav(text, voice_params, output_path):
+                    raise Exception(f"生成 {hour:02d}.wav 失败")
+        except Exception as e:
+            success = False
+            self.log(f"生成整点报时文件时出错: {e}")
+            self.root.after(0, messagebox.showerror, "错误", f"生成报时文件失败：{e}")
+        finally:
+            self.root.after(0, progress_dialog.destroy)
+            if success:
+                self.log("全部整点报时文件生成完毕。")
+                self.root.after(0, messagebox.showinfo, "成功", "整点报时功能已启用！")
+            else:
+                self.log("整点报时功能启用失败。")
+                self.settings['time_chime_enabled'] = False
+                self.root.after(0, self.time_chime_enabled_var.set, False)
+                self.save_settings()
+
+    def _delete_chime_files_worker(self):
+        """在后台线程中删除报时文件和文件夹"""
+        self.log("正在禁用整点报时功能，开始删除缓存文件...")
+        try:
+            if os.path.exists(CHIME_FOLDER):
+                shutil.rmtree(CHIME_FOLDER)
+                self.log("整点报时缓存文件已成功删除。")
+            else:
+                self.log("未找到整点报时缓存文件夹，无需删除。")
+        except Exception as e:
+            self.log(f"删除整点报时文件失败: {e}")
+            self.root.after(0, messagebox.showerror, "错误", f"删除报时文件失败：{e}")
+
+    # ------------------------------------
 
     def toggle_lock_state(self):
         if self.is_locked:
@@ -1047,7 +1176,6 @@ class TimedBroadcastApp:
 
     def _set_ui_lock_state(self, state):
         for title, btn in self.nav_buttons.items():
-            # 锁定状态下，超级管理和注册软件按钮保持可用
             if title in ["超级管理", "注册软件"]:
                 continue 
             try:
@@ -1586,7 +1714,6 @@ class TimedBroadcastApp:
             self.log(f"导出文稿失败: {e}")
 
     def _synthesis_worker(self, text, voice_params, output_path, callback):
-        """后台线程工作函数，用于语音合成"""
         try:
             success = self._synthesize_text_to_wav(text, voice_params, output_path)
             if success:
@@ -1597,7 +1724,6 @@ class TimedBroadcastApp:
             self.root.after(0, callback, {'success': False, 'error': str(e)})
 
     def _synthesize_text_to_wav(self, text, voice_params, output_path):
-        """将文本合成为WAV文件"""
         if not WIN32COM_AVAILABLE:
             raise ImportError("pywin32 模块未安装，无法进行语音合成。")
         
@@ -1769,7 +1895,6 @@ class TimedBroadcastApp:
         if count > 0: self.update_task_list(); self.save_tasks(); self.log(f"已{status} {count} 个节目")
     
     def _set_tasks_status_by_type(self, task_type, status):
-        """根据任务类型 'audio' 或 'voice' 设置状态"""
         if not self.tasks: return
         
         type_name = "音频" if task_type == 'audio' else "语音"
@@ -2077,9 +2202,9 @@ class TimedBroadcastApp:
     def _scheduler_worker(self):
         while self.running:
             now = datetime.now()
-            # 如果软件被锁定，则不检查广播任务
             if not self.is_app_locked_down:
                 self._check_broadcast_tasks(now)
+                self._check_time_chime(now) # 新增：检查整点报时
             
             self._check_power_tasks(now)
             time.sleep(1)
@@ -2097,6 +2222,26 @@ class TimedBroadcastApp:
                 self.log(f"错误：节假日 '{holiday.get('name')}' 日期格式无效，已跳过。")
                 continue
         return False
+
+    def _check_time_chime(self, now):
+        """检查是否需要进行整点报时"""
+        if not self.settings.get("time_chime_enabled", False):
+            return
+
+        # 检查是否是整点，且与上次报时的小时不重复
+        if now.minute == 0 and now.second == 0 and now.hour != self.last_chime_hour:
+            self.last_chime_hour = now.hour
+            
+            if self._is_in_holiday(now):
+                self.log("当前处于节假日，跳过整点报时。")
+                return
+
+            chime_file = os.path.join(CHIME_FOLDER, f"{now.hour:02d}.wav")
+            if os.path.exists(chime_file):
+                self.log(f"触发整点报时: {now.hour:02d}点")
+                self.playback_command_queue.put(('PLAY_CHIME', chime_file))
+            else:
+                self.log(f"警告：找不到整点报时文件 {chime_file}，报时失败。")
 
     def _check_broadcast_tasks(self, now):
         current_date_str = now.strftime("%Y-%m-%d")
@@ -2162,7 +2307,10 @@ class TimedBroadcastApp:
     def _playback_worker(self):
         is_playing = False
         while self.running:
-            command, data = self.playback_command_queue.get()
+            try:
+                command, data = self.playback_command_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
 
             if command == 'PLAY_INTERRUPT':
                 is_playing = True
@@ -2177,6 +2325,27 @@ class TimedBroadcastApp:
                     is_playing = True
                     self._execute_broadcast(data[0], data[1])
                     is_playing = False
+
+            elif command == 'PLAY_CHIME':
+                if not AUDIO_AVAILABLE: continue
+                chime_path = data
+                was_playing = pygame.mixer.get_busy()
+                if was_playing:
+                    pygame.mixer.pause()
+                    self.log("整点报时，暂停当前播放...")
+                
+                try:
+                    chime_sound = pygame.mixer.Sound(chime_path)
+                    chime_sound.set_volume(1.0) # 报时音量固定为最大
+                    chime_channel = chime_sound.play()
+                    while chime_channel and chime_channel.get_busy():
+                        time.sleep(0.1) # 阻塞等待报时结束
+                except Exception as e:
+                    self.log(f"播放整点报时失败: {e}")
+
+                if was_playing:
+                    pygame.mixer.unpause()
+                    self.log("报时结束，恢复播放。")
 
             elif command == 'STOP':
                 is_playing = False
@@ -2216,7 +2385,6 @@ class TimedBroadcastApp:
             self.log(f"任务 '{task['name']}' 播放结束。")
 
     def _is_interrupted(self):
-        """Checks for an interrupt command without blocking."""
         try:
             command_tuple = self.playback_command_queue.get_nowait()
             command = command_tuple[0]
@@ -2383,7 +2551,14 @@ class TimedBroadcastApp:
         except Exception as e: self.log(f"加载任务失败: {e}")
 
     def load_settings(self):
-        defaults = {"autostart": False, "start_minimized": False, "lock_on_start": False, "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00", "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00", "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00", "last_power_action_date": ""}
+        defaults = {
+            "autostart": False, "start_minimized": False, "lock_on_start": False, 
+            "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00", 
+            "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00", 
+            "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00", 
+            "last_power_action_date": "",
+            "time_chime_enabled": False, "time_chime_voice": "" # 新增
+        }
         if os.path.exists(SETTINGS_FILE):
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as f: self.settings = json.load(f)
@@ -2408,7 +2583,9 @@ class TimedBroadcastApp:
                 "weekly_shutdown_time": self.weekly_shutdown_time_var.get(), 
                 "weekly_reboot_enabled": self.weekly_reboot_enabled_var.get(), 
                 "weekly_reboot_days": self.weekly_reboot_days_var.get(), 
-                "weekly_reboot_time": self.weekly_reboot_time_var.get()
+                "weekly_reboot_time": self.weekly_reboot_time_var.get(),
+                "time_chime_enabled": self.time_chime_enabled_var.get(), # 新增
+                "time_chime_voice": self.time_chime_voice_var.get() # 新增
             })
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(self.settings, f, ensure_ascii=False, indent=2)
@@ -2840,7 +3017,6 @@ def main():
     root.mainloop()
 
 if __name__ == "__main__":
-    # 彻底退出前的最终保障
     if not WIN32COM_AVAILABLE:
         messagebox.showerror("核心依赖缺失", "pywin32 库未安装或损坏，软件无法运行注册和锁定等核心功能，即将退出。")
         sys.exit()
