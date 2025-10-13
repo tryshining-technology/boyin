@@ -84,9 +84,11 @@ class TimedBroadcastApp:
         self.root = root
         self.root.title("定时播音")
         
-        # --- 界面尺寸优化 ---
-        # 移除固定的 geometry，改为启动时最大化
-        self.root.state('zoomed')
+        # --- 窗口尺寸优化 ---
+        # 设置一个默认启动尺寸
+        self.root.geometry("1400x800")
+        # 设置最小尺寸，防止窗口过小导致控件不可见
+        self.root.minsize(1024, 768)
         
         self.root.configure(bg='#E8F4F8')
         
@@ -3218,16 +3220,18 @@ class TimedBroadcastApp:
             self.log("已清空所有节假日。")
 
 def main():
-    # --- DPI 感知设置 ---
+    # --- DPI 感知优化 (兼容 Win7 到 Win11) ---
     try:
-        # 尝试使用新版Win10+的API
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
-    except AttributeError:
-        # 回退到旧版API
+        # 尝试 Win8.1+ 的 SetProcessDpiAwareness(1) - System Aware
+        # 这个模式对 Tkinter 兼容性最好，能解决高分屏模糊问题，且不易出现UI错乱
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        # 如果失败（例如在 Win7 上 shcore.dll 不存在），则回退到旧版方法
         try:
             ctypes.windll.user32.SetProcessDPIAware()
-        except AttributeError:
-            pass # 在非Windows系统上会失败
+        except Exception:
+            # 如果两种方法都失败（例如非Windows系统），则静默处理
+            pass
 
     root = tk.Tk()
     app = TimedBroadcastApp(root)
