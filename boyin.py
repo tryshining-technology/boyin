@@ -374,14 +374,15 @@ class TimedBroadcastApp:
     def _reset_software(self):
         if not messagebox.askyesno(
             "！！！最终确认！！！",
-            "您真的要重置整个软件吗？\n\n此操作将：\n- 清空所有节目单\n- 清空所有节假日\n- 清除锁定密码\n- 重置所有系统设置\n\n此操作【无法恢复】！软件将在重置后提示您重启。"
+            "您真的要重置整个软件吗？\n\n此操作将：\n- 清空所有节目单 (但保留音频文件)\n- 清空所有节假日\n- 清除锁定密码\n- 重置所有系统设置\n\n此操作【无法恢复】！软件将在重置后提示您重启。"
         ): return
 
         self.log("开始执行软件重置...")
         try:
             original_askyesno = messagebox.askyesno
             messagebox.askyesno = lambda title, message: True
-            self.clear_all_tasks()
+            # [Bug Fix 2] 调用清空任务时，明确指出不要删除关联的物理文件
+            self.clear_all_tasks(delete_associated_files=False)
             self.clear_all_holidays()
             messagebox.askyesno = original_askyesno
 
@@ -525,20 +526,6 @@ class TimedBroadcastApp:
         self.update_status_bar()
         self.log("定时播音软件已启动")
     
-    # ... 从这里开始，剩余的代码与上一版本完全相同 ...
-    def create_holiday_page(self):
-        # ...
-        pass
-    
-    # ... all other methods ...
-
-# (此处省略了所有从 create_holiday_page 到文件末尾的未修改代码，请您保留您本地的这些代码)
-# 为了简洁，此处不再重复粘贴。请确保您只替换了文件开头到 `create_scheduled_broadcast_page` 之前的部分。
-# ...
-# 实际上，为了确保100%正确，我还是将完整代码放在下面。
-
-# (以下为完整代码，接上文)
-
     def create_holiday_page(self):
         page_frame = tk.Frame(self.root, bg='white')
 
@@ -834,14 +821,25 @@ class TimedBroadcastApp:
             self.save_settings()
 
     def _set_ui_lock_state(self, state):
-        self._set_widget_state_recursively(self.nav_frame, state)
-        for page in self.pages.values():
-             if page and page.winfo_exists():
-                if page_name := [k for k, v in self.pages.items() if v == page]:
-                    if page_name[0] == "超级管理":
-                        continue
-                self._set_widget_state_recursively(page, state)
-    
+        # [Bug Fix 1] 精细化控制导航栏按钮，而不是禁用整个导航栏
+        for title, btn in self.nav_buttons.items():
+            if title == "超级管理":
+                continue  # 跳过“超级管理”按钮，使其保持可用
+            try:
+                # 禁用按钮本身
+                btn.config(state=state)
+                # 禁用按钮所在的frame，以改变背景色（如果需要）
+                btn.master.config(state=state)
+            except tk.TclError:
+                pass
+        
+        # 禁用除超级管理页面之外的所有页面内容
+        for page_name, page_frame in self.pages.items():
+            if page_frame and page_frame.winfo_exists():
+                if page_name == "超级管理":
+                    continue
+                self._set_widget_state_recursively(page_frame, state)
+
     def _set_widget_state_recursively(self, parent_widget, state):
         for child in parent_widget.winfo_children():
             if child == self.lock_button:
@@ -1363,7 +1361,7 @@ class TimedBroadcastApp:
     def delete_task(self):
         selections = self.task_tree.selection()
         if not selections: messagebox.showwarning("警告", "请先选择要删除的节目"); return
-        if messagebox.askyesno("确认", f"确定要删除选中的 {len(selections)} 个节目吗？"):
+        if messagebox.askyesno("确认", f"确定要删除选中的 {len(selections)} 个节目吗？\n(关联的语音文件也将被删除)"):
             indices = sorted([self.task_tree.index(s) for s in selections], reverse=True)
             for index in indices:
                 task_to_delete = self.tasks[index]
@@ -1456,6 +1454,14 @@ class TimedBroadcastApp:
         if filename:
             try:
                 with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
+
+                # [Bug Fix 3] 添加文件结构校验
+                if not isinstance(imported, list) or \
+                   (imported and (not isinstance(imported[0], dict) or 'time' not in imported[0] or 'type' not in imported[0])):
+                    messagebox.showerror("导入失败", "文件格式不正确，看起来不是一个有效的节目单备份文件。")
+                    self.log(f"尝试导入格式错误的节目单文件: {os.path.basename(filename)}")
+                    return
+
                 self.tasks.extend(imported); self.update_task_list(); self.save_tasks()
                 self.log(f"已从 {os.path.basename(filename)} 导入 {len(imported)} 个节目")
             except Exception as e: messagebox.showerror("错误", f"导入失败: {e}")
@@ -1564,24 +1570,40 @@ class TimedBroadcastApp:
         self.root.wait_window(dialog)
         return result[0]
 
-    def clear_all_tasks(self):
+    def clear_all_tasks(self, delete_associated_files=True):
         if not self.tasks: return
-        if messagebox.askyesno("严重警告", "您确定要清空所有节目吗？\n此操作不可恢复！"):
+        
+        # [Bug Fix 2] 根据参数动态生成提示信息
+        if delete_associated_files:
+            msg = "您确定要清空所有节目吗？\n此操作将同时删除关联的语音文件，且不可恢复！"
+        else:
+            msg = "您确定要清空所有节目列表吗？\n（此操作不会删除音频文件）"
+            
+        if messagebox.askyesno("严重警告", msg):
             files_to_delete = []
-            for task in self.tasks:
-                if task.get('type') == 'voice' and 'wav_filename' in task:
-                    wav_path = os.path.join(AUDIO_FOLDER, task['wav_filename'])
-                    if os.path.exists(wav_path):
-                        files_to_delete.append(wav_path)
+            # [Bug Fix 2] 仅在需要时收集待删除文件列表
+            if delete_associated_files:
+                for task in self.tasks:
+                    if task.get('type') == 'voice' and 'wav_filename' in task:
+                        wav_filename = task.get('wav_filename')
+                        if wav_filename: # 确保文件名存在
+                            wav_path = os.path.join(AUDIO_FOLDER, wav_filename)
+                            if os.path.exists(wav_path):
+                                files_to_delete.append(wav_path)
             
             self.tasks.clear()
             self.update_task_list()
             self.save_tasks()
-            self.log("已清空所有节目。")
+            self.log("已清空所有节目列表。")
 
-            for f in files_to_delete:
-                try: os.remove(f)
-                except Exception as e: self.log(f"删除语音文件失败: {e}")
+            # [Bug Fix 2] 仅在需要时执行文件删除
+            if delete_associated_files and files_to_delete:
+                for f in files_to_delete:
+                    try: 
+                        os.remove(f)
+                        self.log(f"已删除语音文件: {os.path.basename(f)}")
+                    except Exception as e: 
+                        self.log(f"删除语音文件失败: {e}")
 
     def show_time_settings_dialog(self, time_entry):
         dialog = tk.Toplevel(self.root)
@@ -2495,6 +2517,14 @@ class TimedBroadcastApp:
         if filename:
             try:
                 with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
+
+                # [Bug Fix 3] 添加文件结构校验
+                if not isinstance(imported, list) or \
+                   (imported and (not isinstance(imported[0], dict) or 'start_datetime' not in imported[0] or 'end_datetime' not in imported[0])):
+                    messagebox.showerror("导入失败", "文件格式不正确，看起来不是一个有效的节假日备份文件。")
+                    self.log(f"尝试导入格式错误的节假日文件: {os.path.basename(filename)}")
+                    return
+
                 self.holidays.extend(imported)
                 self.update_holiday_list(); self.save_holidays()
                 self.log(f"已从 {os.path.basename(filename)} 导入 {len(imported)} 个节假日")
