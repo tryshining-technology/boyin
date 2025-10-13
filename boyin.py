@@ -11,6 +11,7 @@ import getpass
 import base64
 import queue
 import shutil
+import ctypes  # 引入 ctypes 用于DPI感知
 
 # 尝试导入所需库
 TRAY_AVAILABLE = False
@@ -82,7 +83,11 @@ class TimedBroadcastApp:
     def __init__(self, root):
         self.root = root
         self.root.title("定时播音")
-        self.root.geometry("1400x800")
+        
+        # --- 界面尺寸优化 ---
+        # 移除固定的 geometry，改为启动时最大化
+        self.root.state('zoomed')
+        
         self.root.configure(bg='#E8F4F8')
         
         if os.path.exists(ICON_FILE):
@@ -410,34 +415,57 @@ class TimedBroadcastApp:
                 self.machine_code = numeric_mac
                 return self.machine_code
             else:
-                raise Exception("未找到有效的有线或无线网络适配器。")
+                raise Exception("未找到有效的物理网络适配器。")
         except Exception as e:
             messagebox.showerror("错误", f"无法获取机器码：{e}\n软件将退出。")
             self.root.destroy()
             sys.exit()
 
     def _get_mac_address(self):
-        interfaces = psutil.net_if_addrs()
-        
-        wired_macs = []
-        wireless_macs = []
+        """
+        更具兼容性的MAC地址获取方法。
+        遍历所有已启用的、非环回的网络接口，查找有效的MAC地址。
+        优先返回有线网卡，其次是无线网卡，最后是其他任何物理网卡。
+        """
+        if not PSUTIL_AVAILABLE:
+            return None
 
-        for name, addrs in interfaces.items():
-            for addr in addrs:
-                if addr.family == psutil.AF_LINK:
-                    mac = addr.address.replace(':', '').replace('-', '').upper()
-                    if len(mac) == 12:
-                        if 'ethernet' in name.lower() or 'eth' in name.lower():
-                            wired_macs.append(mac)
-                        elif 'wi-fi' in name.lower() or 'wlan' in name.lower():
-                            wireless_macs.append(mac)
-        
-        if wired_macs:
-            return wired_macs[0]
-        if wireless_macs:
-            return wireless_macs[0]
+        try:
+            stats = psutil.net_if_stats()
+            addrs = psutil.net_if_addrs()
+
+            wired_macs = []
+            wireless_macs = []
+            other_macs = []
+
+            for name, addr_list in addrs.items():
+                # 检查接口是否启用且不是环回接口
+                if name in stats and stats[name].isup and 'loopback' not in name.lower():
+                    for addr in addr_list:
+                        if addr.family == psutil.AF_LINK:
+                            mac = addr.address.replace(':', '').replace('-', '').upper()
+                            # 验证MAC地址的有效性
+                            if len(mac) == 12 and mac != '000000000000':
+                                if 'ethernet' in name.lower() or 'eth' in name.lower() or '本地连接' in name:
+                                    wired_macs.append(mac)
+                                elif 'wi-fi' in name.lower() or 'wlan' in name.lower() or '无线网络连接' in name:
+                                    wireless_macs.append(mac)
+                                else:
+                                    other_macs.append(mac)
             
-        return None
+            # 按优先级返回
+            if wired_macs:
+                return wired_macs[0]
+            if wireless_macs:
+                return wireless_macs[0]
+            if other_macs:
+                return other_macs[0]
+
+            return None
+        except Exception as e:
+            print(f"获取MAC地址时发生异常: {e}")
+            return None
+
 
     def _calculate_reg_codes(self, numeric_mac_str):
         try:
@@ -3190,6 +3218,17 @@ class TimedBroadcastApp:
             self.log("已清空所有节假日。")
 
 def main():
+    # --- DPI 感知设置 ---
+    try:
+        # 尝试使用新版Win10+的API
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except AttributeError:
+        # 回退到旧版API
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except AttributeError:
+            pass # 在非Windows系统上会失败
+
     root = tk.Tk()
     app = TimedBroadcastApp(root)
     root.mainloop()
