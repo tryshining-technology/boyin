@@ -117,7 +117,7 @@ class TimedBroadcastApp:
             self.root.after(100, self.hide_to_tray)
 
     # --- 注册表操作方法 ---
-def _save_password_to_registry(self, password_b64):
+    def _save_password_to_registry(self, password_b64):
         # 使用 WIN32COM_AVAILABLE 进行判断
         if not WIN32COM_AVAILABLE: return False
         try:
