@@ -11,7 +11,6 @@ import getpass
 import base64
 import queue
 import shutil
-# import ctypes # 彻底移除DPI相关的库
 
 # 尝试导入所需库
 TRAY_AVAILABLE = False
@@ -83,13 +82,7 @@ class TimedBroadcastApp:
     def __init__(self, root):
         self.root = root
         self.root.title("定时播音")
-        
-        # --- 窗口尺寸优化 ---
-        # 设置一个默认启动尺寸
         self.root.geometry("1400x800")
-        # 设置最小尺寸，防止窗口过小导致控件不可见
-        self.root.minsize(1024, 768)
-        
         self.root.configure(bg='#E8F4F8')
         
         if os.path.exists(ICON_FILE):
@@ -417,57 +410,73 @@ class TimedBroadcastApp:
                 self.machine_code = numeric_mac
                 return self.machine_code
             else:
-                raise Exception("未找到有效的物理网络适配器。")
+                raise Exception("未找到有效的有线或无线网络适配器。")
         except Exception as e:
             messagebox.showerror("错误", f"无法获取机器码：{e}\n软件将退出。")
             self.root.destroy()
             sys.exit()
 
     def _get_mac_address(self):
-        """
-        更具兼容性的MAC地址获取方法。
-        遍历所有已启用的、非环回的网络接口，查找有效的MAC地址。
-        优先返回有线网卡，其次是无线网卡，最后是其他任何物理网卡。
-        """
-        if not PSUTIL_AVAILABLE:
-            return None
+        # --- MODIFICATION START: Enhanced MAC address detection ---
+        interfaces = psutil.net_if_addrs()
+        stats = psutil.net_if_stats()
 
-        try:
-            stats = psutil.net_if_stats()
-            addrs = psutil.net_if_addrs()
+        wired_macs = []
+        wireless_macs = []
+        other_macs = []
 
-            wired_macs = []
-            wireless_macs = []
-            other_macs = []
+        # More comprehensive keywords for matching, including common Chinese names
+        wired_keywords = ['ethernet', 'eth', '本地连接', 'local area connection']
+        wireless_keywords = ['wi-fi', 'wlan', '无线网络连接', 'wireless']
 
-            for name, addr_list in addrs.items():
-                # 检查接口是否启用且不是环回接口
-                if name in stats and stats[name].isup and 'loopback' not in name.lower():
-                    for addr in addr_list:
-                        if addr.family == psutil.AF_LINK:
-                            mac = addr.address.replace(':', '').replace('-', '').upper()
-                            # 验证MAC地址的有效性
-                            if len(mac) == 12 and mac != '000000000000':
-                                if 'ethernet' in name.lower() or 'eth' in name.lower() or '本地连接' in name:
-                                    wired_macs.append(mac)
-                                elif 'wi-fi' in name.lower() or 'wlan' in name.lower() or '无线网络连接' in name:
-                                    wireless_macs.append(mac)
-                                else:
-                                    other_macs.append(mac)
+        for name, addrs in interfaces.items():
+            is_wired = any(keyword in name.lower() for keyword in wired_keywords)
+            is_wireless = any(keyword in name.lower() for keyword in wireless_keywords)
             
-            # 按优先级返回
-            if wired_macs:
-                return wired_macs[0]
-            if wireless_macs:
-                return wireless_macs[0]
-            if other_macs:
-                return other_macs[0]
+            # Check if the interface is up and running
+            is_up = stats.get(name) and getattr(stats.get(name), 'isup', False)
 
-            return None
-        except Exception as e:
-            print(f"获取MAC地址时发生异常: {e}")
-            return None
+            for addr in addrs:
+                if addr.family == psutil.AF_LINK:
+                    mac = addr.address.replace(':', '').replace('-', '').upper()
+                    # Skip invalid or loopback-like MACs
+                    if len(mac) == 12 and mac != '000000000000':
+                        mac_info = {'mac': mac, 'is_up': is_up, 'name': name}
+                        if is_wired:
+                            wired_macs.append(mac_info)
+                        elif is_wireless:
+                            wireless_macs.append(mac_info)
+                        else:
+                            other_macs.append(mac_info)
+        
+        # Prioritize interfaces that are UP, then by type (wired > wireless > other)
+        # Sort each list to have 'up' interfaces first
+        wired_macs.sort(key=lambda x: x['is_up'], reverse=True)
+        wireless_macs.sort(key=lambda x: x['is_up'], reverse=True)
+        other_macs.sort(key=lambda x: x['is_up'], reverse=True)
+        
+        if wired_macs:
+            self.log(f"找到有线网卡 MAC: {wired_macs[0]['mac']} (来自: {wired_macs[0]['name']})")
+            return wired_macs[0]['mac']
+        if wireless_macs:
+            self.log(f"找到无线网卡 MAC: {wireless_macs[0]['mac']} (来自: {wireless_macs[0]['name']})")
+            return wireless_macs[0]['mac']
+        if other_macs:
+            self.log(f"找到其他类型网卡 MAC: {other_macs[0]['mac']} (来自: {other_macs[0]['name']})")
+            return other_macs[0]['mac']
+            
+        # Last resort: if keyword matching fails, iterate again and just find the first valid MAC
+        for name, addrs in interfaces.items():
+            for addr in addrs:
+                if addr.family == psutil.AF_LINK:
+                    mac = addr.address.replace(':', '').replace('-', '').upper()
+                    if len(mac) == 12 and mac != '000000000000':
+                         self.log(f"备用方案找到 MAC: {mac} (来自: {name})")
+                         return mac
 
+        self.log("错误: 未能找到任何有效的网络适配器 MAC 地址。")
+        return None
+        # --- MODIFICATION END ---
 
     def _calculate_reg_codes(self, numeric_mac_str):
         try:
@@ -1488,120 +1497,120 @@ class TimedBroadcastApp:
         is_edit_mode = task_to_edit is not None
         dialog = tk.Toplevel(self.root)
         dialog.title("修改音频节目" if is_edit_mode else "添加音频节目")
-        # --- 对话框尺寸和布局优化 ---
-        dialog.geometry("980x650") 
+        # --- MODIFICATION START: Adjusted dialog size for low resolutions ---
+        dialog.geometry("950x720")
+        # --- MODIFICATION END ---
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#E8E8E8')
-        
         main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=15)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        main_frame.columnconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-
-        # 左侧栏
+        # --- MODIFICATION START: Reduced vertical padding for compact layout ---
         content_frame = tk.LabelFrame(main_frame, text="内容", font=('Microsoft YaHei', 12, 'bold'),
-                                     bg='#E8E8E8', padx=10, pady=10)
-        content_frame.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
-        
-        # 右侧栏
-        right_frame = tk.Frame(main_frame, bg='#E8E8E8')
-        right_frame.grid(row=0, column=1, sticky='nsew')
-        
-        time_frame = tk.LabelFrame(right_frame, text="时间", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=10)
-        time_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        other_frame = tk.LabelFrame(right_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=10)
-        other_frame.pack(fill=tk.X)
-
-        button_frame = tk.Frame(main_frame, bg='#E8E8E8')
-        button_frame.grid(row=1, column=0, columnspan=2, pady=20)
-
-        # --- 填充内容 ---
+                                     bg='#E8E8E8', padx=10, pady=5)
+        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         font_spec = ('Microsoft YaHei', 11)
         
-        # ... content_frame widgets ...
-        tk.Label(content_frame, text="节目名称:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=5)
-        name_entry = tk.Entry(content_frame, font=font_spec)
-        name_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
-        
+        tk.Label(content_frame, text="节目名称:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        name_entry = tk.Entry(content_frame, font=font_spec, width=55)
+        name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         audio_type_var = tk.StringVar(value="single")
-        tk.Label(content_frame, text="音频文件", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        tk.Label(content_frame, text="音频文件", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=2)
         audio_single_frame = tk.Frame(content_frame, bg='#E8E8E8')
-        audio_single_frame.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
+        audio_single_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         tk.Radiobutton(audio_single_frame, text="", variable=audio_type_var, value="single", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
-        audio_single_entry = tk.Entry(audio_single_frame, font=font_spec)
-        audio_single_entry.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
+        audio_single_entry = tk.Entry(audio_single_frame, font=font_spec, width=35)
+        audio_single_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(audio_single_frame, text="00:00", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=10)
         def select_single_audio():
             filename = filedialog.askopenfilename(title="选择音频文件", initialdir=AUDIO_FOLDER, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")])
             if filename: audio_single_entry.delete(0, tk.END); audio_single_entry.insert(0, filename)
-        tk.Button(audio_single_frame, text="选取...", command=select_single_audio, bg='#D0D0D0', font=font_spec, bd=1).pack(side=tk.LEFT, padx=5)
-
-        tk.Label(content_frame, text="音频文件夹", font=font_spec, bg='#E8E8E8').grid(row=2, column=0, sticky='e', padx=5, pady=5)
+        tk.Button(audio_single_frame, text="选取...", command=select_single_audio, bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).pack(side=tk.LEFT, padx=5)
+        tk.Label(content_frame, text="音频文件夹", font=font_spec, bg='#E8E8E8').grid(row=2, column=0, sticky='e', padx=5, pady=2)
         audio_folder_frame = tk.Frame(content_frame, bg='#E8E8E8')
-        audio_folder_frame.grid(row=2, column=1, sticky='ew', padx=5, pady=5)
+        audio_folder_frame.grid(row=2, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         tk.Radiobutton(audio_folder_frame, text="", variable=audio_type_var, value="folder", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
-        audio_folder_entry = tk.Entry(audio_folder_frame, font=font_spec)
-        audio_folder_entry.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
+        audio_folder_entry = tk.Entry(audio_folder_frame, font=font_spec, width=50)
+        audio_folder_entry.pack(side=tk.LEFT, padx=5)
         def select_folder():
             foldername = filedialog.askdirectory(title="选择音频文件夹", initialdir=AUDIO_FOLDER)
             if foldername: audio_folder_entry.delete(0, tk.END); audio_folder_entry.insert(0, foldername)
-        tk.Button(audio_folder_frame, text="选取...", command=select_folder, bg='#D0D0D0', font=font_spec, bd=1).pack(side=tk.LEFT, padx=5)
-        
+        tk.Button(audio_folder_frame, text="选取...", command=select_folder, bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).pack(side=tk.LEFT, padx=5)
         play_order_frame = tk.Frame(content_frame, bg='#E8E8E8')
-        play_order_frame.grid(row=3, column=1, sticky='w', padx=5, pady=5)
+        play_order_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=2)
         play_order_var = tk.StringVar(value="sequential")
         tk.Radiobutton(play_order_frame, text="顺序播", variable=play_order_var, value="sequential", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT, padx=10)
         tk.Radiobutton(play_order_frame, text="随机播", variable=play_order_var, value="random", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT, padx=10)
-        
         volume_frame = tk.Frame(content_frame, bg='#E8E8E8')
-        volume_frame.grid(row=4, column=1, sticky='w', padx=5, pady=8)
+        volume_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=3)
         tk.Label(volume_frame, text="音量:", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT)
         volume_entry = tk.Entry(volume_frame, font=font_spec, width=10)
         volume_entry.pack(side=tk.LEFT, padx=5)
         tk.Label(volume_frame, text="0-100", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
-        content_frame.columnconfigure(1, weight=1)
-
-        # ... time_frame widgets ...
-        tk.Label(time_frame, text="开始时间:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=5)
-        start_time_entry = tk.Entry(time_frame, font=font_spec)
-        start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
-        tk.Label(time_frame, text="《多个用,隔开》", font=('Microsoft YaHei', 9), bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
-        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1).grid(row=0, column=3, padx=5)
         
+        time_frame = tk.LabelFrame(main_frame, text="时间", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=15, pady=10)
+        time_frame.grid(row=1, column=0, sticky='ew', pady=4)
+        tk.Label(time_frame, text="开始时间:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        start_time_entry = tk.Entry(time_frame, font=font_spec, width=50)
+        start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
+        tk.Label(time_frame, text="《可多个,用英文逗号,隔开》", font=font_spec, bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=0, column=3, padx=5)
         interval_var = tk.StringVar(value="first")
-        tk.Label(time_frame, text="间隔播报:", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=5)
         interval_frame1 = tk.Frame(time_frame, bg='#E8E8E8')
-        interval_frame1.grid(row=1, column=1, columnspan=3, sticky='w', padx=5, pady=5)
-        tk.Radiobutton(interval_frame1, text="播", variable=interval_var, value="first", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
-        interval_first_entry = tk.Entry(interval_frame1, font=font_spec, width=5)
+        interval_frame1.grid(row=1, column=1, columnspan=2, sticky='w', padx=5, pady=2)
+        tk.Label(time_frame, text="间隔播报:", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=2)
+        tk.Radiobutton(interval_frame1, text="播 n 首", variable=interval_var, value="first", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
+        interval_first_entry = tk.Entry(interval_frame1, font=font_spec, width=15)
         interval_first_entry.pack(side=tk.LEFT, padx=5)
-        tk.Label(interval_frame1, text="首(遍)", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
-        
+        tk.Label(interval_frame1, text="(单曲时,指 n 遍)", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
         interval_frame2 = tk.Frame(time_frame, bg='#E8E8E8')
-        interval_frame2.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=5)
-        tk.Radiobutton(interval_frame2, text="播", variable=interval_var, value="seconds", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
-        interval_seconds_entry = tk.Entry(interval_frame2, font=font_spec, width=5)
+        interval_frame2.grid(row=2, column=1, columnspan=2, sticky='w', padx=5, pady=2)
+        tk.Radiobutton(interval_frame2, text="播 n 秒", variable=interval_var, value="seconds", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
+        interval_seconds_entry = tk.Entry(interval_frame2, font=font_spec, width=15)
         interval_seconds_entry.pack(side=tk.LEFT, padx=5)
-        tk.Label(interval_frame2, text="秒 (1h=3600s)", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
+        tk.Label(interval_frame2, text="(3600秒 = 1小时)", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
+        tk.Label(time_frame, text="周几/几号:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='e', padx=5, pady=3)
+        weekday_entry = tk.Entry(time_frame, font=font_spec, width=50)
+        weekday_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=3)
+        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=3, column=3, padx=5)
+        tk.Label(time_frame, text="日期范围:", font=font_spec, bg='#E8E8E8').grid(row=4, column=0, sticky='e', padx=5, pady=3)
+        date_range_entry = tk.Entry(time_frame, font=font_spec, width=50)
+        date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=3)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=4, column=3, padx=5)
         
-        tk.Label(time_frame, text="周几/几号:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='e', padx=5, pady=8)
-        weekday_entry = tk.Entry(time_frame, font=font_spec)
-        weekday_entry.grid(row=3, column=1, columnspan=2, sticky='ew', padx=5, pady=8)
-        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1).grid(row=3, column=3, padx=5)
-        
-        tk.Label(time_frame, text="日期范围:", font=font_spec, bg='#E8E8E8').grid(row=4, column=0, sticky='e', padx=5, pady=8)
-        date_range_entry = tk.Entry(time_frame, font=font_spec)
-        date_range_entry.grid(row=4, column=1, columnspan=2, sticky='ew', padx=5, pady=8)
-        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1).grid(row=4, column=3, padx=5)
-        time_frame.columnconfigure(1, weight=1)
-
-        # ... other_frame widgets ...
+        other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=5)
+        other_frame.grid(row=2, column=0, sticky='ew', pady=2)
         delay_var = tk.StringVar(value="ontime")
-        tk.Radiobutton(other_frame, text="准时播 - 终止当前节目（默认）", variable=delay_var, value="ontime", bg='#E8E8E8', font=font_spec).pack(anchor='w')
-        tk.Radiobutton(other_frame, text="可延后 - 排队等候", variable=delay_var, value="delay", bg='#E8E8E8', font=font_spec).pack(anchor='w')
-        tk.Radiobutton(other_frame, text="立即播 - 添加后立即播放", variable=delay_var, value="immediate", bg='#E8E8E8', font=font_spec).pack(anchor='w')
+        tk.Label(other_frame, text="模式:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='ne', padx=5, pady=2)
+        delay_frame = tk.Frame(other_frame, bg='#E8E8E8')
+        delay_frame.grid(row=0, column=1, sticky='w', padx=5, pady=2)
+        tk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们（默认）", variable=delay_var, value="ontime", bg='#E8E8E8', font=font_spec).pack(anchor='w')
+        tk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候", variable=delay_var, value="delay", bg='#E8E8E8', font=font_spec).pack(anchor='w')
+        tk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate", bg='#E8E8E8', font=font_spec).pack(anchor='w')
+        # --- MODIFICATION END ---
 
-        # ... button_frame widgets ...
+        if is_edit_mode:
+            task = task_to_edit
+            name_entry.insert(0, task.get('name', ''))
+            start_time_entry.insert(0, task.get('time', ''))
+            audio_type_var.set(task.get('audio_type', 'single'))
+            if task.get('audio_type') == 'single': audio_single_entry.insert(0, task.get('content', ''))
+            else: audio_folder_entry.insert(0, task.get('content', ''))
+            play_order_var.set(task.get('play_order', 'sequential'))
+            volume_entry.insert(0, task.get('volume', '80'))
+            interval_var.set(task.get('interval_type', 'first'))
+            interval_first_entry.insert(0, task.get('interval_first', '1'))
+            interval_seconds_entry.insert(0, task.get('interval_seconds', '600'))
+            weekday_entry.insert(0, task.get('weekday', '每周:1234567'))
+            date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            delay_var.set(task.get('delay', 'ontime'))
+        else:
+            volume_entry.insert(0, "80"); interval_first_entry.insert(0, "1"); interval_seconds_entry.insert(0, "600")
+            weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
+        
+        # --- MODIFICATION START: Reduced vertical padding for compact layout ---
+        button_frame = tk.Frame(main_frame, bg='#E8E8E8')
+        button_frame.grid(row=3, column=0, pady=8)
+        # --- MODIFICATION END ---
         def save_task():
             audio_path = audio_single_entry.get().strip() if audio_type_var.get() == "single" else audio_folder_entry.get().strip()
             if not audio_path: messagebox.showwarning("警告", "请选择音频文件或文件夹", parent=dialog); return
@@ -1628,147 +1637,137 @@ class TimedBroadcastApp:
         button_text = "保存修改" if is_edit_mode else "添加"
         tk.Button(button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
         tk.Button(button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
-        
-        # --- 填充初始值 ---
-        if is_edit_mode:
-            task = task_to_edit
-            name_entry.insert(0, task.get('name', ''))
-            start_time_entry.insert(0, task.get('time', ''))
-            audio_type_var.set(task.get('audio_type', 'single'))
-            if task.get('audio_type') == 'single': audio_single_entry.insert(0, task.get('content', ''))
-            else: audio_folder_entry.insert(0, task.get('content', ''))
-            play_order_var.set(task.get('play_order', 'sequential'))
-            volume_entry.insert(0, task.get('volume', '80'))
-            interval_var.set(task.get('interval_type', 'first'))
-            interval_first_entry.insert(0, task.get('interval_first', '1'))
-            interval_seconds_entry.insert(0, task.get('interval_seconds', '600'))
-            weekday_entry.insert(0, task.get('weekday', '每周:1234567'))
-            date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31'))
-            delay_var.set(task.get('delay', 'ontime'))
-        else:
-            volume_entry.insert(0, "80"); interval_first_entry.insert(0, "1"); interval_seconds_entry.insert(0, "600")
-            weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
+        content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
 
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
         dialog = tk.Toplevel(self.root)
         dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
-        # --- 对话框尺寸和布局优化 ---
-        dialog.geometry("980x700") 
+        # --- MODIFICATION START: Adjusted dialog size for low resolutions ---
+        dialog.geometry("950x720")
+        # --- MODIFICATION END ---
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#E8E8E8')
-
         main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=15)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        main_frame.columnconfigure(0, weight=6) # 左侧更宽
-        main_frame.columnconfigure(1, weight=4) # 右侧稍窄
-
-        # 左侧栏
-        content_frame = tk.LabelFrame(main_frame, text="内容", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=10)
-        content_frame.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
-        
-        # 右侧栏
-        right_frame = tk.Frame(main_frame, bg='#E8E8E8')
-        right_frame.grid(row=0, column=1, sticky='nsew')
-        
-        time_frame = tk.LabelFrame(right_frame, text="时间", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=10)
-        time_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        other_frame = tk.LabelFrame(right_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=15, pady=15)
-        other_frame.pack(fill=tk.X)
-
-        button_frame = tk.Frame(main_frame, bg='#E8E8E8')
-        button_frame.grid(row=1, column=0, columnspan=2, pady=20)
-
-        # --- 填充内容 ---
+        # --- MODIFICATION START: Reduced vertical padding for compact layout ---
+        content_frame = tk.LabelFrame(main_frame, text="内容", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=5)
+        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         font_spec = ('Microsoft YaHei', 11)
         
-        # ... content_frame widgets ...
-        tk.Label(content_frame, text="节目名称:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='w', padx=5, pady=5)
-        name_entry = tk.Entry(content_frame, font=font_spec)
-        name_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
+        tk.Label(content_frame, text="节目名称:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='w', padx=5, pady=2)
+        name_entry = tk.Entry(content_frame, font=font_spec, width=65)
+        name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         
-        tk.Label(content_frame, text="播音文字:", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='nw', padx=5, pady=5)
-        content_text = scrolledtext.ScrolledText(content_frame, height=5, font=font_spec, wrap=tk.WORD)
-        content_text.grid(row=1, column=1, sticky='nsew', padx=5, pady=5)
+        tk.Label(content_frame, text="播音文字:", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='nw', padx=5, pady=2)
+        text_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        text_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
+        content_text = scrolledtext.ScrolledText(text_frame, height=5, font=font_spec, width=65, wrap=tk.WORD)
+        content_text.pack(fill=tk.BOTH, expand=True)
 
         script_btn_frame = tk.Frame(content_frame, bg='#E8E8E8')
-        script_btn_frame.grid(row=2, column=1, sticky='w', padx=5, pady=(0, 5))
+        script_btn_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=(0, 2))
         tk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text), font=('Microsoft YaHei', 10)).pack(side=tk.LEFT)
         tk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text, name_entry), font=('Microsoft YaHei', 10)).pack(side=tk.LEFT, padx=10)
 
-        tk.Label(content_frame, text="播音员:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='w', padx=5, pady=8)
+        tk.Label(content_frame, text="播音员:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='w', padx=5, pady=3)
+        voice_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        voice_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=3)
         available_voices = self.get_available_voices()
         voice_var = tk.StringVar()
-        voice_combo = ttk.Combobox(content_frame, textvariable=voice_var, values=available_voices, font=font_spec, state='readonly')
-        voice_combo.grid(row=3, column=1, sticky='ew', padx=5, pady=8)
+        voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, values=available_voices, font=font_spec, width=50, state='readonly')
+        voice_combo.pack(side=tk.LEFT)
         
         speech_params_frame = tk.Frame(content_frame, bg='#E8E8E8')
-        speech_params_frame.grid(row=4, column=1, sticky='w', padx=5, pady=5)
-        tk.Label(speech_params_frame, text="语速:", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT)
-        speed_entry = tk.Entry(speech_params_frame, font=font_spec, width=5)
+        speech_params_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=2)
+        tk.Label(speech_params_frame, text="语速(-10~10):", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(0,5))
+        speed_entry = tk.Entry(speech_params_frame, font=font_spec, width=8)
         speed_entry.pack(side=tk.LEFT, padx=5)
-        tk.Label(speech_params_frame, text="音调:", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,0))
-        pitch_entry = tk.Entry(speech_params_frame, font=font_spec, width=5)
+        tk.Label(speech_params_frame, text="音调(-10~10):", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
+        pitch_entry = tk.Entry(speech_params_frame, font=font_spec, width=8)
         pitch_entry.pack(side=tk.LEFT, padx=5)
-        tk.Label(speech_params_frame, text="音量:", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,0))
-        volume_entry = tk.Entry(speech_params_frame, font=font_spec, width=5)
+        tk.Label(speech_params_frame, text="音量(0-100):", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
+        volume_entry = tk.Entry(speech_params_frame, font=font_spec, width=8)
         volume_entry.pack(side=tk.LEFT, padx=5)
         
         prompt_var = tk.IntVar()
         prompt_frame = tk.Frame(content_frame, bg='#E8E8E8')
-        prompt_frame.grid(row=5, column=0, columnspan=2, sticky='w', padx=5, pady=5)
+        prompt_frame.grid(row=5, column=1, columnspan=3, sticky='w', padx=5, pady=2)
         tk.Checkbutton(prompt_frame, text="提示音:", variable=prompt_var, bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
         prompt_file_var, prompt_volume_var = tk.StringVar(), tk.StringVar()
         prompt_file_entry = tk.Entry(prompt_frame, textvariable=prompt_file_var, font=font_spec, width=20)
         prompt_file_entry.pack(side=tk.LEFT, padx=5)
         tk.Button(prompt_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var)).pack(side=tk.LEFT)
-        tk.Label(prompt_frame, text="音量:", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
-        tk.Entry(prompt_frame, textvariable=prompt_volume_var, font=font_spec, width=5).pack(side=tk.LEFT, padx=5)
+        tk.Label(prompt_frame, text="音量(0-100):", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
+        tk.Entry(prompt_frame, textvariable=prompt_volume_var, font=font_spec, width=8).pack(side=tk.LEFT, padx=5)
         
         bgm_var = tk.IntVar()
         bgm_frame = tk.Frame(content_frame, bg='#E8E8E8')
-        bgm_frame.grid(row=6, column=0, columnspan=2, sticky='w', padx=5, pady=5)
+        bgm_frame.grid(row=6, column=1, columnspan=3, sticky='w', padx=5, pady=2)
         tk.Checkbutton(bgm_frame, text="背景音乐:", variable=bgm_var, bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
         bgm_file_var, bgm_volume_var = tk.StringVar(), tk.StringVar()
         bgm_file_entry = tk.Entry(bgm_frame, textvariable=bgm_file_var, font=font_spec, width=20)
         bgm_file_entry.pack(side=tk.LEFT, padx=5)
         tk.Button(bgm_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var)).pack(side=tk.LEFT)
-        tk.Label(bgm_frame, text="音量:", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
-        tk.Entry(bgm_frame, textvariable=bgm_volume_var, font=font_spec, width=5).pack(side=tk.LEFT, padx=5)
-        content_frame.rowconfigure(1, weight=1)
-        content_frame.columnconfigure(1, weight=1)
-
-        # ... time_frame widgets ...
-        tk.Label(time_frame, text="开始时间:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=5)
-        start_time_entry = tk.Entry(time_frame, font=font_spec)
-        start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
-        tk.Label(time_frame, text="《多个用,隔开》", font=('Microsoft YaHei', 9), bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
-        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1).grid(row=0, column=3, padx=5)
+        tk.Label(bgm_frame, text="音量(0-100):", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
+        tk.Entry(bgm_frame, textvariable=bgm_volume_var, font=font_spec, width=8).pack(side=tk.LEFT, padx=5)
         
-        tk.Label(time_frame, text="播 n 遍:", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        time_frame = tk.LabelFrame(main_frame, text="时间", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=5)
+        time_frame.grid(row=1, column=0, sticky='ew', pady=2)
+        tk.Label(time_frame, text="开始时间:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        start_time_entry = tk.Entry(time_frame, font=font_spec, width=50)
+        start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
+        tk.Label(time_frame, text="《可多个,用英文逗号,隔开》", font=font_spec, bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=0, column=3, padx=5)
+        tk.Label(time_frame, text="播 n 遍:", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=2)
         repeat_entry = tk.Entry(time_frame, font=font_spec, width=12)
-        repeat_entry.grid(row=1, column=1, sticky='w', padx=5, pady=5)
+        repeat_entry.grid(row=1, column=1, sticky='w', padx=5, pady=2)
+        tk.Label(time_frame, text="周几/几号:", font=font_spec, bg='#E8E8E8').grid(row=2, column=0, sticky='e', padx=5, pady=2)
+        weekday_entry = tk.Entry(time_frame, font=font_spec, width=50)
+        weekday_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=2)
+        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=2, column=3, padx=5)
+        tk.Label(time_frame, text="日期范围:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='e', padx=5, pady=2)
+        date_range_entry = tk.Entry(time_frame, font=font_spec, width=50)
+        date_range_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=2)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=3, column=3, padx=5)
         
-        tk.Label(time_frame, text="周几/几号:", font=font_spec, bg='#E8E8E8').grid(row=2, column=0, sticky='e', padx=5, pady=5)
-        weekday_entry = tk.Entry(time_frame, font=font_spec)
-        weekday_entry.grid(row=2, column=1, columnspan=2, sticky='ew', padx=5, pady=5)
-        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1).grid(row=2, column=3, padx=5)
-        
-        tk.Label(time_frame, text="日期范围:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='e', padx=5, pady=5)
-        date_range_entry = tk.Entry(time_frame, font=font_spec)
-        date_range_entry.grid(row=3, column=1, columnspan=2, sticky='ew', padx=5, pady=5)
-        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1).grid(row=3, column=3, padx=5)
-        time_frame.columnconfigure(1, weight=1)
-
-        # ... other_frame widgets ...
+        other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=15, pady=10)
+        other_frame.grid(row=2, column=0, sticky='ew', pady=4)
         delay_var = tk.StringVar(value="delay")
-        tk.Radiobutton(other_frame, text="准时播 - 终止当前节目", variable=delay_var, value="ontime", bg='#E8E8E8', font=font_spec).pack(anchor='w', pady=2)
-        tk.Radiobutton(other_frame, text="可延后 - 排队等候（默认）", variable=delay_var, value="delay", bg='#E8E8E8', font=font_spec).pack(anchor='w', pady=2)
-        tk.Radiobutton(other_frame, text="立即播 - 添加后立即播放", variable=delay_var, value="immediate", bg='#E8E8E8', font=font_spec).pack(anchor='w', pady=2)
+        tk.Label(other_frame, text="模式:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='ne', padx=5, pady=2)
+        delay_frame = tk.Frame(other_frame, bg='#E8E8E8')
+        delay_frame.grid(row=0, column=1, sticky='w', padx=5, pady=2)
+        tk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们", variable=delay_var, value="ontime", bg='#E8E8E8', font=font_spec).pack(anchor='w', pady=1)
+        tk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候（默认）", variable=delay_var, value="delay", bg='#E8E8E8', font=font_spec).pack(anchor='w', pady=1)
+        tk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate", bg='#E8E8E8', font=font_spec).pack(anchor='w', pady=1)
+        # --- MODIFICATION END ---
+        
+        if is_edit_mode:
+            task = task_to_edit
+            name_entry.insert(0, task.get('name', ''))
+            content_text.insert('1.0', task.get('source_text', ''))
+            voice_var.set(task.get('voice', ''))
+            speed_entry.insert(0, task.get('speed', '0'))
+            pitch_entry.insert(0, task.get('pitch', '0'))
+            volume_entry.insert(0, task.get('volume', '80'))
+            prompt_var.set(task.get('prompt', 0)); prompt_file_var.set(task.get('prompt_file', '')); prompt_volume_var.set(task.get('prompt_volume', '80'))
+            bgm_var.set(task.get('bgm', 0)); bgm_file_var.set(task.get('bgm_file', '')); bgm_volume_var.set(task.get('bgm_volume', '40'))
+            start_time_entry.insert(0, task.get('time', ''))
+            repeat_entry.insert(0, task.get('repeat', '1'))
+            weekday_entry.insert(0, task.get('weekday', '每周:1234567'))
+            date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            delay_var.set(task.get('delay', 'delay'))
+        else:
+            speed_entry.insert(0, "0"); pitch_entry.insert(0, "0"); volume_entry.insert(0, "80")
+            prompt_var.set(0); prompt_volume_var.set("80"); bgm_var.set(0); bgm_volume_var.set("40")
+            repeat_entry.insert(0, "1"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
 
-        # ... button_frame widgets ...
+        # --- MODIFICATION START: Reduced vertical padding for compact layout ---
+        button_frame = tk.Frame(main_frame, bg='#E8E8E8')
+        button_frame.grid(row=3, column=0, pady=8)
+        # --- MODIFICATION END ---
+        
         def save_task():
             text_content = content_text.get('1.0', tk.END).strip()
             if not text_content:
@@ -1881,27 +1880,7 @@ class TimedBroadcastApp:
         button_text = "保存修改" if is_edit_mode else "添加"
         tk.Button(button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
         tk.Button(button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
-
-        # --- 填充初始值 ---
-        if is_edit_mode:
-            task = task_to_edit
-            name_entry.insert(0, task.get('name', ''))
-            content_text.insert('1.0', task.get('source_text', ''))
-            voice_var.set(task.get('voice', ''))
-            speed_entry.insert(0, task.get('speed', '0'))
-            pitch_entry.insert(0, task.get('pitch', '0'))
-            volume_entry.insert(0, task.get('volume', '80'))
-            prompt_var.set(task.get('prompt', 0)); prompt_file_var.set(task.get('prompt_file', '')); prompt_volume_var.set(task.get('prompt_volume', '80'))
-            bgm_var.set(task.get('bgm', 0)); bgm_file_var.set(task.get('bgm_file', '')); bgm_volume_var.set(task.get('bgm_volume', '40'))
-            start_time_entry.insert(0, task.get('time', ''))
-            repeat_entry.insert(0, task.get('repeat', '1'))
-            weekday_entry.insert(0, task.get('weekday', '每周:1234567'))
-            date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31'))
-            delay_var.set(task.get('delay', 'delay'))
-        else:
-            speed_entry.insert(0, "0"); pitch_entry.insert(0, "0"); volume_entry.insert(0, "80")
-            prompt_var.set(0); prompt_volume_var.set("80"); bgm_var.set(0); bgm_volume_var.set("40")
-            repeat_entry.insert(0, "1"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
+        content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
 
     def _import_voice_script(self, text_widget):
         filename = filedialog.askopenfilename(
@@ -3263,10 +3242,6 @@ class TimedBroadcastApp:
             self.log("已清空所有节假日。")
 
 def main():
-    # --- 关键修改：移除所有 DPI 感知代码 ---
-    # 这样可以让 Windows 自行处理缩放，虽然可能导致模糊，
-    # 但是能最大程度保证 UI 不会错乱和崩溃。
-    
     root = tk.Tk()
     app = TimedBroadcastApp(root)
     root.mainloop()
