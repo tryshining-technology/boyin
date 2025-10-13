@@ -250,16 +250,47 @@ class TimedBroadcastApp:
         selected_btn.master.config(bg='#5DADE2')
 
     def _prompt_for_super_admin_password(self):
+        # 使用自定义对话框替代 simpledialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title("身份验证")
+        dialog.geometry("350x180")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        self.center_window(dialog, 350, 180)
+
+        result = [None] 
+
+        tk.Label(dialog, text="请输入超级管理员密码:", font=('Microsoft YaHei', 11)).pack(pady=20)
+        password_entry = tk.Entry(dialog, show='*', font=('Microsoft YaHei', 11), width=25)
+        password_entry.pack(pady=5)
+        password_entry.focus_set()
+
+        def on_confirm():
+            result[0] = password_entry.get()
+            dialog.destroy()
+        
+        def on_cancel():
+            dialog.destroy()
+
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(pady=20)
+        tk.Button(btn_frame, text="确定", command=on_confirm, width=8).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="取消", command=on_cancel, width=8).pack(side=tk.LEFT, padx=10)
+        dialog.bind('<Return>', lambda event: on_confirm())
+
+        self.root.wait_window(dialog)
+        entered_password = result[0]
+
         correct_password = datetime.now().strftime('%Y%m%d')
-        entered_password = simpledialog.askstring("身份验证", "请输入超级管理员密码:", show='*')
         
         if entered_password == correct_password:
             self.log("超级管理员密码正确，进入管理模块。")
             self.switch_page("超级管理")
-        elif entered_password is not None:
+        elif entered_password is not None: # 如果用户输入了但密码错误
             messagebox.showerror("验证失败", "密码错误！")
             self.log("尝试进入超级管理模块失败：密码错误。")
-            
+
     # --- 授权与注册相关方法 ---
 
     def create_registration_page(self):
@@ -275,7 +306,7 @@ class TimedBroadcastApp:
         # 显示机器码
         machine_code_frame = tk.Frame(main_content_frame, bg='white')
         machine_code_frame.pack(fill=tk.X, pady=10)
-        tk.Label(machine_code_frame, text="您的机器码:", font=font_spec, bg='white').pack(side=tk.LEFT)
+        tk.Label(machine_code_frame, text="机器码:", font=font_spec, bg='white').pack(side=tk.LEFT)
         machine_code_val = self.get_machine_code()
         machine_code_entry = tk.Entry(machine_code_frame, font=font_spec, width=30, fg='red')
         machine_code_entry.pack(side=tk.LEFT, padx=10)
@@ -285,7 +316,7 @@ class TimedBroadcastApp:
         # 输入注册码
         reg_code_frame = tk.Frame(main_content_frame, bg='white')
         reg_code_frame.pack(fill=tk.X, pady=10)
-        tk.Label(reg_code_frame, text="请输入注册码:", font=font_spec, bg='white').pack(side=tk.LEFT)
+        tk.Label(reg_code_frame, text="注册码:", font=font_spec, bg='white').pack(side=tk.LEFT)
         self.reg_code_entry = tk.Entry(reg_code_frame, font=font_spec, width=30)
         self.reg_code_entry.pack(side=tk.LEFT, padx=10)
 
@@ -312,16 +343,20 @@ class TimedBroadcastApp:
         try:
             mac = self._get_mac_address()
             if mac:
-                self.machine_code = mac
+                # 将MAC地址中的A-F替换为1-6
+                substitution = str.maketrans("ABCDEF", "123456")
+                numeric_mac = mac.upper().translate(substitution)
+                self.machine_code = numeric_mac
                 return self.machine_code
             else:
-                raise Exception("未找到有效的网络适配器。")
+                raise Exception("未找到有效的有线或无线网络适配器。")
         except Exception as e:
             messagebox.showerror("错误", f"无法获取机器码：{e}\n软件将退出。")
             self.root.destroy()
             sys.exit()
 
     def _get_mac_address(self):
+        """优先获取有线网卡，其次是无线网卡的MAC地址"""
         interfaces = psutil.net_if_addrs()
         
         wired_macs = []
@@ -331,32 +366,36 @@ class TimedBroadcastApp:
             for addr in addrs:
                 if addr.family == psutil.AF_LINK:
                     mac = addr.address.replace(':', '').replace('-', '').upper()
-                    if 'ethernet' in name.lower() or 'eth' in name.lower():
-                        wired_macs.append(mac)
-                    elif 'wi-fi' in name.lower() or 'wlan' in name.lower():
-                        wireless_macs.append(mac)
+                    # 确保是12位MAC地址
+                    if len(mac) == 12:
+                        if 'ethernet' in name.lower() or 'eth' in name.lower():
+                            wired_macs.append(mac)
+                        elif 'wi-fi' in name.lower() or 'wlan' in name.lower():
+                            wireless_macs.append(mac)
         
+        # 优先返回有线网卡
         if wired_macs:
             return wired_macs[0]
+        # 其次返回无线网卡
         if wireless_macs:
             return wireless_macs[0]
             
         return None
 
-    def _calculate_reg_codes(self, mac):
-        # 1. 替换字母
-        substitution = str.maketrans("ABCDEF", "123456")
-        numeric_mac_str = mac.upper().translate(substitution)
-        
-        # 2. 计算月度码
-        monthly_code = int(int(numeric_mac_str) * 3.14)
-        
-        # 3. 计算永久码
-        reversed_mac_str = numeric_mac_str[::-1]
-        permanent_val = int(reversed_mac_str) / 3.14
-        permanent_code = f"{permanent_val:.2f}"
-        
-        return {'monthly': str(monthly_code), 'permanent': permanent_code}
+    def _calculate_reg_codes(self, numeric_mac_str):
+        """根据纯数字的机器码计算月度和永久注册码"""
+        try:
+            # 1. 计算月度码
+            monthly_code = int(int(numeric_mac_str) * 3.14)
+            
+            # 2. 计算永久码
+            reversed_mac_str = numeric_mac_str[::-1]
+            permanent_val = int(reversed_mac_str) / 3.14
+            permanent_code = f"{permanent_val:.2f}"
+            
+            return {'monthly': str(monthly_code), 'permanent': permanent_code}
+        except (ValueError, TypeError):
+            return {'monthly': None, 'permanent': None}
 
     def attempt_registration(self):
         entered_code = self.reg_code_entry.get().strip()
@@ -364,8 +403,8 @@ class TimedBroadcastApp:
             messagebox.showwarning("提示", "请输入注册码。")
             return
 
-        machine_code = self.get_machine_code()
-        correct_codes = self._calculate_reg_codes(machine_code)
+        numeric_machine_code = self.get_machine_code()
+        correct_codes = self._calculate_reg_codes(numeric_machine_code)
         
         today_str = datetime.now().strftime('%Y-%m-%d')
         
