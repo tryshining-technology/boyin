@@ -25,12 +25,12 @@ try:
     import win32com.client
     import pythoncom
     from pywintypes import com_error
-    # 新增导入 win32api 和 win32con 用于注册表操作
-    import win32api
-    import win32con
+    # --- START: MODIFIED CODE ---
+    # 使用 Python 内置的 winreg 库进行注册表操作，它比 pywin32 更稳定
+    import winreg
+    # --- END: MODIFIED CODE ---
     WIN32COM_AVAILABLE = True
 except ImportError:
-    # 统一警告信息，涵盖所有 pywin32 提供的功能
     print("警告: pywin32 未安装，语音、开机启动和密码持久化功能将受限。")
 
 AUDIO_AVAILABLE = False
@@ -101,7 +101,7 @@ class TimedBroadcastApp:
 
         self.create_folder_structure()
         self.load_settings()
-        self.load_lock_password() # 在此处加载密码
+        self.load_lock_password()
         self.create_widgets()
         self.load_tasks()
         self.load_holidays()
@@ -116,19 +116,15 @@ class TimedBroadcastApp:
         if self.settings.get("start_minimized", False):
             self.root.after(100, self.hide_to_tray)
 
-    # --- 注册表操作方法 ---
+    # --- START: MODIFIED REGISTRY METHODS using winreg ---
     def _save_password_to_registry(self, password_b64):
-        # 使用 WIN32COM_AVAILABLE 进行判断
         if not WIN32COM_AVAILABLE: return False
         try:
-            # 使用 win32api.RegCreateKeyEx 创建或打开注册表键
-            # KEY_WRITE 权限允许创建和写入值
-            key, _ = win32api.RegCreateKeyEx(win32con.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, win32con.KEY_WRITE)
-            
-            # 关键修改：将第三个参数从 0 改为 None 来避免类型错误
-            win32api.RegSetValueEx(key, "LockPasswordB64", 0, win32con.REG_SZ, password_b64)
-            
-            win32api.RegCloseKey(key)
+            # 创建或打开主键
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH)
+            # 设置值，winreg.SetValueEx 的参数顺序和类型要求非常清晰
+            winreg.SetValueEx(key, "LockPasswordB64", 0, winreg.REG_SZ, password_b64)
+            winreg.CloseKey(key)
             self.log("密码已安全存储。")
             return True
         except Exception as e:
@@ -136,50 +132,45 @@ class TimedBroadcastApp:
             return False
 
     def _load_password_from_registry(self):
-        # 使用 WIN32COM_AVAILABLE 进行判断
         if not WIN32COM_AVAILABLE: return ""
         try:
-            # 使用 win32api.RegOpenKeyEx 打开注册表键
-            key = win32api.RegOpenKeyEx(win32con.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, win32con.KEY_READ)
-            # 使用 win32api.RegQueryValueEx 读取值
-            password_b64, _ = win32api.RegQueryValueEx(key, "LockPasswordB64")
-            win32api.RegCloseKey(key)
+            # 打开键
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_READ)
+            # 读取值
+            password_b64, _ = winreg.QueryValueEx(key, "LockPasswordB64")
+            winreg.CloseKey(key)
             return password_b64
-        except win32api.error as e:
-            # win32api.error 错误码 2 表示 "系统找不到指定的文件" (即键或值不存在)
-            if e.winerror == 2:
-                return "" # 键或值不存在是正常情况，表示未设置密码
-            self.log(f"错误: 无法从注册表加载密码 - {e}")
+        except FileNotFoundError:
+            # 如果键或值不存在，这是正常情况
             return ""
         except Exception as e:
             self.log(f"错误: 无法从注册表加载密码 - {e}")
             return ""
 
     def _clear_password_from_registry(self):
-        # 使用 WIN32COM_AVAILABLE 进行判断
         if not WIN32COM_AVAILABLE: return False
         try:
-            # 使用 win32api.RegOpenKeyEx 打开注册表键
-            key = win32api.RegOpenKeyEx(win32con.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, win32con.KEY_WRITE)
-            # 使用 win32api.RegDeleteValue 删除值
-            win32api.RegDeleteValue(key, "LockPasswordB64")
-            win32api.RegCloseKey(key)
+            # 打开键
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_WRITE)
+            # 删除值
+            winreg.DeleteValue(key, "LockPasswordB64")
+            winreg.CloseKey(key)
             self.log("安全存储的密码已被清除。")
             return True
-        except win32api.error as e:
-            # 如果要删除的值不存在，也视为成功
-            if e.winerror == 2:
-                return True
-            self.log(f"错误: 无法从注册表清除密码 - {e}")
-            return False
+        except FileNotFoundError:
+            # 如果要删除的值本就不存在，也视为成功
+            return True
         except Exception as e:
             self.log(f"错误: 无法从注册表清除密码 - {e}")
             return False
+    # --- END: MODIFIED REGISTRY METHODS ---
             
     def load_lock_password(self):
         """在初始化时从注册表加载密码"""
         self.lock_password_b64 = self._load_password_from_registry()
     
+    # ... [THE REST OF YOUR CODE REMAINS EXACTLY THE SAME] ...
+    # ... [从这里开始，后面的所有代码都无需改动，保持原样即可] ...
     # --------------------------------
 
     def create_folder_structure(self):
@@ -279,7 +270,6 @@ class TimedBroadcastApp:
         self.lock_button = tk.Button(self.top_right_btn_frame, text="锁定", command=self.toggle_lock_state, bg='#E74C3C', fg='white',
                                      font=font_11, bd=0, padx=12, pady=5, cursor='hand2')
         self.lock_button.pack(side=tk.LEFT, padx=3)
-        # BUGFIX: 禁用非Windows系统上的锁定按钮，现在使用 WIN32COM_AVAILABLE
         if not WIN32COM_AVAILABLE:
             self.lock_button.config(state=tk.DISABLED, text="锁定(Win)")
 
@@ -468,7 +458,6 @@ class TimedBroadcastApp:
                        font=('Microsoft YaHei', 11), bg='white', anchor='w',
                        command=self._handle_lock_on_start_toggle)
         self.lock_on_start_cb.pack(side=tk.LEFT)
-        # 统一使用 WIN32COM_AVAILABLE
         if not WIN32COM_AVAILABLE:
             self.lock_on_start_cb.config(state=tk.DISABLED)
         
@@ -476,7 +465,6 @@ class TimedBroadcastApp:
 
         self.clear_password_btn = tk.Button(general_frame, text="清除锁定密码", font=('Microsoft YaHei', 11), command=self.clear_lock_password)
         self.clear_password_btn.pack(pady=10)
-        # 统一使用 WIN32COM_AVAILABLE
         if not self.lock_password_b64 or not WIN32COM_AVAILABLE:
             self.clear_password_btn.config(state=tk.DISABLED)
 
@@ -581,7 +569,6 @@ class TimedBroadcastApp:
             if p1 != p2: messagebox.showerror("错误", "两次输入的密码不一致。", parent=dialog); return
             
             encoded_pass = base64.b64encode(p1.encode('utf-8')).decode('utf-8')
-            # 这里的检查也统一使用 WIN32COM_AVAILABLE
             if self._save_password_to_registry(encoded_pass):
                 self.lock_password_b64 = encoded_pass
                 if "设置" in self.pages and hasattr(self, 'clear_password_btn'):
@@ -640,7 +627,6 @@ class TimedBroadcastApp:
 
     def _perform_password_clear_logic(self):
         """Logic for clearing the password from registry and memory."""
-        # 这里的检查也统一使用 WIN32COM_AVAILABLE
         if self._clear_password_from_registry():
             self.lock_password_b64 = ""
             self.settings["lock_on_start"] = False
@@ -1068,11 +1054,16 @@ class TimedBroadcastApp:
 
                 if play_this_task_now:
                     self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
+            
+            synthesis_thread = threading.Thread(target=self._synthesis_worker, 
+                                                args=(text_content, voice_params, output_path, _on_synthesis_complete))
+            synthesis_thread.daemon = True
+            synthesis_thread.start()
 
-            button_text = "保存修改" if is_edit_mode else "添加"
-            tk.Button(button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
-            tk.Button(button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
-            content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
+        button_text = "保存修改" if is_edit_mode else "添加"
+        tk.Button(button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
 
     def _synthesis_worker(self, text, voice_params, output_path, callback):
         """后台线程工作函数，用于语音合成"""
