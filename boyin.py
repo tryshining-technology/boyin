@@ -72,10 +72,8 @@ BGM_FOLDER = os.path.join(application_path, "文稿背景")
 VOICE_SCRIPT_FOLDER = os.path.join(application_path, "语音文稿")
 ICON_FILE = resource_path("icon.ico")
 
-# 新增整点报时文件夹路径
 CHIME_FOLDER = os.path.join(AUDIO_FOLDER, "整点报时")
 
-# 定义注册表路径
 REGISTRY_KEY_PATH = r"Software\创翔科技\TimedBroadcastApp"
 
 class TimedBroadcastApp:
@@ -112,7 +110,7 @@ class TimedBroadcastApp:
         self.nav_buttons = {}
         self.current_page = None
 
-        self.last_chime_hour = -1 # 用于防止整点报时重复触发
+        self.last_chime_hour = -1
 
         self.create_folder_structure()
         self.load_settings()
@@ -137,7 +135,6 @@ class TimedBroadcastApp:
         if self.is_app_locked_down:
             self.root.after(100, self.perform_lockdown)
 
-    # --- 注册表通用读写方法 ---
     def _save_to_registry(self, key_name, value):
         if not WIN32COM_AVAILABLE: return False
         try:
@@ -164,8 +161,6 @@ class TimedBroadcastApp:
             
     def load_lock_password(self):
         self.lock_password_b64 = self._load_from_registry("LockPasswordB64") or ""
-    
-    # --------------------------------
     
     def create_folder_structure(self):
         for folder in [PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER, VOICE_SCRIPT_FOLDER]:
@@ -230,7 +225,6 @@ class TimedBroadcastApp:
         elif page_name == "设置":
             if page_name not in self.pages:
                 self.pages[page_name] = self.create_settings_page()
-            # 每次切换到设置页面时都刷新UI
             self._refresh_settings_ui()
             target_frame = self.pages[page_name]
         elif page_name == "注册软件":
@@ -293,8 +287,6 @@ class TimedBroadcastApp:
         elif entered_password is not None:
             messagebox.showerror("验证失败", "密码错误！")
             self.log("尝试进入超级管理模块失败：密码错误。")
-
-    # --- 授权与注册相关方法 ---
 
     def create_registration_page(self):
         page_frame = tk.Frame(self.root, bg='white')
@@ -470,8 +462,6 @@ class TimedBroadcastApp:
 
     def update_title_bar(self):
         self.root.title(f"定时播音 ({self.auth_info['message']})")
-
-    # --------------------------------
     
     def create_super_admin_page(self):
         page_frame = tk.Frame(self.root, bg='white')
@@ -573,9 +563,10 @@ class TimedBroadcastApp:
         self.weekly_reboot_time_var.set(self.settings.get("weekly_reboot_time", "22:00:00"))
         self.weekly_reboot_days_var.set(self.settings.get("weekly_reboot_days", "每周:67"))
 
-        # 新增：刷新整点报时UI
         self.time_chime_enabled_var.set(self.settings.get("time_chime_enabled", False))
         self.time_chime_voice_var.set(self.settings.get("time_chime_voice", ""))
+        self.time_chime_speed_var.set(self.settings.get("time_chime_speed", "0"))
+        self.time_chime_pitch_var.set(self.settings.get("time_chime_pitch", "0"))
         
         if self.lock_password_b64 and WIN32COM_AVAILABLE:
             self.clear_password_btn.config(state=tk.NORMAL)
@@ -598,7 +589,6 @@ class TimedBroadcastApp:
 
             self._save_to_registry("LockPasswordB64", "")
 
-            # 重置时也要删除整点报时文件
             if os.path.exists(CHIME_FOLDER):
                 shutil.rmtree(CHIME_FOLDER)
                 self.log("已删除整点报时缓存文件。")
@@ -609,7 +599,8 @@ class TimedBroadcastApp:
                 "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00",
                 "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00",
                 "last_power_action_date": "",
-                "time_chime_enabled": False, "time_chime_voice": "" # 新增
+                "time_chime_enabled": False, "time_chime_voice": "",
+                "time_chime_speed": "0", "time_chime_pitch": "0"
             }
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(default_settings, f, ensure_ascii=False, indent=2)
@@ -794,16 +785,11 @@ class TimedBroadcastApp:
         btn_width = 10 
         
         buttons_config = [
-            ("添加", self.add_holiday),
-            ("修改", self.edit_holiday),
-            ("删除", self.delete_holiday),
+            ("添加", self.add_holiday), ("修改", self.edit_holiday), ("删除", self.delete_holiday),
             (None, None),
-            ("全部启用", self.enable_all_holidays),
-            ("全部禁用", self.disable_all_holidays),
+            ("全部启用", self.enable_all_holidays), ("全部禁用", self.disable_all_holidays),
             (None, None),
-            ("导入节日", self.import_holidays),
-            ("导出节日", self.export_holidays),
-            ("清空节日", self.clear_all_holidays),
+            ("导入节日", self.import_holidays), ("导出节日", self.export_holidays), ("清空节日", self.clear_all_holidays),
         ]
 
         for text, cmd in buttons_config:
@@ -827,9 +813,9 @@ class TimedBroadcastApp:
                                       bg='white', padx=15, pady=10)
         general_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        self.autostart_var = tk.BooleanVar(value=self.settings.get("autostart", False))
-        self.start_minimized_var = tk.BooleanVar(value=self.settings.get("start_minimized", False))
-        self.lock_on_start_var = tk.BooleanVar(value=self.settings.get("lock_on_start", False))
+        self.autostart_var = tk.BooleanVar()
+        self.start_minimized_var = tk.BooleanVar()
+        self.lock_on_start_var = tk.BooleanVar()
 
         tk.Checkbutton(general_frame, text="登录windows后自动启动", variable=self.autostart_var, 
                        font=('Microsoft YaHei', 11), bg='white', anchor='w', 
@@ -852,16 +838,15 @@ class TimedBroadcastApp:
 
         self.clear_password_btn = tk.Button(general_frame, text="清除锁定密码", font=('Microsoft YaHei', 11), command=self.clear_lock_password)
         self.clear_password_btn.pack(pady=10)
-        if not self.lock_password_b64 or not WIN32COM_AVAILABLE:
-            self.clear_password_btn.config(state=tk.DISABLED)
-
-        # --- 新增：整点报时功能 ---
+        
         time_chime_frame = tk.LabelFrame(settings_frame, text="整点报时", font=('Microsoft YaHei', 12, 'bold'),
                                          bg='white', padx=15, pady=10)
         time_chime_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        self.time_chime_enabled_var = tk.BooleanVar(value=self.settings.get("time_chime_enabled", False))
-        self.time_chime_voice_var = tk.StringVar(value=self.settings.get("time_chime_voice", ""))
+        self.time_chime_enabled_var = tk.BooleanVar()
+        self.time_chime_voice_var = tk.StringVar()
+        self.time_chime_speed_var = tk.StringVar()
+        self.time_chime_pitch_var = tk.StringVar()
         
         chime_control_frame = tk.Frame(time_chime_frame, bg='white')
         chime_control_frame.pack(fill=tk.X, pady=5)
@@ -873,34 +858,41 @@ class TimedBroadcastApp:
         available_voices = self.get_available_voices()
         self.chime_voice_combo = ttk.Combobox(chime_control_frame, textvariable=self.time_chime_voice_var, 
                                               values=available_voices, font=('Microsoft YaHei', 10), 
-                                              width=40, state='readonly')
+                                              width=35, state='readonly')
         self.chime_voice_combo.pack(side=tk.LEFT, padx=10)
-        self.chime_voice_combo.bind("<<ComboboxSelected>>", self._on_chime_voice_selected)
+        self.chime_voice_combo.bind("<<ComboboxSelected>>", lambda e: self._on_chime_params_changed(is_voice_change=True))
 
-        if not available_voices:
-            self.time_chime_enabled_var.set(False)
-            # 可以在这里放一个Label提示用户没有可用语音
+        params_frame = tk.Frame(chime_control_frame, bg='white')
+        params_frame.pack(side=tk.LEFT, padx=10)
+        tk.Label(params_frame, text="语速(-10~10):", font=('Microsoft YaHei', 10), bg='white').pack(side=tk.LEFT)
+        speed_entry = tk.Entry(params_frame, textvariable=self.time_chime_speed_var, font=('Microsoft YaHei', 10), width=5)
+        speed_entry.pack(side=tk.LEFT, padx=(0, 10))
+        tk.Label(params_frame, text="音调(-10~10):", font=('Microsoft YaHei', 10), bg='white').pack(side=tk.LEFT)
+        pitch_entry = tk.Entry(params_frame, textvariable=self.time_chime_pitch_var, font=('Microsoft YaHei', 10), width=5)
+        pitch_entry.pack(side=tk.LEFT)
         
+        speed_entry.bind("<FocusOut>", self._on_chime_params_changed)
+        pitch_entry.bind("<FocusOut>", self._on_chime_params_changed)
+
         power_frame = tk.LabelFrame(settings_frame, text="电源管理", font=('Microsoft YaHei', 12, 'bold'),
                                     bg='white', padx=15, pady=10)
         power_frame.pack(fill=tk.X, padx=20, pady=10)
 
-        self.daily_shutdown_enabled_var = tk.BooleanVar(value=self.settings.get("daily_shutdown_enabled", False))
-        self.daily_shutdown_time_var = tk.StringVar(value=self.settings.get("daily_shutdown_time", "23:00:00"))
-        self.weekly_shutdown_enabled_var = tk.BooleanVar(value=self.settings.get("weekly_shutdown_enabled", False))
-        self.weekly_shutdown_time_var = tk.StringVar(value=self.settings.get("weekly_shutdown_time", "23:30:00"))
-        self.weekly_shutdown_days_var = tk.StringVar(value=self.settings.get("weekly_shutdown_days", "每周:12345"))
-        self.weekly_reboot_enabled_var = tk.BooleanVar(value=self.settings.get("weekly_reboot_enabled", False))
-        self.weekly_reboot_time_var = tk.StringVar(value=self.settings.get("weekly_reboot_time", "22:00:00"))
-        self.weekly_reboot_days_var = tk.StringVar(value=self.settings.get("weekly_reboot_days", "每周:67"))
+        self.daily_shutdown_enabled_var = tk.BooleanVar()
+        self.daily_shutdown_time_var = tk.StringVar()
+        self.weekly_shutdown_enabled_var = tk.BooleanVar()
+        self.weekly_shutdown_time_var = tk.StringVar()
+        self.weekly_shutdown_days_var = tk.StringVar()
+        self.weekly_reboot_enabled_var = tk.BooleanVar()
+        self.weekly_reboot_time_var = tk.StringVar()
+        self.weekly_reboot_days_var = tk.StringVar()
 
         daily_frame = tk.Frame(power_frame, bg='white')
         daily_frame.pack(fill=tk.X, pady=4)
         tk.Checkbutton(daily_frame, text="每天关机", variable=self.daily_shutdown_enabled_var, 
                        font=('Microsoft YaHei', 11), bg='white', command=self.save_settings).pack(side=tk.LEFT)
-        time_entry_daily = tk.Entry(daily_frame, textvariable=self.daily_shutdown_time_var, 
-                                    font=('Microsoft YaHei', 11), width=15)
-        time_entry_daily.pack(side=tk.LEFT, padx=10)
+        tk.Entry(daily_frame, textvariable=self.daily_shutdown_time_var, 
+                 font=('Microsoft YaHei', 11), width=15).pack(side=tk.LEFT, padx=10)
         tk.Button(daily_frame, text="设置", font=('Microsoft YaHei', 11), command=lambda: self.show_single_time_dialog(self.daily_shutdown_time_var)
                   ).pack(side=tk.LEFT)
 
@@ -908,12 +900,10 @@ class TimedBroadcastApp:
         weekly_frame.pack(fill=tk.X, pady=4)
         tk.Checkbutton(weekly_frame, text="每周关机", variable=self.weekly_shutdown_enabled_var, 
                        font=('Microsoft YaHei', 11), bg='white', command=self.save_settings).pack(side=tk.LEFT)
-        days_entry_weekly = tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_days_var,
-                                     font=('Microsoft YaHei', 11), width=20)
-        days_entry_weekly.pack(side=tk.LEFT, padx=(10,5))
-        time_entry_weekly = tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_time_var,
-                                     font=('Microsoft YaHei', 11), width=15)
-        time_entry_weekly.pack(side=tk.LEFT, padx=5)
+        tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_days_var,
+                 font=('Microsoft YaHei', 11), width=20).pack(side=tk.LEFT, padx=(10,5))
+        tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_time_var,
+                 font=('Microsoft YaHei', 11), width=15).pack(side=tk.LEFT, padx=5)
         tk.Button(weekly_frame, text="设置", font=('Microsoft YaHei', 11), command=lambda: self.show_power_week_time_dialog(
             "设置每周关机", self.weekly_shutdown_days_var, self.weekly_shutdown_time_var)).pack(side=tk.LEFT)
 
@@ -921,41 +911,52 @@ class TimedBroadcastApp:
         reboot_frame.pack(fill=tk.X, pady=4)
         tk.Checkbutton(reboot_frame, text="每周重启", variable=self.weekly_reboot_enabled_var,
                        font=('Microsoft YaHei', 11), bg='white', command=self.save_settings).pack(side=tk.LEFT)
-        days_entry_reboot = tk.Entry(reboot_frame, textvariable=self.weekly_reboot_days_var,
-                                     font=('Microsoft YaHei', 11), width=20)
-        days_entry_reboot.pack(side=tk.LEFT, padx=(10,5))
-        time_entry_reboot = tk.Entry(reboot_frame, textvariable=self.weekly_reboot_time_var,
-                                     font=('Microsoft YaHei', 11), width=15)
-        time_entry_reboot.pack(side=tk.LEFT, padx=5)
+        tk.Entry(reboot_frame, textvariable=self.weekly_reboot_days_var,
+                 font=('Microsoft YaHei', 11), width=20).pack(side=tk.LEFT, padx=(10,5))
+        tk.Entry(reboot_frame, textvariable=self.weekly_reboot_time_var,
+                 font=('Microsoft YaHei', 11), width=15).pack(side=tk.LEFT, padx=5)
         tk.Button(reboot_frame, text="设置", font=('Microsoft YaHei', 11), command=lambda: self.show_power_week_time_dialog(
             "设置每周重启", self.weekly_reboot_days_var, self.weekly_reboot_time_var)).pack(side=tk.LEFT)
 
         return settings_frame
 
-    # --- 新增：整点报时处理逻辑 ---
-    def _on_chime_voice_selected(self, event):
-        """当用户在下拉列表中选择新语音时，如果报时已启用，则重新生成文件"""
-        self.save_settings()
-        if self.time_chime_enabled_var.get():
-            if messagebox.askyesno("确认", "您更改了播音员，需要重新生成全部24个报时文件。\n是否立即开始？"):
+    def _on_chime_params_changed(self, event=None, is_voice_change=False):
+        current_voice = self.time_chime_voice_var.get()
+        current_speed = self.time_chime_speed_var.get()
+        current_pitch = self.time_chime_pitch_var.get()
+
+        saved_voice = self.settings.get("time_chime_voice", "")
+        saved_speed = self.settings.get("time_chime_speed", "0")
+        saved_pitch = self.settings.get("time_chime_pitch", "0")
+
+        params_changed = (current_voice != saved_voice or 
+                          current_speed != saved_speed or 
+                          current_pitch != saved_pitch)
+
+        if self.time_chime_enabled_var.get() and params_changed:
+            self.save_settings() # 保存新值
+            if messagebox.askyesno("应用更改", "您更改了报时参数，需要重新生成全部24个报时文件。\n是否立即开始？"):
                 self._handle_time_chime_toggle(force_regenerate=True)
             else:
                 # 用户取消，恢复到之前的设置
-                self.time_chime_voice_var.set(self.settings.get("time_chime_voice", ""))
+                if is_voice_change: self.time_chime_voice_var.set(saved_voice)
+                self.time_chime_speed_var.set(saved_speed)
+                self.time_chime_pitch_var.set(saved_pitch)
+        else:
+            self.save_settings()
 
     def _handle_time_chime_toggle(self, force_regenerate=False):
-        """处理整点报时复选框的点击事件"""
         is_enabled = self.time_chime_enabled_var.get()
         
-        if is_enabled:
+        if is_enabled or force_regenerate:
             selected_voice = self.time_chime_voice_var.get()
             if not selected_voice:
-                messagebox.showwarning("操作失败", "请先从右侧列表中选择一个播音员。")
-                self.time_chime_enabled_var.set(False)
+                messagebox.showwarning("操作失败", "请先从下拉列表中选择一个播音员。")
+                if not force_regenerate: self.time_chime_enabled_var.set(False)
                 return
 
             self.save_settings()
-            self.log("准备启用整点报时功能，开始生成语音文件...")
+            self.log("准备启用/更新整点报时功能，开始生成语音文件...")
             
             progress_dialog = tk.Toplevel(self.root)
             progress_dialog.title("请稍候")
@@ -971,16 +972,14 @@ class TimedBroadcastApp:
             threading.Thread(target=self._generate_chime_files_worker, 
                              args=(selected_voice, progress_dialog, progress_label), daemon=True).start()
 
-        elif not force_regenerate: # 仅在非强制生成时（即用户手动取消勾选）才执行删除
+        elif not is_enabled and not force_regenerate:
             if messagebox.askyesno("确认操作", "您确定要禁用整点报时功能吗？\n这将删除所有已生成的报时音频文件。"):
                 self.save_settings()
                 threading.Thread(target=self._delete_chime_files_worker, daemon=True).start()
             else:
-                # 用户取消，保持勾选状态
                 self.time_chime_enabled_var.set(True)
     
     def _get_time_period_string(self, hour):
-        """根据小时（0-23）返回中文时间段"""
         if 0 <= hour < 6: return "凌晨"
         elif 6 <= hour < 9: return "早上"
         elif 9 <= hour < 12: return "上午"
@@ -989,7 +988,6 @@ class TimedBroadcastApp:
         else: return "晚上"
 
     def _generate_chime_files_worker(self, voice, progress_dialog, progress_label):
-        """在后台线程中生成24个报时文件"""
         if not os.path.exists(CHIME_FOLDER):
             os.makedirs(CHIME_FOLDER)
         
@@ -1004,11 +1002,15 @@ class TimedBroadcastApp:
                 text = f"现在时刻,北京时间{period}{display_hour}点整"
                 output_path = os.path.join(CHIME_FOLDER, f"{hour:02d}.wav")
                 
-                # 更新UI
                 progress_text = f"正在生成：{hour:02d}.wav ({hour + 1}/24)"
                 self.root.after(0, lambda p=progress_text: progress_label.config(text=p))
                 
-                voice_params = {'voice': voice, 'speed': '0', 'pitch': '0', 'volume': '100'}
+                voice_params = {
+                    'voice': voice, 
+                    'speed': self.settings.get("time_chime_speed", "0"), 
+                    'pitch': self.settings.get("time_chime_pitch", "0"), 
+                    'volume': '100'
+                }
                 if not self._synthesize_text_to_wav(text, voice_params, output_path):
                     raise Exception(f"生成 {hour:02d}.wav 失败")
         except Exception as e:
@@ -1019,7 +1021,8 @@ class TimedBroadcastApp:
             self.root.after(0, progress_dialog.destroy)
             if success:
                 self.log("全部整点报时文件生成完毕。")
-                self.root.after(0, messagebox.showinfo, "成功", "整点报时功能已启用！")
+                if self.time_chime_enabled_var.get():
+                     self.root.after(0, messagebox.showinfo, "成功", "整点报时功能已启用/更新！")
             else:
                 self.log("整点报时功能启用失败。")
                 self.settings['time_chime_enabled'] = False
@@ -1027,7 +1030,6 @@ class TimedBroadcastApp:
                 self.save_settings()
 
     def _delete_chime_files_worker(self):
-        """在后台线程中删除报时文件和文件夹"""
         self.log("正在禁用整点报时功能，开始删除缓存文件...")
         try:
             if os.path.exists(CHIME_FOLDER):
@@ -1038,8 +1040,6 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"删除整点报时文件失败: {e}")
             self.root.after(0, messagebox.showerror, "错误", f"删除报时文件失败：{e}")
-
-    # ------------------------------------
 
     def toggle_lock_state(self):
         if self.is_locked:
@@ -1054,12 +1054,16 @@ class TimedBroadcastApp:
         self.is_locked = True
         self.lock_button.config(text="解锁", bg='#2ECC71')
         self._set_ui_lock_state(tk.DISABLED)
+        if self.tray_icon: # 更新托盘菜单
+            self.tray_icon.menu = self.locked_menu
         self.log("界面已锁定。")
 
     def _apply_unlock(self):
         self.is_locked = False
         self.lock_button.config(text="锁定", bg='#E74C3C')
         self._set_ui_lock_state(tk.NORMAL)
+        if self.tray_icon: # 更新托盘菜单
+            self.tray_icon.menu = self.unlocked_menu
         self.log("界面已解锁。")
 
     def perform_initial_lock(self):
@@ -2204,7 +2208,7 @@ class TimedBroadcastApp:
             now = datetime.now()
             if not self.is_app_locked_down:
                 self._check_broadcast_tasks(now)
-                self._check_time_chime(now) # 新增：检查整点报时
+                self._check_time_chime(now)
             
             self._check_power_tasks(now)
             time.sleep(1)
@@ -2224,11 +2228,9 @@ class TimedBroadcastApp:
         return False
 
     def _check_time_chime(self, now):
-        """检查是否需要进行整点报时"""
         if not self.settings.get("time_chime_enabled", False):
             return
 
-        # 检查是否是整点，且与上次报时的小时不重复
         if now.minute == 0 and now.second == 0 and now.hour != self.last_chime_hour:
             self.last_chime_hour = now.hour
             
@@ -2336,10 +2338,10 @@ class TimedBroadcastApp:
                 
                 try:
                     chime_sound = pygame.mixer.Sound(chime_path)
-                    chime_sound.set_volume(1.0) # 报时音量固定为最大
+                    chime_sound.set_volume(1.0)
                     chime_channel = chime_sound.play()
                     while chime_channel and chime_channel.get_busy():
-                        time.sleep(0.1) # 阻塞等待报时结束
+                        time.sleep(0.1)
                 except Exception as e:
                     self.log(f"播放整点报时失败: {e}")
 
@@ -2557,7 +2559,8 @@ class TimedBroadcastApp:
             "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00", 
             "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00", 
             "last_power_action_date": "",
-            "time_chime_enabled": False, "time_chime_voice": "" # 新增
+            "time_chime_enabled": False, "time_chime_voice": "",
+            "time_chime_speed": "0", "time_chime_pitch": "0"
         }
         if os.path.exists(SETTINGS_FILE):
             try:
@@ -2584,8 +2587,10 @@ class TimedBroadcastApp:
                 "weekly_reboot_enabled": self.weekly_reboot_enabled_var.get(), 
                 "weekly_reboot_days": self.weekly_reboot_days_var.get(), 
                 "weekly_reboot_time": self.weekly_reboot_time_var.get(),
-                "time_chime_enabled": self.time_chime_enabled_var.get(), # 新增
-                "time_chime_voice": self.time_chime_voice_var.get() # 新增
+                "time_chime_enabled": self.time_chime_enabled_var.get(),
+                "time_chime_voice": self.time_chime_voice_var.get(),
+                "time_chime_speed": self.time_chime_speed_var.get(),
+                "time_chime_pitch": self.time_chime_pitch_var.get()
             })
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(self.settings, f, ensure_ascii=False, indent=2)
@@ -2695,8 +2700,14 @@ class TimedBroadcastApp:
     def setup_tray_icon(self):
         try: image = Image.open(ICON_FILE)
         except Exception as e: image = Image.new('RGB', (64, 64), 'white'); print(f"警告: 未找到或无法加载图标文件 '{ICON_FILE}': {e}")
-        menu = (item('显示', self.show_from_tray, default=True), item('退出', self.quit_app))
-        self.tray_icon = Icon("boyin", image, "定时播音", menu)
+        
+        # 定义动态菜单
+        self.unlocked_menu = (item('显示', self.show_from_tray, default=True), item('退出', self.quit_app))
+        unlock_callback = lambda: self.root.after(0, self._prompt_for_password_unlock)
+        self.locked_menu = (item('解锁', unlock_callback, default=True), item('退出', self.quit_app))
+        
+        initial_menu = self.locked_menu if self.is_locked else self.unlocked_menu
+        self.tray_icon = Icon("boyin", image, "定时播音", initial_menu)
 
     def start_tray_icon_thread(self):
         if TRAY_AVAILABLE and self.tray_icon is None:
