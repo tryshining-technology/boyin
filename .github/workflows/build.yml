@@ -46,17 +46,19 @@ jobs:
             ${{ runner.os }}-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
 
       - name: Install dependencies and configure pywin32
+        # 使用 shell: bash 以获得更一致的跨平台行为，即使在windows runner上
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
           # --- 修改点在这里 ---
-          # 使用 -m 模块化调用，让Python自己寻找脚本，更稳定
-          python -m pywin32_postinstall -install
+          # 直接调用脚本名，让系统通过PATH环境变量去寻找它
+          pywin32_postinstall.py -install
 
       - name: Build application with PyInstaller
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name boyin --icon=ico.ico --add-data "ico.ico;." boyin.py
+          pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico --add-data "icon.ico;." boyin.py
 
       - name: Upload artifact (${{ matrix.artifact-name }})
         uses: actions/upload-artifact@v4
