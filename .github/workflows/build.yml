@@ -46,15 +46,14 @@ jobs:
             ${{ runner.os }}-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
 
       - name: Install dependencies and configure pywin32
-        # 使用 shell: bash 以获得更一致的跨平台行为，即使在windows runner上
-        shell: bash
+        # 使用默认的 PowerShell shell
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
-          # --- 修改点在这里 ---
-          # 直接调用脚本名，让系统通过PATH环境变量去寻找它
-          pywin32_postinstall.py -install
+          # --- 最终修改点在这里 ---
+          # 使用 PowerShell 的 Get-Command 明确找到脚本路径并用 python 执行
+          python (Get-Command pywin32_postinstall.py).Source -install
 
       - name: Build application with PyInstaller
         run: |
