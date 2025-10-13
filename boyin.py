@@ -81,7 +81,7 @@ REGISTRY_PARENT_KEY_PATH = r"Software\创翔科技"
 class TimedBroadcastApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("定时播音")
+        self.root.title(" 创翔多功能定时播音旗舰版")
         self.root.geometry("1400x800")
         self.root.configure(bg='#E8F4F8')
         
@@ -214,7 +214,7 @@ class TimedBroadcastApp:
         self.switch_page("定时广播")
         
         self.update_status_bar()
-        self.log("定时播音软件已启动")
+        self.log(" 创翔多功能定时播音旗舰版软件已启动")
 
     def create_status_bar_content(self):
         self.status_labels = []
@@ -563,7 +563,7 @@ class TimedBroadcastApp:
         self.switch_page("注册软件")
 
     def update_title_bar(self):
-        self.root.title(f"定时播音 ({self.auth_info['message']})")
+        self.root.title(f" 创翔多功能定时播音旗舰版 ({self.auth_info['message']})")
     
     def create_super_admin_page(self):
         page_frame = tk.Frame(self.page_container, bg='white')
@@ -2821,7 +2821,7 @@ class TimedBroadcastApp:
             if enable: self.autostart_var.set(False); self.save_settings()
             messagebox.showerror("功能受限", "未安装 pywin32 库，无法设置开机启动。")
             return
-        shortcut_path = os.path.join(os.environ['APPDATA'], 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', "定时播音.lnk")
+        shortcut_path = os.path.join(os.environ['APPDATA'], 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', " 创翔多功能定时播音旗舰版.lnk")
         target_path = sys.executable
         try:
             if enable:
@@ -2927,7 +2927,7 @@ class TimedBroadcastApp:
             item('退出', self.quit_app)
         )
         
-        self.tray_icon = Icon("boyin", image, "定时播音", menu)
+        self.tray_icon = Icon("boyin", image, " 创翔多功能定时播音旗舰版", menu)
 
     def start_tray_icon_thread(self):
         if TRAY_AVAILABLE and self.tray_icon is None:
