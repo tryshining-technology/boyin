@@ -7,30 +7,56 @@ on:
 
 jobs:
   build-windows:
+    # 使用矩阵策略来定义不同的构建配置
+    strategy:
+      matrix:
+        include:
+          # 配置 1: 用于 Windows 7 (32位)
+          - python-version: '3.8'
+            architecture: 'x86'
+            artifact-name: 'boyin-Windows-x86-for-Win7'
+
+          # 配置 2: 用于 Windows 7 (64位)
+          - python-version: '3.8'
+            architecture: 'x64'
+            artifact-name: 'boyin-Windows-x64-for-Win7'
+
+          # 配置 3: 用于 Windows 8.1 - 11 (64位)
+          - python-version: '3.11'
+            architecture: 'x64'
+            artifact-name: 'boyin-Windows-x64-for-Win8.1+'
+
+    # 每个构建任务都在最新的Windows runner上运行
     runs-on: windows-latest
 
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
 
-      - name: Set up Python (forcing x64)
+      # 使用矩阵中的版本和架构来设置Python环境
+      - name: Set up Python ${{ matrix.python-version }} (${{ matrix.architecture }})
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          architecture: 'x64'
+          python-version: '${{ matrix.python-version }}'
+          architecture: '${{ matrix.architecture }}'
 
       - name: Install dependencies and configure pywin32
         run: |
           python -m pip install --upgrade pip
+          # 安装 requirements.txt 中定义的所有依赖
           pip install -r requirements.txt
           pip install pyinstaller
-          pywin32_postinstall.py -install
+          # 运行 pywin32 的安装后脚本，这对于打包至关重要
+          python Scripts/pywin32_postinstall.py -install
 
       - name: Build application with PyInstaller
-        run: pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico --add-data "icon.ico;." boyin.py
+        run: |
+          # --add-data "icon.ico;." 用于将图标文件打包进exe
+          pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico --add-data "icon.ico;." boyin.py
 
-      - name: Upload artifact
+      # 使用矩阵中定义的名字来上传构建产物，确保每个文件都独一无二
+      - name: Upload artifact (${{ matrix.artifact-name }})
         uses: actions/upload-artifact@v4
         with:
-          name: boyin-Windows-x64
+          name: ${{ matrix.artifact-name }}
           path: dist/boyin.exe
