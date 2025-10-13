@@ -417,7 +417,6 @@ class TimedBroadcastApp:
             sys.exit()
 
     def _get_mac_address(self):
-        # --- MODIFICATION START: Enhanced MAC address detection ---
         interfaces = psutil.net_if_addrs()
         stats = psutil.net_if_stats()
 
@@ -425,7 +424,6 @@ class TimedBroadcastApp:
         wireless_macs = []
         other_macs = []
 
-        # More comprehensive keywords for matching, including common Chinese names
         wired_keywords = ['ethernet', 'eth', '本地连接', 'local area connection']
         wireless_keywords = ['wi-fi', 'wlan', '无线网络连接', 'wireless']
 
@@ -433,13 +431,11 @@ class TimedBroadcastApp:
             is_wired = any(keyword in name.lower() for keyword in wired_keywords)
             is_wireless = any(keyword in name.lower() for keyword in wireless_keywords)
             
-            # Check if the interface is up and running
             is_up = stats.get(name) and getattr(stats.get(name), 'isup', False)
 
             for addr in addrs:
                 if addr.family == psutil.AF_LINK:
                     mac = addr.address.replace(':', '').replace('-', '').upper()
-                    # Skip invalid or loopback-like MACs
                     if len(mac) == 12 and mac != '000000000000':
                         mac_info = {'mac': mac, 'is_up': is_up, 'name': name}
                         if is_wired:
@@ -449,8 +445,6 @@ class TimedBroadcastApp:
                         else:
                             other_macs.append(mac_info)
         
-        # Prioritize interfaces that are UP, then by type (wired > wireless > other)
-        # Sort each list to have 'up' interfaces first
         wired_macs.sort(key=lambda x: x['is_up'], reverse=True)
         wireless_macs.sort(key=lambda x: x['is_up'], reverse=True)
         other_macs.sort(key=lambda x: x['is_up'], reverse=True)
@@ -465,7 +459,6 @@ class TimedBroadcastApp:
             self.log(f"找到其他类型网卡 MAC: {other_macs[0]['mac']} (来自: {other_macs[0]['name']})")
             return other_macs[0]['mac']
             
-        # Last resort: if keyword matching fails, iterate again and just find the first valid MAC
         for name, addrs in interfaces.items():
             for addr in addrs:
                 if addr.family == psutil.AF_LINK:
@@ -476,7 +469,6 @@ class TimedBroadcastApp:
 
         self.log("错误: 未能找到任何有效的网络适配器 MAC 地址。")
         return None
-        # --- MODIFICATION END ---
 
     def _calculate_reg_codes(self, numeric_mac_str):
         try:
@@ -1497,14 +1489,13 @@ class TimedBroadcastApp:
         is_edit_mode = task_to_edit is not None
         dialog = tk.Toplevel(self.root)
         dialog.title("修改音频节目" if is_edit_mode else "添加音频节目")
-        # --- MODIFICATION START: Adjusted dialog size for low resolutions ---
-        dialog.geometry("950x720")
-        # --- MODIFICATION END ---
+        dialog.geometry("950x680")
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#E8E8E8')
-        main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=15)
+        
+        main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        # --- MODIFICATION START: Reduced vertical padding for compact layout ---
+        
         content_frame = tk.LabelFrame(main_frame, text="内容", font=('Microsoft YaHei', 12, 'bold'),
                                      bg='#E8E8E8', padx=10, pady=5)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
@@ -1577,15 +1568,22 @@ class TimedBroadcastApp:
         date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=3)
         tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=4, column=3, padx=5)
         
-        other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=5)
-        other_frame.grid(row=2, column=0, sticky='ew', pady=2)
+        # --- MODIFICATION START: Buttons are now part of the "Other" frame ---
+        other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=10)
+        other_frame.grid(row=2, column=0, sticky='ew', pady=5)
         delay_var = tk.StringVar(value="ontime")
-        tk.Label(other_frame, text="模式:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='ne', padx=5, pady=2)
+        
+        tk.Label(other_frame, text="模式:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='nw', padx=5, pady=2)
+        
         delay_frame = tk.Frame(other_frame, bg='#E8E8E8')
         delay_frame.grid(row=0, column=1, sticky='w', padx=5, pady=2)
         tk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们（默认）", variable=delay_var, value="ontime", bg='#E8E8E8', font=font_spec).pack(anchor='w')
         tk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候", variable=delay_var, value="delay", bg='#E8E8E8', font=font_spec).pack(anchor='w')
         tk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate", bg='#E8E8E8', font=font_spec).pack(anchor='w')
+
+        dialog_button_frame = tk.Frame(other_frame, bg='#E8E8E8')
+        dialog_button_frame.grid(row=0, column=2, sticky='e', padx=20)
+        other_frame.grid_columnconfigure(1, weight=1)
         # --- MODIFICATION END ---
 
         if is_edit_mode:
@@ -1606,11 +1604,7 @@ class TimedBroadcastApp:
         else:
             volume_entry.insert(0, "80"); interval_first_entry.insert(0, "1"); interval_seconds_entry.insert(0, "600")
             weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
-        
-        # --- MODIFICATION START: Reduced vertical padding for compact layout ---
-        button_frame = tk.Frame(main_frame, bg='#E8E8E8')
-        button_frame.grid(row=3, column=0, pady=8)
-        # --- MODIFICATION END ---
+            
         def save_task():
             audio_path = audio_single_entry.get().strip() if audio_type_var.get() == "single" else audio_folder_entry.get().strip()
             if not audio_path: messagebox.showwarning("警告", "请选择音频文件或文件夹", parent=dialog); return
@@ -1633,10 +1627,13 @@ class TimedBroadcastApp:
 
             if play_this_task_now:
                 self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
-
+        
+        # --- MODIFICATION START: Buttons are created in the new frame ---
         button_text = "保存修改" if is_edit_mode else "添加"
-        tk.Button(button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
-        tk.Button(button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(dialog_button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(dialog_button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        # --- MODIFICATION END ---
+        
         content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
 
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
@@ -1644,14 +1641,13 @@ class TimedBroadcastApp:
         is_edit_mode = task_to_edit is not None
         dialog = tk.Toplevel(self.root)
         dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
-        # --- MODIFICATION START: Adjusted dialog size for low resolutions ---
-        dialog.geometry("950x720")
-        # --- MODIFICATION END ---
+        dialog.geometry("950x680")
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#E8E8E8')
-        main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=15)
+
+        main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        # --- MODIFICATION START: Reduced vertical padding for compact layout ---
+
         content_frame = tk.LabelFrame(main_frame, text="内容", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=5)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         font_spec = ('Microsoft YaHei', 11)
@@ -1732,17 +1728,24 @@ class TimedBroadcastApp:
         date_range_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=2)
         tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=3, column=3, padx=5)
         
+        # --- MODIFICATION START: Buttons are now part of the "Other" frame ---
         other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=15, pady=10)
         other_frame.grid(row=2, column=0, sticky='ew', pady=4)
         delay_var = tk.StringVar(value="delay")
-        tk.Label(other_frame, text="模式:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='ne', padx=5, pady=2)
+        
+        tk.Label(other_frame, text="模式:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='nw', padx=5, pady=2)
+        
         delay_frame = tk.Frame(other_frame, bg='#E8E8E8')
         delay_frame.grid(row=0, column=1, sticky='w', padx=5, pady=2)
         tk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们", variable=delay_var, value="ontime", bg='#E8E8E8', font=font_spec).pack(anchor='w', pady=1)
         tk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候（默认）", variable=delay_var, value="delay", bg='#E8E8E8', font=font_spec).pack(anchor='w', pady=1)
         tk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate", bg='#E8E8E8', font=font_spec).pack(anchor='w', pady=1)
+
+        dialog_button_frame = tk.Frame(other_frame, bg='#E8E8E8')
+        dialog_button_frame.grid(row=0, column=2, sticky='e', padx=20)
+        other_frame.grid_columnconfigure(1, weight=1)
         # --- MODIFICATION END ---
-        
+
         if is_edit_mode:
             task = task_to_edit
             name_entry.insert(0, task.get('name', ''))
@@ -1763,11 +1766,6 @@ class TimedBroadcastApp:
             prompt_var.set(0); prompt_volume_var.set("80"); bgm_var.set(0); bgm_volume_var.set("40")
             repeat_entry.insert(0, "1"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
 
-        # --- MODIFICATION START: Reduced vertical padding for compact layout ---
-        button_frame = tk.Frame(main_frame, bg='#E8E8E8')
-        button_frame.grid(row=3, column=0, pady=8)
-        # --- MODIFICATION END ---
-        
         def save_task():
             text_content = content_text.get('1.0', tk.END).strip()
             if not text_content:
@@ -1876,10 +1874,13 @@ class TimedBroadcastApp:
                                                 args=(text_content, voice_params, output_path, _on_synthesis_complete))
             synthesis_thread.daemon = True
             synthesis_thread.start()
-
+        
+        # --- MODIFICATION START: Buttons are created in the new frame ---
         button_text = "保存修改" if is_edit_mode else "添加"
-        tk.Button(button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
-        tk.Button(button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(dialog_button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(dialog_button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        # --- MODIFICATION END ---
+
         content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
 
     def _import_voice_script(self, text_widget):
