@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox, scrolledtext, filedialog, simpledialog
 import json
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import random
 import sys
@@ -25,12 +25,10 @@ try:
     import win32com.client
     import pythoncom
     from pywintypes import com_error
-    # 使用 Python 内置的 winreg 库进行注册表操作，它比 pywin32 更稳定
     import winreg
     WIN32COM_AVAILABLE = True
 except ImportError:
-    # 统一警告信息，涵盖所有 pywin32 提供的功能
-    print("警告: pywin32 未安装，语音、开机启动和密码持久化功能将受限。")
+    print("警告: pywin32 未安装，语音、开机启动和密码持久化/注册功能将受限。")
 
 AUDIO_AVAILABLE = False
 try:
@@ -41,6 +39,13 @@ except ImportError:
     print("警告: pygame 未安装，音频播放功能将不可用。")
 except Exception as e:
     print(f"警告: pygame 初始化失败 - {e}，音频播放功能将不可用。")
+
+PSUTIL_AVAILABLE = False
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    print("警告: psutil 未安装，无法获取机器码，注册功能不可用。")
 
 
 def resource_path(relative_path):
@@ -67,7 +72,7 @@ VOICE_SCRIPT_FOLDER = os.path.join(application_path, "语音文稿")
 ICON_FILE = resource_path("icon.ico")
 
 # 定义注册表路径
-REGISTRY_KEY_PATH = r"Software\TimedBroadcastApp"
+REGISTRY_KEY_PATH = r"Software\创翔科技\TimedBroadcastApp"
 
 class TimedBroadcastApp:
     def __init__(self, root):
@@ -87,8 +92,12 @@ class TimedBroadcastApp:
         self.settings = {}
         self.running = True
         self.tray_icon = None
-        self.is_locked = False
+        self.is_locked = False  # 用户手动锁定状态
+        self.is_app_locked_down = False # 因授权问题导致的软件锁定状态
         
+        self.auth_info = {'status': 'Unregistered', 'message': '正在验证授权...'}
+        self.machine_code = None
+
         self.lock_password_b64 = ""
         
         self.drag_start_item = None
@@ -102,6 +111,10 @@ class TimedBroadcastApp:
         self.create_folder_structure()
         self.load_settings()
         self.load_lock_password()
+        
+        # 授权检查必须在加载控件和数据之前
+        self.check_authorization()
+
         self.create_widgets()
         self.load_tasks()
         self.load_holidays()
@@ -115,55 +128,41 @@ class TimedBroadcastApp:
 
         if self.settings.get("start_minimized", False):
             self.root.after(100, self.hide_to_tray)
+        
+        if self.is_app_locked_down:
+            self.root.after(100, self.perform_lockdown)
 
-    # --- 使用 winreg 的注册表操作方法 ---
-    def _save_password_to_registry(self, password_b64):
+    # --- 注册表通用读写方法 ---
+    def _save_to_registry(self, key_name, value):
         if not WIN32COM_AVAILABLE: return False
         try:
             key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH)
-            winreg.SetValueEx(key, "LockPasswordB64", 0, winreg.REG_SZ, password_b64)
+            winreg.SetValueEx(key, key_name, 0, winreg.REG_SZ, str(value))
             winreg.CloseKey(key)
-            self.log("密码已安全存储。")
             return True
         except Exception as e:
-            self.log(f"错误: 无法将密码保存到注册表 - {e}")
+            self.log(f"错误: 无法写入注册表项 '{key_name}' - {e}")
             return False
 
-    def _load_password_from_registry(self):
-        if not WIN32COM_AVAILABLE: return ""
+    def _load_from_registry(self, key_name):
+        if not WIN32COM_AVAILABLE: return None
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_READ)
-            password_b64, _ = winreg.QueryValueEx(key, "LockPasswordB64")
+            value, _ = winreg.QueryValueEx(key, key_name)
             winreg.CloseKey(key)
-            return password_b64
+            return value
         except FileNotFoundError:
-            return ""
+            return None
         except Exception as e:
-            self.log(f"错误: 无法从注册表加载密码 - {e}")
-            return ""
-
-    def _clear_password_from_registry(self):
-        if not WIN32COM_AVAILABLE: return False
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_WRITE)
-            winreg.DeleteValue(key, "LockPasswordB64")
-            winreg.CloseKey(key)
-            self.log("安全存储的密码已被清除。")
-            return True
-        except FileNotFoundError:
-            return True
-        except Exception as e:
-            self.log(f"错误: 无法从注册表清除密码 - {e}")
-            return False
+            self.log(f"错误: 无法读取注册表项 '{key_name}' - {e}")
+            return None
             
     def load_lock_password(self):
-        """在初始化时从注册表加载密码"""
-        self.lock_password_b64 = self._load_password_from_registry()
+        self.lock_password_b64 = self._load_from_registry("LockPasswordB64") or ""
     
     # --------------------------------
-
+    
     def create_folder_structure(self):
-        """创建所有必要的文件夹"""
         for folder in [PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER, VOICE_SCRIPT_FOLDER]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
@@ -173,7 +172,7 @@ class TimedBroadcastApp:
         self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
 
-        nav_button_titles = ["定时广播", "节假日", "设置", "超级管理"]
+        nav_button_titles = ["定时广播", "节假日", "设置", "注册软件", "超级管理"]
         
         for i, title in enumerate(nav_button_titles):
             btn_frame = tk.Frame(self.nav_frame, bg='#A8D8E8')
@@ -199,7 +198,16 @@ class TimedBroadcastApp:
         self.switch_page("定时广播")
 
     def switch_page(self, page_name):
-        if self.is_locked and page_name != "超级管理":
+        # 授权锁定下，只允许进入注册和超管页面
+        if self.is_app_locked_down and page_name not in ["注册软件", "超级管理"]:
+            self.log("软件授权已过期，请先注册。")
+            # 确保强制停留在注册页面
+            if self.current_page != self.pages.get("注册软件"):
+                self.root.after(10, lambda: self.switch_page("注册软件"))
+            return
+
+        # 用户手动锁定下，只允许进入超管和注册页面
+        if self.is_locked and page_name not in ["超级管理", "注册软件"]:
             self.log("界面已锁定，请先解锁。")
             return
             
@@ -221,6 +229,10 @@ class TimedBroadcastApp:
             if page_name not in self.pages:
                 self.pages[page_name] = self.create_settings_page()
             target_frame = self.pages[page_name]
+        elif page_name == "注册软件":
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_registration_page()
+            target_frame = self.pages[page_name]
         elif page_name == "超级管理":
             if page_name not in self.pages:
                 self.pages[page_name] = self.create_super_admin_page()
@@ -237,7 +249,6 @@ class TimedBroadcastApp:
         selected_btn.config(bg='#5DADE2', fg='white')
         selected_btn.master.config(bg='#5DADE2')
 
-    # --- 超级管理相关方法 ---
     def _prompt_for_super_admin_password(self):
         correct_password = datetime.now().strftime('%Y%m%d')
         entered_password = simpledialog.askstring("身份验证", "请输入超级管理员密码:", show='*')
@@ -248,6 +259,193 @@ class TimedBroadcastApp:
         elif entered_password is not None:
             messagebox.showerror("验证失败", "密码错误！")
             self.log("尝试进入超级管理模块失败：密码错误。")
+            
+    # --- 授权与注册相关方法 ---
+
+    def create_registration_page(self):
+        page_frame = tk.Frame(self.root, bg='white')
+        title_label = tk.Label(page_frame, text="注册软件", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#2980B9')
+        title_label.pack(anchor='w', padx=20, pady=20)
+        
+        main_content_frame = tk.Frame(page_frame, bg='white')
+        main_content_frame.pack(padx=20, pady=10)
+
+        font_spec = ('Microsoft YaHei', 12)
+        
+        # 显示机器码
+        machine_code_frame = tk.Frame(main_content_frame, bg='white')
+        machine_code_frame.pack(fill=tk.X, pady=10)
+        tk.Label(machine_code_frame, text="您的机器码:", font=font_spec, bg='white').pack(side=tk.LEFT)
+        machine_code_val = self.get_machine_code()
+        machine_code_entry = tk.Entry(machine_code_frame, font=font_spec, width=30, fg='red')
+        machine_code_entry.pack(side=tk.LEFT, padx=10)
+        machine_code_entry.insert(0, machine_code_val)
+        machine_code_entry.config(state='readonly')
+
+        # 输入注册码
+        reg_code_frame = tk.Frame(main_content_frame, bg='white')
+        reg_code_frame.pack(fill=tk.X, pady=10)
+        tk.Label(reg_code_frame, text="请输入注册码:", font=font_spec, bg='white').pack(side=tk.LEFT)
+        self.reg_code_entry = tk.Entry(reg_code_frame, font=font_spec, width=30)
+        self.reg_code_entry.pack(side=tk.LEFT, padx=10)
+
+        # 注册按钮
+        register_btn = tk.Button(main_content_frame, text="注 册", font=('Microsoft YaHei', 12, 'bold'), 
+                                 bg='#27AE60', fg='white', width=15, pady=5, command=self.attempt_registration)
+        register_btn.pack(pady=20)
+        
+        # 提示信息
+        info_text = "请将您的机器码发送给软件提供商以获取注册码。\n注册码分为月度授权和永久授权两种。"
+        tk.Label(main_content_frame, text=info_text, font=('Microsoft YaHei', 10), bg='white', fg='grey').pack(pady=10)
+
+        return page_frame
+
+    def get_machine_code(self):
+        if self.machine_code:
+            return self.machine_code
+
+        if not PSUTIL_AVAILABLE:
+            messagebox.showerror("依赖缺失", "psutil 库未安装，无法获取机器码。软件将退出。")
+            self.root.destroy()
+            sys.exit()
+
+        try:
+            mac = self._get_mac_address()
+            if mac:
+                self.machine_code = mac
+                return self.machine_code
+            else:
+                raise Exception("未找到有效的网络适配器。")
+        except Exception as e:
+            messagebox.showerror("错误", f"无法获取机器码：{e}\n软件将退出。")
+            self.root.destroy()
+            sys.exit()
+
+    def _get_mac_address(self):
+        interfaces = psutil.net_if_addrs()
+        
+        wired_macs = []
+        wireless_macs = []
+
+        for name, addrs in interfaces.items():
+            for addr in addrs:
+                if addr.family == psutil.AF_LINK:
+                    mac = addr.address.replace(':', '').replace('-', '').upper()
+                    if 'ethernet' in name.lower() or 'eth' in name.lower():
+                        wired_macs.append(mac)
+                    elif 'wi-fi' in name.lower() or 'wlan' in name.lower():
+                        wireless_macs.append(mac)
+        
+        if wired_macs:
+            return wired_macs[0]
+        if wireless_macs:
+            return wireless_macs[0]
+            
+        return None
+
+    def _calculate_reg_codes(self, mac):
+        # 1. 替换字母
+        substitution = str.maketrans("ABCDEF", "123456")
+        numeric_mac_str = mac.upper().translate(substitution)
+        
+        # 2. 计算月度码
+        monthly_code = int(int(numeric_mac_str) * 3.14)
+        
+        # 3. 计算永久码
+        reversed_mac_str = numeric_mac_str[::-1]
+        permanent_val = int(reversed_mac_str) / 3.14
+        permanent_code = f"{permanent_val:.2f}"
+        
+        return {'monthly': str(monthly_code), 'permanent': permanent_code}
+
+    def attempt_registration(self):
+        entered_code = self.reg_code_entry.get().strip()
+        if not entered_code:
+            messagebox.showwarning("提示", "请输入注册码。")
+            return
+
+        machine_code = self.get_machine_code()
+        correct_codes = self._calculate_reg_codes(machine_code)
+        
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        
+        if entered_code == correct_codes['monthly']:
+            self._save_to_registry('RegistrationStatus', 'Monthly')
+            self._save_to_registry('RegistrationDate', today_str)
+            messagebox.showinfo("注册成功", "恭喜您，月度授权已成功激活！")
+            self.check_authorization() # 重新检查授权并解锁
+        elif entered_code == correct_codes['permanent']:
+            self._save_to_registry('RegistrationStatus', 'Permanent')
+            self._save_to_registry('RegistrationDate', today_str)
+            messagebox.showinfo("注册成功", "恭喜您，永久授权已成功激活！")
+            self.check_authorization() # 重新检查授权并解锁
+        else:
+            messagebox.showerror("注册失败", "您输入的注册码无效，请重新核对。")
+
+    def check_authorization(self):
+        """核心授权检查逻辑"""
+        today = datetime.now().date()
+        status = self._load_from_registry('RegistrationStatus')
+        reg_date_str = self._load_from_registry('RegistrationDate')
+        
+        if status == 'Permanent':
+            self.auth_info = {'status': 'Permanent', 'message': '永久授权'}
+            self.is_app_locked_down = False
+        elif status == 'Monthly':
+            try:
+                reg_date = datetime.strptime(reg_date_str, '%Y-%m-%d').date()
+                expiry_date = reg_date + timedelta(days=30)
+                if today > expiry_date:
+                    self.auth_info = {'status': 'Expired', 'message': '授权已过期，请注册'}
+                    self.is_app_locked_down = True
+                else:
+                    remaining_days = (expiry_date - today).days
+                    self.auth_info = {'status': 'Monthly', 'message': f'月度授权 - 剩余 {remaining_days} 天'}
+                    self.is_app_locked_down = False
+            except (TypeError, ValueError):
+                self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
+                self.is_app_locked_down = True
+        else: # 未注册
+            first_run_date_str = self._load_from_registry('FirstRunDate')
+            if not first_run_date_str:
+                self._save_to_registry('FirstRunDate', today.strftime('%Y-%m-%d'))
+                self.auth_info = {'status': 'Trial', 'message': '未注册 - 剩余 3 天'}
+                self.is_app_locked_down = False
+            else:
+                try:
+                    first_run_date = datetime.strptime(first_run_date_str, '%Y-%m-%d').date()
+                    trial_expiry_date = first_run_date + timedelta(days=3)
+                    if today > trial_expiry_date:
+                        self.auth_info = {'status': 'Expired', 'message': '授权已过期，请注册'}
+                        self.is_app_locked_down = True
+                    else:
+                        remaining_days = (trial_expiry_date - today).days
+                        self.auth_info = {'status': 'Trial', 'message': f'未注册 - 剩余 {remaining_days} 天'}
+                        self.is_app_locked_down = False
+                except (TypeError, ValueError):
+                    self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
+                    self.is_app_locked_down = True
+        
+        self.update_title_bar()
+
+    def perform_lockdown(self):
+        """执行软件授权锁定"""
+        messagebox.showerror("授权过期", "您的软件试用期或授权已到期，功能已受限。\n请在“注册软件”页面输入有效注册码以继续使用。")
+        self.log("软件因授权问题被锁定。")
+        
+        # 禁用所有任务
+        for task in self.tasks:
+            task['status'] = '禁用'
+        self.update_task_list()
+        self.save_tasks()
+        
+        # 强制切换到注册页面
+        self.switch_page("注册软件")
+
+    def update_title_bar(self):
+        self.root.title(f"定时播音 ({self.auth_info['message']})")
+
+    # --------------------------------
     
     def create_super_admin_page(self):
         page_frame = tk.Frame(self.root, bg='white')
@@ -273,7 +471,7 @@ class TimedBroadcastApp:
         try:
             backup_data = {
                 'backup_date': datetime.now().isoformat(), 'tasks': self.tasks, 'holidays': self.holidays,
-                'settings': self.settings, 'lock_password_b64': self._load_password_from_registry()
+                'settings': self.settings, 'lock_password_b64': self._load_from_registry("LockPasswordB64")
             }
             filename = filedialog.asksaveasfilename(
                 title="备份所有设置到...", defaultextension=".json",
@@ -319,9 +517,9 @@ class TimedBroadcastApp:
                 json.dump(self.settings, f, ensure_ascii=False, indent=2)
             
             if self.lock_password_b64:
-                self._save_password_to_registry(self.lock_password_b64)
+                self._save_to_registry("LockPasswordB64", self.lock_password_b64)
             else:
-                self._clear_password_from_registry()
+                self._save_to_registry("LockPasswordB64", "") # 清空
 
             # 3. 刷新所有UI界面
             self.update_task_list()
@@ -337,7 +535,6 @@ class TimedBroadcastApp:
             self.log(f"还原失败: {e}"); messagebox.showerror("还原失败", f"发生错误: {e}")
     
     def _refresh_settings_ui(self):
-        """根据 self.settings 和 self.lock_password_b64 刷新设置页面的所有控件状态"""
         if "设置" not in self.pages or not hasattr(self, 'autostart_var'):
             return
 
@@ -372,7 +569,7 @@ class TimedBroadcastApp:
             self.clear_all_holidays()
             messagebox.askyesno = original_askyesno
 
-            self._clear_password_from_registry()
+            self._save_to_registry("LockPasswordB64", "") # 清空密码
 
             default_settings = {
                 "autostart": False, "start_minimized": False, "lock_on_start": False,
@@ -504,7 +701,6 @@ class TimedBroadcastApp:
         self.status_labels = []
         status_texts = ["当前时间", "系统状态", "播放状态", "任务数量"]
         
-        # [新增功能 2] 添加版权信息标签
         copyright_label = tk.Label(status_frame, text="© 创翔科技", font=font_11,
                                    bg='#5DADE2', fg='white', padx=15)
         copyright_label.pack(side=tk.RIGHT, padx=2)
@@ -727,7 +923,7 @@ class TimedBroadcastApp:
             if p1 != p2: messagebox.showerror("错误", "两次输入的密码不一致。", parent=dialog); return
             
             encoded_pass = base64.b64encode(p1.encode('utf-8')).decode('utf-8')
-            if self._save_password_to_registry(encoded_pass):
+            if self._save_to_registry("LockPasswordB64", encoded_pass):
                 self.lock_password_b64 = encoded_pass
                 if "设置" in self.pages and hasattr(self, 'clear_password_btn'):
                     self.clear_password_btn.config(state=tk.NORMAL)
@@ -784,8 +980,7 @@ class TimedBroadcastApp:
         dialog.bind('<Return>', lambda event: confirm())
 
     def _perform_password_clear_logic(self):
-        """Logic for clearing the password from registry and memory."""
-        if self._clear_password_from_registry():
+        if self._save_to_registry("LockPasswordB64", ""):
             self.lock_password_b64 = ""
             self.settings["lock_on_start"] = False
             
@@ -799,7 +994,6 @@ class TimedBroadcastApp:
             self.log("锁定密码已清除。")
 
     def clear_lock_password(self):
-        """Called by the button on the settings page."""
         if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。", parent=self.root):
             self._perform_password_clear_logic()
             messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root)
@@ -814,7 +1008,8 @@ class TimedBroadcastApp:
 
     def _set_ui_lock_state(self, state):
         for title, btn in self.nav_buttons.items():
-            if title == "超级管理":
+            # 锁定状态下，超级管理和注册软件按钮保持可用
+            if title in ["超级管理", "注册软件"]:
                 continue 
             try:
                 btn.config(state=state)
@@ -823,7 +1018,7 @@ class TimedBroadcastApp:
         
         for page_name, page_frame in self.pages.items():
             if page_frame and page_frame.winfo_exists():
-                if page_name == "超级管理":
+                if page_name in ["超级管理", "注册软件"]:
                     continue
                 self._set_widget_state_recursively(page_frame, state)
     
@@ -1089,7 +1284,6 @@ class TimedBroadcastApp:
         script_btn_frame = tk.Frame(content_frame, bg='#E8E8E8')
         script_btn_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=(0, 5))
         tk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text), font=('Microsoft YaHei', 10)).pack(side=tk.LEFT)
-        # [修改功能 1] 修改导出按钮的 command，传入 name_entry
         tk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text, name_entry), font=('Microsoft YaHei', 10)).pack(side=tk.LEFT, padx=10)
 
         tk.Label(content_frame, text="播音员:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='w', padx=5, pady=8)
@@ -1319,17 +1513,14 @@ class TimedBroadcastApp:
             messagebox.showerror("导入失败", f"无法读取文件：\n{e}")
             self.log(f"导入文稿失败: {e}")
 
-    # [修改功能 1] 修改函数签名以接收 name_widget
     def _export_voice_script(self, text_widget, name_widget):
         content = text_widget.get('1.0', tk.END).strip()
         if not content:
             messagebox.showwarning("无法导出", "播音文字内容为空，无需导出。")
             return
 
-        # [修改功能 1] 根据节目名称生成默认文件名
         program_name = name_widget.get().strip()
         if program_name:
-            # 清理文件名中的非法字符
             invalid_chars = '\\/:*?"<>|'
             safe_name = "".join(c for c in program_name if c not in invalid_chars).strip()
             default_filename = f"{safe_name}.txt" if safe_name else "未命名文稿.txt"
@@ -1339,7 +1530,7 @@ class TimedBroadcastApp:
         filename = filedialog.asksaveasfilename(
             title="导出文稿到...",
             initialdir=VOICE_SCRIPT_FOLDER,
-            initialfile=default_filename, # 使用动态生成的默认文件名
+            initialfile=default_filename,
             defaultextension=".txt",
             filetypes=[("文本文档", "*.txt")]
         )
@@ -1847,7 +2038,10 @@ class TimedBroadcastApp:
     def _scheduler_worker(self):
         while self.running:
             now = datetime.now()
-            self._check_broadcast_tasks(now)
+            # 如果软件被锁定，则不检查广播任务
+            if not self.is_app_locked_down:
+                self._check_broadcast_tasks(now)
+            
             self._check_power_tasks(now)
             time.sleep(1)
     
@@ -2155,8 +2349,6 @@ class TimedBroadcastApp:
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as f: self.settings = json.load(f)
                 for key, value in defaults.items(): self.settings.setdefault(key, value)
-                if "lock_password_b64" in self.settings:
-                    del self.settings["lock_password_b64"]
             except Exception as e: 
                 self.log(f"加载设置失败: {e}, 将使用默认设置。")
                 self.settings = defaults
@@ -2609,4 +2801,11 @@ def main():
     root.mainloop()
 
 if __name__ == "__main__":
+    # 彻底退出前的最终保障
+    if not WIN32COM_AVAILABLE:
+        messagebox.showerror("核心依赖缺失", "pywin32 库未安装或损坏，软件无法运行注册和锁定等核心功能，即将退出。")
+        sys.exit()
+    if not PSUTIL_AVAILABLE:
+        messagebox.showerror("核心依赖缺失", "psutil 库未安装，软件无法获取机器码以进行授权验证，即将退出。")
+        sys.exit()
     main()
