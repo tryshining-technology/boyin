@@ -126,7 +126,7 @@ class TimedBroadcastApp:
             key, _ = win32api.RegCreateKeyEx(win32con.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, win32con.KEY_WRITE)
             
             # 关键修改：将第三个参数从 0 改为 None 来避免类型错误
-            win32api.RegSetValueEx(key, "LockPasswordB64", None, win32con.REG_SZ, password_b64)
+            win32api.RegSetValueEx(key, "LockPasswordB64", 0, win32con.REG_SZ, password_b64)
             
             win32api.RegCloseKey(key)
             self.log("密码已安全存储。")
