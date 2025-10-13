@@ -63,6 +63,7 @@ HOLIDAY_FILE = os.path.join(application_path, "holidays.json")
 PROMPT_FOLDER = os.path.join(application_path, "提示音")
 AUDIO_FOLDER = os.path.join(application_path, "音频文件")
 BGM_FOLDER = os.path.join(application_path, "文稿背景")
+VOICE_SCRIPT_FOLDER = os.path.join(application_path, "语音文稿") # [新增功能 2] 新增语音文稿文件夹路径
 ICON_FILE = resource_path("icon.ico")
 
 # 定义注册表路径
@@ -163,7 +164,8 @@ class TimedBroadcastApp:
 
     def create_folder_structure(self):
         """创建所有必要的文件夹"""
-        for folder in [PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER]:
+        # [新增功能 2] 将新文件夹加入创建列表
+        for folder in [PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER, VOICE_SCRIPT_FOLDER]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
 
@@ -198,7 +200,7 @@ class TimedBroadcastApp:
         self.switch_page("定时广播")
 
     def switch_page(self, page_name):
-        if self.is_locked:
+        if self.is_locked and page_name != "超级管理": # 超级管理页面允许在锁定状态下进入
             self.log("界面已锁定，请先解锁。")
             return
             
@@ -243,23 +245,8 @@ class TimedBroadcastApp:
         
         if entered_password == correct_password:
             self.log("超级管理员密码正确，进入管理模块。")
-            if self.current_page:
-                self.current_page.pack_forget()
-            for title, btn in self.nav_buttons.items():
-                btn.config(bg='#A8D8E8', fg='black')
-                btn.master.config(bg='#A8D8E8')
-            
-            page_name = "超级管理"
-            if page_name not in self.pages:
-                self.pages[page_name] = self.create_super_admin_page()
-            target_frame = self.pages[page_name]
-            
-            target_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
-            self.current_page = target_frame
-            
-            selected_btn = self.nav_buttons[page_name]
-            selected_btn.config(bg='#5DADE2', fg='white')
-            selected_btn.master.config(bg='#5DADE2')
+            # 调用标准的页面切换逻辑
+            self.switch_page("超级管理")
         elif entered_password is not None:
             messagebox.showerror("验证失败", "密码错误！")
             self.log("尝试进入超级管理模块失败：密码错误。")
@@ -346,6 +333,9 @@ class TimedBroadcastApp:
             self.log("所有设置已从备份文件成功还原。")
             messagebox.showinfo("还原成功", "所有设置已成功还原并立即应用。")
             
+            # [新增功能 1] 还原成功后，延时切换到主页面
+            self.root.after(100, lambda: self.switch_page("定时广播"))
+
         except Exception as e:
             self.log(f"还原失败: {e}"); messagebox.showerror("还原失败", f"发生错误: {e}")
     
@@ -381,7 +371,6 @@ class TimedBroadcastApp:
         try:
             original_askyesno = messagebox.askyesno
             messagebox.askyesno = lambda title, message: True
-            # [Bug Fix 2] 调用清空任务时，明确指出不要删除关联的物理文件
             self.clear_all_tasks(delete_associated_files=False)
             self.clear_all_holidays()
             messagebox.askyesno = original_askyesno
@@ -821,25 +810,20 @@ class TimedBroadcastApp:
             self.save_settings()
 
     def _set_ui_lock_state(self, state):
-        # [Bug Fix 1] 精细化控制导航栏按钮，而不是禁用整个导航栏
         for title, btn in self.nav_buttons.items():
             if title == "超级管理":
-                continue  # 跳过“超级管理”按钮，使其保持可用
+                continue 
             try:
-                # 禁用按钮本身
                 btn.config(state=state)
-                # 禁用按钮所在的frame，以改变背景色（如果需要）
-                btn.master.config(state=state)
             except tk.TclError:
                 pass
         
-        # 禁用除超级管理页面之外的所有页面内容
         for page_name, page_frame in self.pages.items():
             if page_frame and page_frame.winfo_exists():
                 if page_name == "超级管理":
                     continue
                 self._set_widget_state_recursively(page_frame, state)
-
+    
     def _set_widget_state_recursively(self, parent_widget, state):
         for child in parent_widget.winfo_children():
             if child == self.lock_button:
@@ -1092,20 +1076,30 @@ class TimedBroadcastApp:
         tk.Label(content_frame, text="节目名称:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='w', padx=5, pady=5)
         name_entry = tk.Entry(content_frame, font=font_spec, width=65)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=5)
+        
+        # --- [新增功能 2] 文稿区域 ---
         tk.Label(content_frame, text="播音文字:", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='nw', padx=5, pady=5)
         text_frame = tk.Frame(content_frame, bg='#E8E8E8')
         text_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=5)
         content_text = scrolledtext.ScrolledText(text_frame, height=5, font=font_spec, width=65, wrap=tk.WORD)
         content_text.pack(fill=tk.BOTH, expand=True)
-        tk.Label(content_frame, text="播音员:", font=font_spec, bg='#E8E8E8').grid(row=2, column=0, sticky='w', padx=5, pady=8)
+
+        script_btn_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        script_btn_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=(0, 5))
+        tk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text), font=('Microsoft YaHei', 10)).pack(side=tk.LEFT)
+        tk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text), font=('Microsoft YaHei', 10)).pack(side=tk.LEFT, padx=10)
+        # --- 文稿区域结束 ---
+
+        tk.Label(content_frame, text="播音员:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='w', padx=5, pady=8) # row 2 -> 3
         voice_frame = tk.Frame(content_frame, bg='#E8E8E8')
-        voice_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=8)
+        voice_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=8) # row 2 -> 3
         available_voices = self.get_available_voices()
         voice_var = tk.StringVar()
         voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, values=available_voices, font=font_spec, width=50, state='readonly')
         voice_combo.pack(side=tk.LEFT)
+        
         speech_params_frame = tk.Frame(content_frame, bg='#E8E8E8')
-        speech_params_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=5)
+        speech_params_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=5) # row 3 -> 4
         tk.Label(speech_params_frame, text="语速(-10~10):", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(0,5))
         speed_entry = tk.Entry(speech_params_frame, font=font_spec, width=8)
         speed_entry.pack(side=tk.LEFT, padx=5)
@@ -1115,9 +1109,10 @@ class TimedBroadcastApp:
         tk.Label(speech_params_frame, text="音量(0-100):", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
         volume_entry = tk.Entry(speech_params_frame, font=font_spec, width=8)
         volume_entry.pack(side=tk.LEFT, padx=5)
+        
         prompt_var = tk.IntVar()
         prompt_frame = tk.Frame(content_frame, bg='#E8E8E8')
-        prompt_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=5)
+        prompt_frame.grid(row=5, column=1, columnspan=3, sticky='w', padx=5, pady=5) # row 4 -> 5
         tk.Checkbutton(prompt_frame, text="提示音:", variable=prompt_var, bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
         prompt_file_var, prompt_volume_var = tk.StringVar(), tk.StringVar()
         prompt_file_entry = tk.Entry(prompt_frame, textvariable=prompt_file_var, font=font_spec, width=20)
@@ -1125,9 +1120,10 @@ class TimedBroadcastApp:
         tk.Button(prompt_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var)).pack(side=tk.LEFT)
         tk.Label(prompt_frame, text="音量(0-100):", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
         tk.Entry(prompt_frame, textvariable=prompt_volume_var, font=font_spec, width=8).pack(side=tk.LEFT, padx=5)
+        
         bgm_var = tk.IntVar()
         bgm_frame = tk.Frame(content_frame, bg='#E8E8E8')
-        bgm_frame.grid(row=5, column=1, columnspan=3, sticky='w', padx=5, pady=5)
+        bgm_frame.grid(row=6, column=1, columnspan=3, sticky='w', padx=5, pady=5) # row 5 -> 6
         tk.Checkbutton(bgm_frame, text="背景音乐:", variable=bgm_var, bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
         bgm_file_var, bgm_volume_var = tk.StringVar(), tk.StringVar()
         bgm_file_entry = tk.Entry(bgm_frame, textvariable=bgm_file_var, font=font_spec, width=20)
@@ -1135,6 +1131,7 @@ class TimedBroadcastApp:
         tk.Button(bgm_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var)).pack(side=tk.LEFT)
         tk.Label(bgm_frame, text="音量(0-100):", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
         tk.Entry(bgm_frame, textvariable=bgm_volume_var, font=font_spec, width=8).pack(side=tk.LEFT, padx=5)
+        
         time_frame = tk.LabelFrame(main_frame, text="时间", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=10)
         time_frame.grid(row=1, column=0, sticky='ew', pady=5)
         tk.Label(time_frame, text="开始时间:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=5)
@@ -1301,6 +1298,52 @@ class TimedBroadcastApp:
         tk.Button(button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
         content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
 
+    # [新增功能 2] 导入文稿方法
+    def _import_voice_script(self, text_widget):
+        filename = filedialog.askopenfilename(
+            title="选择要导入的文稿",
+            initialdir=VOICE_SCRIPT_FOLDER,
+            filetypes=[("文本文档", "*.txt"), ("所有文件", "*.*")]
+        )
+        if not filename:
+            return
+        
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                content = f.read()
+            text_widget.delete('1.0', tk.END)
+            text_widget.insert('1.0', content)
+            self.log(f"已从 {os.path.basename(filename)} 成功导入文稿。")
+        except Exception as e:
+            messagebox.showerror("导入失败", f"无法读取文件：\n{e}")
+            self.log(f"导入文稿失败: {e}")
+
+    # [新增功能 2] 导出文稿方法
+    def _export_voice_script(self, text_widget):
+        content = text_widget.get('1.0', tk.END).strip()
+        if not content:
+            messagebox.showwarning("无法导出", "播音文字内容为空，无需导出。")
+            return
+
+        filename = filedialog.asksaveasfilename(
+            title="导出文稿到...",
+            initialdir=VOICE_SCRIPT_FOLDER,
+            initialfile="我的文稿.txt",
+            defaultextension=".txt",
+            filetypes=[("文本文档", "*.txt")]
+        )
+        if not filename:
+            return
+            
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(content)
+            self.log(f"文稿已成功导出到 {os.path.basename(filename)}。")
+            messagebox.showinfo("导出成功", f"文稿已成功导出到：\n{filename}")
+        except Exception as e:
+            messagebox.showerror("导出失败", f"无法保存文件：\n{e}")
+            self.log(f"导出文稿失败: {e}")
+
     def _synthesis_worker(self, text, voice_params, output_path, callback):
         """后台线程工作函数，用于语音合成"""
         try:
@@ -1455,7 +1498,6 @@ class TimedBroadcastApp:
             try:
                 with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
 
-                # [Bug Fix 3] 添加文件结构校验
                 if not isinstance(imported, list) or \
                    (imported and (not isinstance(imported[0], dict) or 'time' not in imported[0] or 'type' not in imported[0])):
                     messagebox.showerror("导入失败", "文件格式不正确，看起来不是一个有效的节目单备份文件。")
@@ -1573,7 +1615,6 @@ class TimedBroadcastApp:
     def clear_all_tasks(self, delete_associated_files=True):
         if not self.tasks: return
         
-        # [Bug Fix 2] 根据参数动态生成提示信息
         if delete_associated_files:
             msg = "您确定要清空所有节目吗？\n此操作将同时删除关联的语音文件，且不可恢复！"
         else:
@@ -1581,12 +1622,11 @@ class TimedBroadcastApp:
             
         if messagebox.askyesno("严重警告", msg):
             files_to_delete = []
-            # [Bug Fix 2] 仅在需要时收集待删除文件列表
             if delete_associated_files:
                 for task in self.tasks:
                     if task.get('type') == 'voice' and 'wav_filename' in task:
                         wav_filename = task.get('wav_filename')
-                        if wav_filename: # 确保文件名存在
+                        if wav_filename: 
                             wav_path = os.path.join(AUDIO_FOLDER, wav_filename)
                             if os.path.exists(wav_path):
                                 files_to_delete.append(wav_path)
@@ -1596,7 +1636,6 @@ class TimedBroadcastApp:
             self.save_tasks()
             self.log("已清空所有节目列表。")
 
-            # [Bug Fix 2] 仅在需要时执行文件删除
             if delete_associated_files and files_to_delete:
                 for f in files_to_delete:
                     try: 
@@ -2518,7 +2557,6 @@ class TimedBroadcastApp:
             try:
                 with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
 
-                # [Bug Fix 3] 添加文件结构校验
                 if not isinstance(imported, list) or \
                    (imported and (not isinstance(imported[0], dict) or 'start_datetime' not in imported[0] or 'end_datetime' not in imported[0])):
                     messagebox.showerror("导入失败", "文件格式不正确，看起来不是一个有效的节假日备份文件。")
