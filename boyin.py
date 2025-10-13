@@ -172,14 +172,12 @@ class TimedBroadcastApp:
         self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
 
-        # --- NEW: 添加 "超级管理" ---
         nav_button_titles = ["定时广播", "节假日", "设置", "超级管理"]
         
         for i, title in enumerate(nav_button_titles):
             btn_frame = tk.Frame(self.nav_frame, bg='#A8D8E8')
             btn_frame.pack(fill=tk.X, pady=1)
 
-            # --- NEW: 为 "超级管理" 设置特殊命令 ---
             cmd = None
             if title == "超级管理":
                 cmd = self._prompt_for_super_admin_password
@@ -200,7 +198,6 @@ class TimedBroadcastApp:
         self.switch_page("定时广播")
 
     def switch_page(self, page_name):
-        # 这个检查对 "超级管理" 无效，因为它不通过此函数调用
         if self.is_locked:
             self.log("界面已锁定，请先解锁。")
             return
@@ -223,7 +220,6 @@ class TimedBroadcastApp:
             if page_name not in self.pages:
                 self.pages[page_name] = self.create_settings_page()
             target_frame = self.pages[page_name]
-        # --- NEW: 超级管理页面的创建和切换逻辑 ---
         elif page_name == "超级管理":
             if page_name not in self.pages:
                 self.pages[page_name] = self.create_super_admin_page()
@@ -240,16 +236,13 @@ class TimedBroadcastApp:
         selected_btn.config(bg='#5DADE2', fg='white')
         selected_btn.master.config(bg='#5DADE2')
 
-    # --- NEW: 所有超级管理相关的新方法 ---
+    # --- 超级管理相关方法 ---
     def _prompt_for_super_admin_password(self):
-        """弹出动态密码输入框，验证成功后切换到超级管理页面"""
         correct_password = datetime.now().strftime('%Y%m%d')
-        
         entered_password = simpledialog.askstring("身份验证", "请输入超级管理员密码:", show='*')
         
         if entered_password == correct_password:
             self.log("超级管理员密码正确，进入管理模块。")
-            # 手动执行页面切换，绕过常规的 switch_page 中的锁定检查
             if self.current_page:
                 self.current_page.pack_forget()
             for title, btn in self.nav_buttons.items():
@@ -267,140 +260,139 @@ class TimedBroadcastApp:
             selected_btn = self.nav_buttons[page_name]
             selected_btn.config(bg='#5DADE2', fg='white')
             selected_btn.master.config(bg='#5DADE2')
-
-        elif entered_password is not None: # 用户输入了但密码错误
+        elif entered_password is not None:
             messagebox.showerror("验证失败", "密码错误！")
             self.log("尝试进入超级管理模块失败：密码错误。")
     
     def create_super_admin_page(self):
-        """创建超级管理页面的UI"""
         page_frame = tk.Frame(self.root, bg='white')
-
-        title_label = tk.Label(page_frame, text="超级管理", font=('Microsoft YaHei', 14, 'bold'),
-                               bg='white', fg='#C0392B')
+        title_label = tk.Label(page_frame, text="超级管理", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#C0392B')
         title_label.pack(anchor='w', padx=20, pady=20)
-
         desc_label = tk.Label(page_frame, text="警告：此处的任何操作都可能导致数据丢失或配置重置，请谨慎操作。",
                               font=('Microsoft YaHei', 11), bg='white', fg='red', wraplength=700)
         desc_label.pack(anchor='w', padx=20, pady=(0, 20))
-
         btn_frame = tk.Frame(page_frame, bg='white')
         btn_frame.pack(padx=20, pady=10, fill=tk.X)
-
         btn_font = ('Microsoft YaHei', 12, 'bold')
-        btn_width = 20
-        btn_pady = 10
-
+        btn_width = 20; btn_pady = 10
         tk.Button(btn_frame, text="备份所有设置", command=self._backup_all_settings,
                   font=btn_font, width=btn_width, pady=btn_pady, bg='#2980B9', fg='white').pack(pady=10)
-        
         tk.Button(btn_frame, text="还原所有设置", command=self._restore_all_settings,
                   font=btn_font, width=btn_width, pady=btn_pady, bg='#27AE60', fg='white').pack(pady=10)
-
         tk.Button(btn_frame, text="重置软件", command=self._reset_software,
                   font=btn_font, width=btn_width, pady=btn_pady, bg='#E74C3C', fg='white').pack(pady=10)
-
         return page_frame
 
     def _backup_all_settings(self):
-        """备份所有数据到一个JSON文件"""
         self.log("开始备份所有设置...")
         try:
             backup_data = {
-                'backup_date': datetime.now().isoformat(),
-                'tasks': self.tasks,
-                'holidays': self.holidays,
-                'settings': self.settings,
-                'lock_password_b64': self._load_password_from_registry()
+                'backup_date': datetime.now().isoformat(), 'tasks': self.tasks, 'holidays': self.holidays,
+                'settings': self.settings, 'lock_password_b64': self._load_password_from_registry()
             }
-            
             filename = filedialog.asksaveasfilename(
-                title="备份所有设置到...",
-                defaultextension=".json",
+                title="备份所有设置到...", defaultextension=".json",
                 initialfile=f"boyin_backup_{datetime.now().strftime('%Y%m%d')}.json",
-                filetypes=[("JSON Backup", "*.json")],
-                initialdir=application_path
+                filetypes=[("JSON Backup", "*.json")], initialdir=application_path
             )
-            
             if filename:
                 with open(filename, 'w', encoding='utf-8') as f:
                     json.dump(backup_data, f, ensure_ascii=False, indent=2)
                 self.log(f"所有设置已成功备份到: {os.path.basename(filename)}")
                 messagebox.showinfo("备份成功", f"所有设置已成功备份到:\n{filename}")
         except Exception as e:
-            self.log(f"备份失败: {e}")
-            messagebox.showerror("备份失败", f"发生错误: {e}")
+            self.log(f"备份失败: {e}"); messagebox.showerror("备份失败", f"发生错误: {e}")
 
+    # --- MODIFIED: 彻底重写还原逻辑 ---
     def _restore_all_settings(self):
-        """从备份文件还原所有数据"""
-        if not messagebox.askyesno("严重警告", "您确定要还原所有设置吗？\n当前所有配置将被覆盖，且软件将在还原后提示您重启。"):
+        if not messagebox.askyesno("确认操作", "您确定要还原所有设置吗？\n当前所有配置将被立即覆盖。"):
             return
             
         self.log("开始还原所有设置...")
         filename = filedialog.askopenfilename(
             title="选择要还原的备份文件",
-            filetypes=[("JSON Backup", "*.json")],
-            initialdir=application_path
+            filetypes=[("JSON Backup", "*.json")], initialdir=application_path
         )
-        
-        if not filename:
-            return
+        if not filename: return
 
         try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                backup_data = json.load(f)
+            with open(filename, 'r', encoding='utf-8') as f: backup_data = json.load(f)
 
-            # 验证备份文件的基本结构
             required_keys = ['tasks', 'holidays', 'settings', 'lock_password_b64']
             if not all(key in backup_data for key in required_keys):
-                messagebox.showerror("还原失败", "备份文件格式无效或已损坏。")
-                return
+                messagebox.showerror("还原失败", "备份文件格式无效或已损坏。"); return
 
-            # 写入文件
-            with open(TASK_FILE, 'w', encoding='utf-8') as f:
-                json.dump(backup_data['tasks'], f, ensure_ascii=False, indent=2)
-            with open(HOLIDAY_FILE, 'w', encoding='utf-8') as f:
-                json.dump(backup_data['holidays'], f, ensure_ascii=False, indent=2)
-            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(backup_data['settings'], f, ensure_ascii=False, indent=2)
+            # 1. 更新内存中的状态
+            self.tasks = backup_data['tasks']
+            self.holidays = backup_data['holidays']
+            self.settings = backup_data['settings']
+            self.lock_password_b64 = backup_data['lock_password_b64']
             
-            # 写入注册表
-            password_b64 = backup_data['lock_password_b64']
-            if password_b64:
-                self._save_password_to_registry(password_b64)
+            # 2. 将更新后的状态持久化到文件和注册表
+            self.save_tasks()
+            self.save_holidays()
+            # save_settings() 会从UI变量读取，所以我们先手动保存，再刷新UI
+            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.settings, f, ensure_ascii=False, indent=2)
+
+            if self.lock_password_b64:
+                self._save_password_to_registry(self.lock_password_b64)
             else:
                 self._clear_password_from_registry()
-            
-            self.log("所有设置已从备份文件成功还原。软件需要重启。")
-            messagebox.showinfo("还原成功", "所有设置已成功还原。\n\n请点击“确定”后手动关闭并重新启动软件以应用所有更改。")
-            # 提示用户重启是确保所有状态被正确加载的最安全方式
+
+            # 3. 刷新所有UI界面
+            self.update_task_list()
+            self.update_holiday_list()
+            self._refresh_settings_ui() # 新增的UI刷新函数
+
+            self.log("所有设置已从备份文件成功还原。")
+            messagebox.showinfo("还原成功", "所有设置已成功还原并立即应用。")
             
         except Exception as e:
-            self.log(f"还原失败: {e}")
-            messagebox.showerror("还原失败", f"发生错误: {e}")
+            self.log(f"还原失败: {e}"); messagebox.showerror("还原失败", f"发生错误: {e}")
+    
+    def _refresh_settings_ui(self):
+        """根据 self.settings 和 self.lock_password_b64 刷新设置页面的所有控件状态"""
+        if "设置" not in self.pages or not hasattr(self, 'autostart_var'):
+            return # 如果设置页面还未被创建，则不执行任何操作
+
+        # 刷新通用设置
+        self.autostart_var.set(self.settings.get("autostart", False))
+        self.start_minimized_var.set(self.settings.get("start_minimized", False))
+        self.lock_on_start_var.set(self.settings.get("lock_on_start", False))
+
+        # 刷新电源管理设置
+        self.daily_shutdown_enabled_var.set(self.settings.get("daily_shutdown_enabled", False))
+        self.daily_shutdown_time_var.set(self.settings.get("daily_shutdown_time", "23:00:00"))
+        self.weekly_shutdown_enabled_var.set(self.settings.get("weekly_shutdown_enabled", False))
+        self.weekly_shutdown_time_var.set(self.settings.get("weekly_shutdown_time", "23:30:00"))
+        self.weekly_shutdown_days_var.set(self.settings.get("weekly_shutdown_days", "每周:12345"))
+        self.weekly_reboot_enabled_var.set(self.settings.get("weekly_reboot_enabled", False))
+        self.weekly_reboot_time_var.set(self.settings.get("weekly_reboot_time", "22:00:00"))
+        self.weekly_reboot_days_var.set(self.settings.get("weekly_reboot_days", "每周:67"))
+
+        # 刷新清除密码按钮的状态
+        if self.lock_password_b64 and WIN32COM_AVAILABLE:
+            self.clear_password_btn.config(state=tk.NORMAL)
+        else:
+            self.clear_password_btn.config(state=tk.DISABLED)
 
     def _reset_software(self):
-        """重置软件到初始状态"""
         if not messagebox.askyesno(
             "！！！最终确认！！！",
             "您真的要重置整个软件吗？\n\n此操作将：\n- 清空所有节目单\n- 清空所有节假日\n- 清除锁定密码\n- 重置所有系统设置\n\n此操作【无法恢复】！软件将在重置后提示您重启。"
-        ):
-            return
+        ): return
 
         self.log("开始执行软件重置...")
         try:
-            # 1. 清空节目 (调用现有方法，它会处理WAV文件)
-            # 临时修改messagebox以避免二次确认
             original_askyesno = messagebox.askyesno
             messagebox.askyesno = lambda title, message: True
             self.clear_all_tasks()
             self.clear_all_holidays()
-            messagebox.askyesno = original_askyesno # 恢复
+            messagebox.askyesno = original_askyesno
 
-            # 2. 清除密码
             self._clear_password_from_registry()
 
-            # 3. 重置设置文件
             default_settings = {
                 "autostart": False, "start_minimized": False, "lock_on_start": False,
                 "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00",
@@ -414,10 +406,7 @@ class TimedBroadcastApp:
             self.log("软件已成功重置。软件需要重启。")
             messagebox.showinfo("重置成功", "软件已恢复到初始状态。\n\n请点击“确定”后手动关闭并重新启动软件。")
         except Exception as e:
-            self.log(f"重置失败: {e}")
-            messagebox.showerror("重置失败", f"发生错误: {e}")
-
-    # --- END: 超级管理相关方法 ---
+            self.log(f"重置失败: {e}"); messagebox.showerror("重置失败", f"发生错误: {e}")
 
     def create_scheduled_broadcast_page(self):
         page_frame = self.pages["定时广播"]
@@ -542,6 +531,560 @@ class TimedBroadcastApp:
         self.update_status_bar()
         self.log("定时播音软件已启动")
     
+    # ... The rest of the code is unchanged and follows here ...
+    # ... 请将剩余的所有方法（从 create_holiday_page 开始到文件末尾）直接复制粘贴到此处 ...
+    # ... 为节省篇幅，此处省略，它们与上一版本完全相同 ...
+```
+
+**重要提示：**
+由于代码很长，我只粘贴了包含修改的部分，并用注释标明了剩余部分应该接在哪里。请您将上面代码块中的所有内容，加上您本地文件中从 `def create_holiday_page(self):` 开始到文件末尾的所有内容，组合成最终的文件。
+
+或者，为了确保万无一失，我将再次提供一个包含所有内容的完整版本。
+
+### (再次提供) 最终完整代码
+
+```python
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext, filedialog, simpledialog
+import json
+import threading
+import time
+from datetime import datetime
+import os
+import random
+import sys
+import getpass
+import base64
+import queue
+
+# 尝试导入所需库
+TRAY_AVAILABLE = False
+try:
+    from pystray import MenuItem as item, Icon
+    from PIL import Image
+    TRAY_AVAILABLE = True
+except ImportError:
+    print("警告: pystray 或 Pillow 未安装，最小化到托盘功能不可用。")
+
+WIN32COM_AVAILABLE = False
+try:
+    import win32com.client
+    import pythoncom
+    from pywintypes import com_error
+    # 使用 Python 内置的 winreg 库进行注册表操作，它比 pywin32 更稳定
+    import winreg
+    WIN32COM_AVAILABLE = True
+except ImportError:
+    # 统一警告信息，涵盖所有 pywin32 提供的功能
+    print("警告: pywin32 未安装，语音、开机启动和密码持久化功能将受限。")
+
+AUDIO_AVAILABLE = False
+try:
+    import pygame
+    pygame.mixer.init()
+    AUDIO_AVAILABLE = True
+except ImportError:
+    print("警告: pygame 未安装，音频播放功能将不可用。")
+except Exception as e:
+    print(f"警告: pygame 初始化失败 - {e}，音频播放功能将不可用。")
+
+
+def resource_path(relative_path):
+    """ 获取资源的绝对路径，无论是开发环境还是打包后 """
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+# --- 全局路径设置 ---
+if getattr(sys, 'frozen', False):
+    application_path = os.path.dirname(sys.executable)
+else:
+    application_path = os.path.dirname(os.path.abspath(__file__))
+
+TASK_FILE = os.path.join(application_path, "broadcast_tasks.json")
+SETTINGS_FILE = os.path.join(application_path, "settings.json")
+HOLIDAY_FILE = os.path.join(application_path, "holidays.json")
+PROMPT_FOLDER = os.path.join(application_path, "提示音")
+AUDIO_FOLDER = os.path.join(application_path, "音频文件")
+BGM_FOLDER = os.path.join(application_path, "文稿背景")
+ICON_FILE = resource_path("icon.ico")
+
+# 定义注册表路径
+REGISTRY_KEY_PATH = r"Software\TimedBroadcastApp"
+
+class TimedBroadcastApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("定时播音")
+        self.root.geometry("1400x800")
+        self.root.configure(bg='#E8F4F8')
+        
+        if os.path.exists(ICON_FILE):
+            try:
+                self.root.iconbitmap(ICON_FILE)
+            except Exception as e:
+                print(f"加载窗口图标失败: {e}")
+
+        self.tasks = []
+        self.holidays = []
+        self.settings = {}
+        self.running = True
+        self.tray_icon = None
+        self.is_locked = False
+        
+        self.lock_password_b64 = ""
+        
+        self.drag_start_item = None
+        
+        self.playback_command_queue = queue.Queue()
+        
+        self.pages = {}
+        self.nav_buttons = {}
+        self.current_page = None
+
+        self.create_folder_structure()
+        self.load_settings()
+        self.load_lock_password()
+        self.create_widgets()
+        self.load_tasks()
+        self.load_holidays()
+        
+        self.start_background_threads()
+        self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
+        self.start_tray_icon_thread()
+        
+        if self.settings.get("lock_on_start", False) and self.lock_password_b64:
+            self.root.after(100, self.perform_initial_lock)
+
+        if self.settings.get("start_minimized", False):
+            self.root.after(100, self.hide_to_tray)
+
+    # --- 使用 winreg 的注册表操作方法 ---
+    def _save_password_to_registry(self, password_b64):
+        if not WIN32COM_AVAILABLE: return False
+        try:
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH)
+            winreg.SetValueEx(key, "LockPasswordB64", 0, winreg.REG_SZ, password_b64)
+            winreg.CloseKey(key)
+            self.log("密码已安全存储。")
+            return True
+        except Exception as e:
+            self.log(f"错误: 无法将密码保存到注册表 - {e}")
+            return False
+
+    def _load_password_from_registry(self):
+        if not WIN32COM_AVAILABLE: return ""
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_READ)
+            password_b64, _ = winreg.QueryValueEx(key, "LockPasswordB64")
+            winreg.CloseKey(key)
+            return password_b64
+        except FileNotFoundError:
+            return ""
+        except Exception as e:
+            self.log(f"错误: 无法从注册表加载密码 - {e}")
+            return ""
+
+    def _clear_password_from_registry(self):
+        if not WIN32COM_AVAILABLE: return False
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_WRITE)
+            winreg.DeleteValue(key, "LockPasswordB64")
+            winreg.CloseKey(key)
+            self.log("安全存储的密码已被清除。")
+            return True
+        except FileNotFoundError:
+            return True
+        except Exception as e:
+            self.log(f"错误: 无法从注册表清除密码 - {e}")
+            return False
+            
+    def load_lock_password(self):
+        """在初始化时从注册表加载密码"""
+        self.lock_password_b64 = self._load_password_from_registry()
+    
+    # --------------------------------
+
+    def create_folder_structure(self):
+        """创建所有必要的文件夹"""
+        for folder in [PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER]:
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+
+    def create_widgets(self):
+        self.nav_frame = tk.Frame(self.root, bg='#A8D8E8', width=160)
+        self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
+        self.nav_frame.pack_propagate(False)
+
+        nav_button_titles = ["定时广播", "节假日", "设置", "超级管理"]
+        
+        for i, title in enumerate(nav_button_titles):
+            btn_frame = tk.Frame(self.nav_frame, bg='#A8D8E8')
+            btn_frame.pack(fill=tk.X, pady=1)
+
+            cmd = None
+            if title == "超级管理":
+                cmd = self._prompt_for_super_admin_password
+            else:
+                cmd = lambda t=title: self.switch_page(t)
+
+            btn = tk.Button(btn_frame, text=title, bg='#A8D8E8',
+                          fg='black', font=('Microsoft YaHei', 22, 'bold'),
+                          bd=0, padx=10, pady=8, anchor='w', command=cmd)
+            btn.pack(fill=tk.X)
+            self.nav_buttons[title] = btn
+        
+        self.main_frame = tk.Frame(self.root, bg='white')
+        self.pages["定时广播"] = self.main_frame
+        self.create_scheduled_broadcast_page()
+
+        self.current_page = self.main_frame
+        self.switch_page("定时广播")
+
+    def switch_page(self, page_name):
+        if self.is_locked:
+            self.log("界面已锁定，请先解锁。")
+            return
+            
+        if self.current_page:
+            self.current_page.pack_forget()
+
+        for title, btn in self.nav_buttons.items():
+            btn.config(bg='#A8D8E8', fg='black')
+            btn.master.config(bg='#A8D8E8')
+
+        target_frame = None
+        if page_name == "定时广播":
+            target_frame = self.pages["定时广播"]
+        elif page_name == "节假日":
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_holiday_page()
+            target_frame = self.pages[page_name]
+        elif page_name == "设置":
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_settings_page()
+            target_frame = self.pages[page_name]
+        elif page_name == "超级管理":
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_super_admin_page()
+            target_frame = self.pages[page_name]
+        else:
+            self.log(f"功能开发中: {page_name}")
+            target_frame = self.pages["定时广播"]
+            page_name = "定时广播"
+
+        target_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.current_page = target_frame
+        
+        selected_btn = self.nav_buttons[page_name]
+        selected_btn.config(bg='#5DADE2', fg='white')
+        selected_btn.master.config(bg='#5DADE2')
+
+    # --- 超级管理相关方法 ---
+    def _prompt_for_super_admin_password(self):
+        correct_password = datetime.now().strftime('%Y%m%d')
+        entered_password = simpledialog.askstring("身份验证", "请输入超级管理员密码:", show='*')
+        
+        if entered_password == correct_password:
+            self.log("超级管理员密码正确，进入管理模块。")
+            if self.current_page:
+                self.current_page.pack_forget()
+            for title, btn in self.nav_buttons.items():
+                btn.config(bg='#A8D8E8', fg='black')
+                btn.master.config(bg='#A8D8E8')
+            
+            page_name = "超级管理"
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_super_admin_page()
+            target_frame = self.pages[page_name]
+            
+            target_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+            self.current_page = target_frame
+            
+            selected_btn = self.nav_buttons[page_name]
+            selected_btn.config(bg='#5DADE2', fg='white')
+            selected_btn.master.config(bg='#5DADE2')
+        elif entered_password is not None:
+            messagebox.showerror("验证失败", "密码错误！")
+            self.log("尝试进入超级管理模块失败：密码错误。")
+    
+    def create_super_admin_page(self):
+        page_frame = tk.Frame(self.root, bg='white')
+        title_label = tk.Label(page_frame, text="超级管理", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#C0392B')
+        title_label.pack(anchor='w', padx=20, pady=20)
+        desc_label = tk.Label(page_frame, text="警告：此处的任何操作都可能导致数据丢失或配置重置，请谨慎操作。",
+                              font=('Microsoft YaHei', 11), bg='white', fg='red', wraplength=700)
+        desc_label.pack(anchor='w', padx=20, pady=(0, 20))
+        btn_frame = tk.Frame(page_frame, bg='white')
+        btn_frame.pack(padx=20, pady=10, fill=tk.X)
+        btn_font = ('Microsoft YaHei', 12, 'bold')
+        btn_width = 20; btn_pady = 10
+        tk.Button(btn_frame, text="备份所有设置", command=self._backup_all_settings,
+                  font=btn_font, width=btn_width, pady=btn_pady, bg='#2980B9', fg='white').pack(pady=10)
+        tk.Button(btn_frame, text="还原所有设置", command=self._restore_all_settings,
+                  font=btn_font, width=btn_width, pady=btn_pady, bg='#27AE60', fg='white').pack(pady=10)
+        tk.Button(btn_frame, text="重置软件", command=self._reset_software,
+                  font=btn_font, width=btn_width, pady=btn_pady, bg='#E74C3C', fg='white').pack(pady=10)
+        return page_frame
+
+    def _backup_all_settings(self):
+        self.log("开始备份所有设置...")
+        try:
+            backup_data = {
+                'backup_date': datetime.now().isoformat(), 'tasks': self.tasks, 'holidays': self.holidays,
+                'settings': self.settings, 'lock_password_b64': self._load_password_from_registry()
+            }
+            filename = filedialog.asksaveasfilename(
+                title="备份所有设置到...", defaultextension=".json",
+                initialfile=f"boyin_backup_{datetime.now().strftime('%Y%m%d')}.json",
+                filetypes=[("JSON Backup", "*.json")], initialdir=application_path
+            )
+            if filename:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(backup_data, f, ensure_ascii=False, indent=2)
+                self.log(f"所有设置已成功备份到: {os.path.basename(filename)}")
+                messagebox.showinfo("备份成功", f"所有设置已成功备份到:\n{filename}")
+        except Exception as e:
+            self.log(f"备份失败: {e}"); messagebox.showerror("备份失败", f"发生错误: {e}")
+
+    def _restore_all_settings(self):
+        if not messagebox.askyesno("确认操作", "您确定要还原所有设置吗？\n当前所有配置将被立即覆盖。"):
+            return
+            
+        self.log("开始还原所有设置...")
+        filename = filedialog.askopenfilename(
+            title="选择要还原的备份文件",
+            filetypes=[("JSON Backup", "*.json")], initialdir=application_path
+        )
+        if not filename: return
+
+        try:
+            with open(filename, 'r', encoding='utf-8') as f: backup_data = json.load(f)
+
+            required_keys = ['tasks', 'holidays', 'settings', 'lock_password_b64']
+            if not all(key in backup_data for key in required_keys):
+                messagebox.showerror("还原失败", "备份文件格式无效或已损坏。"); return
+
+            # 1. 更新内存中的状态
+            self.tasks = backup_data['tasks']
+            self.holidays = backup_data['holidays']
+            self.settings = backup_data['settings']
+            self.lock_password_b64 = backup_data['lock_password_b64']
+            
+            # 2. 将更新后的状态持久化到文件和注册表
+            self.save_tasks()
+            self.save_holidays()
+            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.settings, f, ensure_ascii=False, indent=2)
+            
+            if self.lock_password_b64:
+                self._save_password_to_registry(self.lock_password_b64)
+            else:
+                self._clear_password_from_registry()
+
+            # 3. 刷新所有UI界面
+            self.update_task_list()
+            self.update_holiday_list()
+            self._refresh_settings_ui()
+
+            self.log("所有设置已从备份文件成功还原。")
+            messagebox.showinfo("还原成功", "所有设置已成功还原并立即应用。")
+            
+        except Exception as e:
+            self.log(f"还原失败: {e}"); messagebox.showerror("还原失败", f"发生错误: {e}")
+    
+    def _refresh_settings_ui(self):
+        """根据 self.settings 和 self.lock_password_b64 刷新设置页面的所有控件状态"""
+        if "设置" not in self.pages or not hasattr(self, 'autostart_var'):
+            return
+
+        self.autostart_var.set(self.settings.get("autostart", False))
+        self.start_minimized_var.set(self.settings.get("start_minimized", False))
+        self.lock_on_start_var.set(self.settings.get("lock_on_start", False))
+        self.daily_shutdown_enabled_var.set(self.settings.get("daily_shutdown_enabled", False))
+        self.daily_shutdown_time_var.set(self.settings.get("daily_shutdown_time", "23:00:00"))
+        self.weekly_shutdown_enabled_var.set(self.settings.get("weekly_shutdown_enabled", False))
+        self.weekly_shutdown_time_var.set(self.settings.get("weekly_shutdown_time", "23:30:00"))
+        self.weekly_shutdown_days_var.set(self.settings.get("weekly_shutdown_days", "每周:12345"))
+        self.weekly_reboot_enabled_var.set(self.settings.get("weekly_reboot_enabled", False))
+        self.weekly_reboot_time_var.set(self.settings.get("weekly_reboot_time", "22:00:00"))
+        self.weekly_reboot_days_var.set(self.settings.get("weekly_reboot_days", "每周:67"))
+
+        if self.lock_password_b64 and WIN32COM_AVAILABLE:
+            self.clear_password_btn.config(state=tk.NORMAL)
+        else:
+            self.clear_password_btn.config(state=tk.DISABLED)
+
+    def _reset_software(self):
+        if not messagebox.askyesno(
+            "！！！最终确认！！！",
+            "您真的要重置整个软件吗？\n\n此操作将：\n- 清空所有节目单\n- 清空所有节假日\n- 清除锁定密码\n- 重置所有系统设置\n\n此操作【无法恢复】！软件将在重置后提示您重启。"
+        ): return
+
+        self.log("开始执行软件重置...")
+        try:
+            original_askyesno = messagebox.askyesno
+            messagebox.askyesno = lambda title, message: True
+            self.clear_all_tasks()
+            self.clear_all_holidays()
+            messagebox.askyesno = original_askyesno
+
+            self._clear_password_from_registry()
+
+            default_settings = {
+                "autostart": False, "start_minimized": False, "lock_on_start": False,
+                "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00",
+                "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00",
+                "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00",
+                "last_power_action_date": ""
+            }
+            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(default_settings, f, ensure_ascii=False, indent=2)
+            
+            self.log("软件已成功重置。软件需要重启。")
+            messagebox.showinfo("重置成功", "软件已恢复到初始状态。\n\n请点击“确定”后手动关闭并重新启动软件。")
+        except Exception as e:
+            self.log(f"重置失败: {e}"); messagebox.showerror("重置失败", f"发生错误: {e}")
+
+    def create_scheduled_broadcast_page(self):
+        page_frame = self.pages["定时广播"]
+        font_11 = ('Microsoft YaHei', 11)
+
+        top_frame = tk.Frame(page_frame, bg='white')
+        top_frame.pack(fill=tk.X, padx=10, pady=10)
+        title_label = tk.Label(top_frame, text="定时广播", font=('Microsoft YaHei', 14, 'bold'),
+                              bg='white', fg='#2C5F7C')
+        title_label.pack(side=tk.LEFT)
+        
+        add_btn = tk.Button(top_frame, text="添加节目", command=self.add_task, bg='#3498DB', fg='white',
+                              font=font_11, bd=0, padx=12, pady=5, cursor='hand2')
+        add_btn.pack(side=tk.LEFT, padx=10)
+
+        self.top_right_btn_frame = tk.Frame(top_frame, bg='white')
+        self.top_right_btn_frame.pack(side=tk.RIGHT)
+        
+        batch_buttons = [
+            ("全部启用", self.enable_all_tasks, '#27AE60'),
+            ("全部禁用", self.disable_all_tasks, '#F39C12'),
+            ("禁音频节目", lambda: self._set_tasks_status_by_type('audio', '禁用'), '#E67E22'),
+            ("禁语音节目", lambda: self._set_tasks_status_by_type('voice', '禁用'), '#D35400'),
+            ("统一音量", self.set_uniform_volume, '#8E44AD'),
+            ("清空节目", self.clear_all_tasks, '#C0392B')
+        ]
+        for text, cmd, color in batch_buttons:
+            btn = tk.Button(self.top_right_btn_frame, text=text, command=cmd, bg=color, fg='white',
+                          font=font_11, bd=0, padx=12, pady=5, cursor='hand2')
+            btn.pack(side=tk.LEFT, padx=3)
+
+        self.lock_button = tk.Button(self.top_right_btn_frame, text="锁定", command=self.toggle_lock_state, bg='#E74C3C', fg='white',
+                                     font=font_11, bd=0, padx=12, pady=5, cursor='hand2')
+        self.lock_button.pack(side=tk.LEFT, padx=3)
+        if not WIN32COM_AVAILABLE:
+            self.lock_button.config(state=tk.DISABLED, text="锁定(Win)")
+
+        io_buttons = [("导入节目单", self.import_tasks, '#1ABC9C'), ("导出节目单", self.export_tasks, '#1ABC9C')]
+        for text, cmd, color in io_buttons:
+            btn = tk.Button(self.top_right_btn_frame, text=text, command=cmd, bg=color, fg='white',
+                          font=font_11, bd=0, padx=12, pady=5, cursor='hand2')
+            btn.pack(side=tk.LEFT, padx=3)
+
+        stats_frame = tk.Frame(page_frame, bg='#F0F8FF')
+        stats_frame.pack(fill=tk.X, padx=10, pady=5)
+        self.stats_label = tk.Label(stats_frame, text="节目单：0", font=('Microsoft YaHei', 11),
+                                   bg='#F0F8FF', fg='#2C5F7C', anchor='w', padx=10)
+        self.stats_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        table_frame = tk.Frame(page_frame, bg='white')
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        columns = ('节目名称', '状态', '开始时间', '模式', '音频或文字', '音量', '周几/几号', '日期范围')
+        self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12, selectmode='extended')
+        
+        style = ttk.Style()
+        style.configure("Treeview.Heading", font=('Microsoft YaHei', 11, 'bold'))
+        style.configure("Treeview", font=('Microsoft YaHei', 11), rowheight=28)
+
+        self.task_tree.heading('节目名称', text='节目名称')
+        self.task_tree.column('节目名称', width=200, anchor='w')
+        self.task_tree.heading('状态', text='状态')
+        self.task_tree.column('状态', width=70, anchor='center', stretch=tk.NO)
+        self.task_tree.heading('开始时间', text='开始时间')
+        self.task_tree.column('开始时间', width=100, anchor='center', stretch=tk.NO)
+        self.task_tree.heading('模式', text='模式')
+        self.task_tree.column('模式', width=70, anchor='center', stretch=tk.NO)
+        self.task_tree.heading('音频或文字', text='音频或文字')
+        self.task_tree.column('音频或文字', width=300, anchor='w')
+        self.task_tree.heading('音量', text='音量')
+        self.task_tree.column('音量', width=70, anchor='center', stretch=tk.NO)
+        self.task_tree.heading('周几/几号', text='周几/几号')
+        self.task_tree.column('周几/几号', width=100, anchor='center')
+        self.task_tree.heading('日期范围', text='日期范围')
+        self.task_tree.column('日期范围', width=120, anchor='center')
+
+        self.task_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.task_tree.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.task_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.task_tree.bind("<Button-3>", self.show_context_menu)
+        self.task_tree.bind("<Double-1>", self.on_double_click_edit)
+        self._enable_drag_selection(self.task_tree)
+
+        playing_frame = tk.LabelFrame(page_frame, text="正在播：", font=('Microsoft YaHei', 11),
+                                     bg='white', fg='#2C5F7C', padx=10, pady=5)
+        playing_frame.pack(fill=tk.X, padx=10, pady=5)
+        self.playing_text = scrolledtext.ScrolledText(playing_frame, height=3, font=('Microsoft YaHei', 11),
+                                                     bg='#FFFEF0', wrap=tk.WORD, state='disabled')
+        self.playing_text.pack(fill=tk.BOTH, expand=True)
+        self.update_playing_text("等待播放...")
+
+        log_frame = tk.LabelFrame(page_frame, text="", font=('Microsoft YaHei', 11),
+                                 bg='white', fg='#2C5F7C', padx=10, pady=5)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        log_header_frame = tk.Frame(log_frame, bg='white')
+        log_header_frame.pack(fill=tk.X)
+        log_label = tk.Label(log_header_frame, text="日志：", font=('Microsoft YaHei', 11, 'bold'),
+                             bg='white', fg='#2C5F7C')
+        log_label.pack(side=tk.LEFT)
+        self.clear_log_btn = tk.Button(log_header_frame, text="清除日志", command=self.clear_log,
+                                       font=('Microsoft YaHei', 8), bd=0, bg='#EAEAEA',
+                                       fg='#333', cursor='hand2', padx=5, pady=0)
+        self.clear_log_btn.pack(side=tk.LEFT, padx=10)
+
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=6, font=('Microsoft YaHei', 11),
+                                                 bg='#F9F9F9', wrap=tk.WORD, state='disabled')
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+
+        status_frame = tk.Frame(page_frame, bg='#E8F4F8', height=30)
+        status_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        status_frame.pack_propagate(False)
+        self.status_labels = []
+        status_texts = ["当前时间", "系统状态", "播放状态", "任务数量"]
+        for i, text in enumerate(status_texts):
+            label = tk.Label(status_frame, text=f"{text}: --", font=font_11,
+                           bg='#5DADE2' if i % 2 == 0 else '#7EC8E3', fg='white', padx=15, pady=5)
+            label.pack(side=tk.LEFT, padx=2)
+            self.status_labels.append(label)
+
+        self.update_status_bar()
+        self.log("定时播音软件已启动")
+    
+    # ... 从这里开始，剩余的代码与上一版本完全相同 ...
+    def create_holiday_page(self):
+        # ...
+        pass
+    
+    # ... all other methods ...
+
+# (此处省略了所有从 create_holiday_page 到文件末尾的未修改代码，请您保留您本地的这些代码)
+# 为了简洁，此处不再重复粘贴。请确保您只替换了文件开头到 `create_scheduled_broadcast_page` 之前的部分。
+# ...
+# 实际上，为了确保100%正确，我还是将完整代码放在下面。
+
+# (以下为完整代码，接上文)
+
     def create_holiday_page(self):
         page_frame = tk.Frame(self.root, bg='white')
 
@@ -840,7 +1383,6 @@ class TimedBroadcastApp:
         self._set_widget_state_recursively(self.nav_frame, state)
         for page in self.pages.values():
              if page and page.winfo_exists():
-                # 超级管理页面不受锁定影响
                 if page_name := [k for k, v in self.pages.items() if v == page]:
                     if page_name[0] == "超级管理":
                         continue
@@ -1208,8 +1750,7 @@ class TimedBroadcastApp:
                 messagebox.showwarning("格式错误", date_msg, parent=dialog)
                 return
 
-            # 检查是否需要重新生成语音文件
-            regeneration_needed = True  # 默认为需要
+            regeneration_needed = True
             if is_edit_mode:
                 original_task = task_to_edit
                 if (text_content == original_task.get('source_text') and
@@ -1220,11 +1761,8 @@ class TimedBroadcastApp:
                     regeneration_needed = False
                     self.log("语音内容未变更，跳过重新生成WAV文件。")
 
-            # 构建通用的任务数据字典的辅助函数
             def build_task_data(wav_path, wav_filename_str):
                 play_mode = delay_var.get()
-                play_this_task_now = (play_mode == 'immediate')
-                # 立即播模式本身不应改变任务的常规调度行为
                 saved_delay_type = task_to_edit.get('delay', 'delay') if is_edit_mode else play_mode
                 
                 return {
@@ -1242,11 +1780,9 @@ class TimedBroadcastApp:
                     'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {})
                 }
 
-            # 如果不需要重新生成，直接保存并返回
             if not regeneration_needed:
                 new_task_data = build_task_data(
-                    task_to_edit.get('content'), 
-                    task_to_edit.get('wav_filename')
+                    task_to_edit.get('content'), task_to_edit.get('wav_filename')
                 )
                 if not new_task_data['name'] or not new_task_data['time']:
                     messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
@@ -1259,7 +1795,6 @@ class TimedBroadcastApp:
                      self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
                 return
 
-            # --- 如果需要重新生成，执行以下流程 ---
             progress_dialog = tk.Toplevel(dialog)
             progress_dialog.title("请稍候")
             progress_dialog.geometry("300x100")
@@ -1578,7 +2113,6 @@ class TimedBroadcastApp:
     def clear_all_tasks(self):
         if not self.tasks: return
         if messagebox.askyesno("严重警告", "您确定要清空所有节目吗？\n此操作不可恢复！"):
-            # 先收集需要删除的文件列表
             files_to_delete = []
             for task in self.tasks:
                 if task.get('type') == 'voice' and 'wav_filename' in task:
@@ -1586,18 +2120,14 @@ class TimedBroadcastApp:
                     if os.path.exists(wav_path):
                         files_to_delete.append(wav_path)
             
-            # 清空内存中的任务列表
             self.tasks.clear()
             self.update_task_list()
             self.save_tasks()
             self.log("已清空所有节目。")
 
-            # 在任务数据保存后再删除文件，更安全
             for f in files_to_delete:
-                try:
-                    os.remove(f)
-                except Exception as e:
-                    self.log(f"删除语音文件失败: {e}")
+                try: os.remove(f)
+                except Exception as e: self.log(f"删除语音文件失败: {e}")
 
     def show_time_settings_dialog(self, time_entry):
         dialog = tk.Toplevel(self.root)
