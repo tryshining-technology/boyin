@@ -75,6 +75,8 @@ ICON_FILE = resource_path("icon.ico")
 CHIME_FOLDER = os.path.join(AUDIO_FOLDER, "整点报时")
 
 REGISTRY_KEY_PATH = r"Software\创翔科技\TimedBroadcastApp"
+REGISTRY_PARENT_KEY_PATH = r"Software\创翔科技"
+
 
 class TimedBroadcastApp:
     def __init__(self, root):
@@ -533,24 +535,131 @@ class TimedBroadcastApp:
         self.root.title(f"定时播音 ({self.auth_info['message']})")
     
     def create_super_admin_page(self):
-        # 页面父容器修改
         page_frame = tk.Frame(self.page_container, bg='white')
         title_label = tk.Label(page_frame, text="超级管理", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#C0392B')
         title_label.pack(anchor='w', padx=20, pady=20)
         desc_label = tk.Label(page_frame, text="警告：此处的任何操作都可能导致数据丢失或配置重置，请谨慎操作。",
                               font=('Microsoft YaHei', 11), bg='white', fg='red', wraplength=700)
         desc_label.pack(anchor='w', padx=20, pady=(0, 20))
+        
         btn_frame = tk.Frame(page_frame, bg='white')
         btn_frame.pack(padx=20, pady=10, fill=tk.X)
+        
         btn_font = ('Microsoft YaHei', 12, 'bold')
         btn_width = 20; btn_pady = 10
+
         tk.Button(btn_frame, text="备份所有设置", command=self._backup_all_settings,
                   font=btn_font, width=btn_width, pady=btn_pady, bg='#2980B9', fg='white').pack(pady=10)
         tk.Button(btn_frame, text="还原所有设置", command=self._restore_all_settings,
                   font=btn_font, width=btn_width, pady=btn_pady, bg='#27AE60', fg='white').pack(pady=10)
         tk.Button(btn_frame, text="重置软件", command=self._reset_software,
                   font=btn_font, width=btn_width, pady=btn_pady, bg='#E74C3C', fg='white').pack(pady=10)
+        
+        # --- 新增卸载按钮 ---
+        tk.Button(btn_frame, text="卸载软件", command=self._prompt_for_uninstall,
+                  font=btn_font, width=btn_width, pady=btn_pady, bg='#34495E', fg='white').pack(pady=10)
+                  
         return page_frame
+
+    def _prompt_for_uninstall(self):
+        """ 弹出卸载密码输入框 """
+        dialog = tk.Toplevel(self.root)
+        dialog.title("卸载软件 - 身份验证")
+        dialog.geometry("350x180")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        self.center_window(dialog, 350, 180)
+
+        result = [None] 
+
+        tk.Label(dialog, text="请输入卸载密码:", font=('Microsoft YaHei', 11)).pack(pady=20)
+        password_entry = tk.Entry(dialog, show='*', font=('Microsoft YaHei', 11), width=25)
+        password_entry.pack(pady=5)
+        password_entry.focus_set()
+
+        def on_confirm():
+            result[0] = password_entry.get()
+            dialog.destroy()
+        
+        def on_cancel():
+            dialog.destroy()
+
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(pady=20)
+        tk.Button(btn_frame, text="确定", command=on_confirm, width=8).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="取消", command=on_cancel, width=8).pack(side=tk.LEFT, padx=10)
+        dialog.bind('<Return>', lambda event: on_confirm())
+
+        self.root.wait_window(dialog)
+        entered_password = result[0]
+
+        # 密码是 YYYYMMDD 的反序
+        correct_password = datetime.now().strftime('%Y%m%d')[::-1]
+        
+        if entered_password == correct_password:
+            self.log("卸载密码正确，准备执行卸载操作。")
+            self._perform_uninstall()
+        elif entered_password is not None:
+            messagebox.showerror("验证失败", "密码错误！", parent=self.root)
+            self.log("尝试卸载软件失败：密码错误。")
+
+    def _perform_uninstall(self):
+        """ 执行实际的卸载（删除文件和注册表）操作 """
+        if not messagebox.askyesno(
+            "！！！最终警告！！！",
+            "您确定要卸载本软件吗？\n\n此操作将永久删除：\n- 所有注册表信息\n- 所有配置文件 (节目单, 设置, 节假日)\n- 所有数据文件夹 (音频, 提示音, 文稿等)\n\n此操作【绝对无法恢复】！\n\n点击“是”将立即开始清理。",
+            icon='error'
+        ):
+            self.log("用户取消了卸载操作。")
+            return
+
+        self.log("开始执行卸载流程...")
+        self.running = False # 停止后台线程
+
+        # 1. 删除注册表
+        if WIN32COM_AVAILABLE:
+            try:
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH)
+                self.log(f"成功删除注册表项: {REGISTRY_KEY_PATH}")
+                try:
+                    winreg.DeleteKey(winreg.HKEY_CURRENT_USER, REGISTRY_PARENT_KEY_PATH)
+                    self.log(f"成功删除父级注册表项: {REGISTRY_PARENT_KEY_PATH}")
+                except OSError:
+                    self.log("父级注册表项非空，不作删除。")
+            except FileNotFoundError:
+                self.log("未找到相关注册表项，跳过删除。")
+            except Exception as e:
+                self.log(f"删除注册表时出错: {e}")
+
+        # 2. 删除文件夹
+        folders_to_delete = [PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER, VOICE_SCRIPT_FOLDER]
+        for folder in folders_to_delete:
+            if os.path.isdir(folder):
+                try:
+                    shutil.rmtree(folder)
+                    self.log(f"成功删除文件夹: {os.path.basename(folder)}")
+                except Exception as e:
+                    self.log(f"删除文件夹 {os.path.basename(folder)} 时出错: {e}")
+
+        # 3. 删除JSON配置文件
+        files_to_delete = [TASK_FILE, SETTINGS_FILE, HOLIDAY_FILE]
+        for file in files_to_delete:
+            if os.path.isfile(file):
+                try:
+                    os.remove(file)
+                    self.log(f"成功删除文件: {os.path.basename(file)}")
+                except Exception as e:
+                    self.log(f"删除文件 {os.path.basename(file)} 时出错: {e}")
+        
+        # 4. 提示用户并强制退出
+        self.log("软件数据清理完成。")
+        messagebox.showinfo("卸载完成", "软件相关的数据和配置已全部清除。\n\n请手动删除本程序（.exe文件）以完成卸载。\n\n点击“确定”后软件将退出。")
+        
+        # --- 关键修改：使用 os._exit(0) 强制退出 ---
+        # 这会立即终止程序，不会执行任何后续代码或清理操作（如 quit_app 中的保存），
+        # 从而防止重新生成已删除的文件。
+        os._exit(0)
 
     def _backup_all_settings(self):
         self.log("开始备份所有设置...")
@@ -2363,7 +2472,6 @@ class TimedBroadcastApp:
             self.save_settings(); os.system(command)
 
     def _playback_worker(self):
-        is_playing = False
         while self.running:
             try:
                 command, data = self.playback_command_queue.get(timeout=0.1)
@@ -2746,9 +2854,12 @@ class TimedBroadcastApp:
         if self.tray_icon: self.tray_icon.stop()
         self.running = False
         self.playback_command_queue.put(('STOP', None))
+        
+        # 在正常退出时才保存
         self.save_tasks()
         self.save_settings()
         self.save_holidays()
+        
         if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
         self.root.destroy()
         sys.exit()
