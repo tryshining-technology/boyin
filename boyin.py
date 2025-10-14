@@ -94,7 +94,7 @@ class TimedBroadcastApp:
             except Exception as e:
                 print(f"加载窗口图标失败: {e}")
 
-        # --- 字体定义 ---
+        # --- 字体定义 (统一管理) ---
         self.font_nav = ctk.CTkFont(family="Microsoft YaHei", size=22, weight="bold")
         self.font_bold = ctk.CTkFont(family="Microsoft YaHei", size=14, weight="bold")
         self.font_normal = ctk.CTkFont(family="Microsoft YaHei", size=12)
@@ -170,29 +170,23 @@ class TimedBroadcastApp:
                 os.makedirs(folder)
 
     def create_widgets(self):
-        # --- 整体布局 ---
         self.root.grid_rowconfigure(1, weight=1)
         self.root.grid_columnconfigure(1, weight=1)
 
-        # 状态栏在底部
         self.status_frame = ctk.CTkFrame(self.root, height=35, corner_radius=0)
         self.status_frame.grid(row=2, column=0, columnspan=2, sticky="ew")
         self.create_status_bar_content()
 
-        # 导航栏在左侧
         self.nav_frame = ctk.CTkFrame(self.root, width=180, corner_radius=0)
         self.nav_frame.grid(row=0, column=0, rowspan=2, sticky="nsw")
         
-        # 页面容器
         self.page_container = ctk.CTkFrame(self.root, fg_color="transparent")
         self.page_container.grid(row=1, column=1, sticky="nsew", padx=10, pady=10)
 
-        # --- 填充导航栏 ---
         nav_button_titles = ["定时广播", "节假日", "设置", "注册软件", "超级管理"]
         
-        # Logo or Title in Nav
-        nav_title = ctk.CTkLabel(self.nav_frame, text="创翔播音", font=ctk.CTkFont(family="Microsoft YaHei", size=26, weight="bold"), text_color=("#3A84F5", "#DCE4EE"))
-        nav_title.pack(pady=20, padx=20)
+        # FIX 1: 移除导航栏顶部的 "创翔播音" 标签，并增加顶部间距
+        self.nav_frame.grid_rowconfigure(0, minsize=20)
 
         for title in nav_button_titles:
             cmd = self._prompt_for_super_admin_password if title == "超级管理" else lambda t=title: self.switch_page(t)
@@ -204,7 +198,6 @@ class TimedBroadcastApp:
             btn.pack(fill="x", pady=1)
             self.nav_buttons[title] = btn
         
-        # --- 创建初始页面 ---
         self.main_frame = ctk.CTkFrame(self.page_container, fg_color="transparent")
         self.pages["定时广播"] = self.main_frame
         self.create_scheduled_broadcast_page()
@@ -275,20 +268,58 @@ class TimedBroadcastApp:
         selected_btn = self.nav_buttons[page_name]
         selected_btn.configure(fg_color=("gray75", "gray25"), text_color=("#1A66D2", "white"))
 
-    def _prompt_for_super_admin_password(self):
-        dialog = ctk.CTkInputDialog(text="请输入超级管理员密码:", title="身份验证")
-        # Workaround to make it a password dialog
+    # FIX 3 & 5: 创建一个可复用的自定义中文输入对话框
+    def _create_input_dialog(self, title, text, show_asterisk=False):
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title(title)
+        dialog.transient(self.root)
         dialog.grab_set()
-        dialog._entry.configure(show="*")
+
+        result = [None]
+
+        def on_confirm():
+            result[0] = entry.get()
+            dialog.destroy()
+
+        def on_cancel():
+            dialog.destroy()
         
-        entered_password = dialog.get_input()
+        main_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        main_frame.pack(padx=20, pady=20, expand=True, fill="both")
+
+        ctk.CTkLabel(main_frame, text=text, font=self.font_normal).pack(pady=(0, 10))
+        entry = ctk.CTkEntry(main_frame, font=self.font_normal, width=250)
+        if show_asterisk:
+            entry.configure(show="*")
+        entry.pack(pady=(0, 20), ipady=5)
+        entry.focus_set()
+        entry.bind("<Return>", lambda event: on_confirm())
+
+        btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        btn_frame.pack()
+        ctk.CTkButton(btn_frame, text="确定", font=self.font_normal, width=100, command=on_confirm).pack(side="left", padx=10)
+        ctk.CTkButton(btn_frame, text="取消", font=self.font_normal, width=100, fg_color="gray", command=on_cancel).pack(side="left", padx=10)
+        
+        dialog.update_idletasks()
+        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
+        
+        self.root.wait_window(dialog)
+        return result[0]
+
+    def _prompt_for_super_admin_password(self):
+        # FIX 3 & 5: 使用自定义对话框
+        entered_password = self._create_input_dialog(
+            title="身份验证",
+            text="请输入超级管理员密码:",
+            show_asterisk=True
+        )
         
         correct_password = datetime.now().strftime('%Y%m%d')
         
         if entered_password == correct_password:
             self.log("超级管理员密码正确，进入管理模块。")
             self.switch_page("超级管理")
-        elif entered_password is not None:
+        elif entered_password is not None: # 只有在用户输入了内容（而非直接关闭窗口）时才提示错误
             messagebox.showerror("验证失败", "密码错误！")
             self.log("尝试进入超级管理模块失败：密码错误。")
 
@@ -469,10 +500,12 @@ class TimedBroadcastApp:
         return page_frame
 
     def _prompt_for_uninstall(self):
-        dialog = ctk.CTkInputDialog(text="请输入卸载密码:", title="卸载软件 - 身份验证")
-        dialog.grab_set()
-        dialog._entry.configure(show="*")
-        entered_password = dialog.get_input()
+        # FIX 3: 使用自定义对话框
+        entered_password = self._create_input_dialog(
+            title="卸载软件 - 身份验证",
+            text="请输入卸载密码:",
+            show_asterisk=True
+        )
         correct_password = datetime.now().strftime('%Y%m%d')[::-1]
         if entered_password == correct_password:
             self.log("卸载密码正确，准备执行卸载操作。"); self._perform_uninstall()
@@ -804,7 +837,7 @@ class TimedBroadcastApp:
             if messagebox.askyesno("确认操作", "您确定要禁用整点报时功能吗？\n这将删除所有已生成的报时音频文件。"):
                 self.save_settings(); threading.Thread(target=self._delete_chime_files_worker, daemon=True).start()
             else: self.time_chime_enabled_var.set(True)
-
+    
     def _get_time_period_string(self, hour):
         if 0 <= hour < 6:
             return "凌晨"
@@ -874,12 +907,17 @@ class TimedBroadcastApp:
     def perform_initial_lock(self): self.log("根据设置，软件启动时自动锁定。"); self._apply_lock()
 
     def _prompt_for_password_set(self):
-        dialog = ctk.CTkToplevel(self.root); dialog.title("首次锁定，请设置密码"); dialog.geometry("350x250"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set(); self.center_window(dialog, 350, 250)
-        ctk.CTkLabel(dialog, text="请设置一个锁定密码 (最多6位)", font=self.font_normal).pack(pady=10)
-        ctk.CTkLabel(dialog, text="输入密码:", font=self.font_normal).pack(pady=(5,0))
-        pass_entry1 = ctk.CTkEntry(dialog, show='*', width=200, font=self.font_normal); pass_entry1.pack()
-        ctk.CTkLabel(dialog, text="确认密码:", font=self.font_normal).pack(pady=(10,0))
-        pass_entry2 = ctk.CTkEntry(dialog, show='*', width=200, font=self.font_normal); pass_entry2.pack()
+        dialog = ctk.CTkToplevel(self.root); dialog.title("首次锁定，请设置密码"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
+        
+        main_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(main_frame, text="请设置一个锁定密码 (最多6位)", font=self.font_normal).pack(pady=10)
+        ctk.CTkLabel(main_frame, text="输入密码:", font=self.font_normal).pack(pady=(5,0))
+        pass_entry1 = ctk.CTkEntry(main_frame, show='*', width=200, font=self.font_normal); pass_entry1.pack()
+        ctk.CTkLabel(main_frame, text="确认密码:", font=self.font_normal).pack(pady=(10,0))
+        pass_entry2 = ctk.CTkEntry(main_frame, show='*', width=200, font=self.font_normal); pass_entry2.pack()
+        
         def confirm():
             p1, p2 = pass_entry1.get(), pass_entry2.get()
             if not p1: messagebox.showerror("错误", "密码不能为空。", parent=dialog); return
@@ -891,14 +929,23 @@ class TimedBroadcastApp:
                 if "设置" in self.pages and hasattr(self, 'clear_password_btn'): self.clear_password_btn.configure(state="normal")
                 messagebox.showinfo("成功", "密码设置成功，界面即将锁定。", parent=dialog); dialog.destroy(); self._apply_lock()
             else: messagebox.showerror("功能受限", "无法保存密码。\n此功能仅在Windows系统上支持且需要pywin32库。", parent=dialog)
-        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent"); btn_frame.pack(pady=20)
-        ctk.CTkButton(btn_frame, text="确定", command=confirm, font=self.font_normal).pack(side="left", padx=10)
-        ctk.CTkButton(btn_frame, text="取消", command=dialog.destroy, font=self.font_normal, fg_color="gray").pack(side="left", padx=10)
+
+        btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent"); btn_frame.pack(pady=20)
+        ctk.CTkButton(btn_frame, text="确定", font=self.font_normal, command=confirm).pack(side="left", padx=10)
+        ctk.CTkButton(btn_frame, text="取消", font=self.font_normal, command=dialog.destroy, fg_color="gray").pack(side="left", padx=10)
+
+        dialog.update_idletasks()
+        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
 
     def _prompt_for_password_unlock(self):
-        dialog = ctk.CTkToplevel(self.root); dialog.title("解锁界面"); dialog.geometry("400x180"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set(); self.center_window(dialog, 400, 180)
-        ctk.CTkLabel(dialog, text="请输入密码以解锁", font=self.font_normal).pack(pady=10)
-        pass_entry = ctk.CTkEntry(dialog, show='*', width=200, font=self.font_normal); pass_entry.pack(pady=5); pass_entry.focus_set()
+        dialog = ctk.CTkToplevel(self.root); dialog.title("解锁界面"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
+        
+        main_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        ctk.CTkLabel(main_frame, text="请输入密码以解锁", font=self.font_normal).pack(pady=10)
+        pass_entry = ctk.CTkEntry(main_frame, show='*', width=250, font=self.font_normal); pass_entry.pack(pady=5); pass_entry.focus_set()
+
         def is_password_correct():
             encoded_entered_pass = base64.b64encode(pass_entry.get().encode('utf-8')).decode('utf-8')
             return encoded_entered_pass == self.lock_password_b64
@@ -910,11 +957,15 @@ class TimedBroadcastApp:
             if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。", parent=dialog):
                 self._perform_password_clear_logic(); dialog.destroy(); self.root.after(50, self._apply_unlock)
                 self.root.after(100, lambda: messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root))
-        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent"); btn_frame.pack(pady=10)
-        ctk.CTkButton(btn_frame, text="确定", command=confirm, font=self.font_normal).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="清除密码", command=clear_password_action, font=self.font_normal).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="取消", command=dialog.destroy, font=self.font_normal, fg_color="gray").pack(side="left", padx=5)
+
+        btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent"); btn_frame.pack(pady=20)
+        ctk.CTkButton(btn_frame, text="确定", font=self.font_normal, command=confirm).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="清除密码", font=self.font_normal, command=clear_password_action).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="取消", font=self.font_normal, command=dialog.destroy, fg_color="gray").pack(side="left", padx=5)
         dialog.bind('<Return>', lambda event: confirm())
+
+        dialog.update_idletasks()
+        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
 
     def _perform_password_clear_logic(self):
         if self._save_to_registry("LockPasswordB64", ""):
@@ -980,15 +1031,17 @@ class TimedBroadcastApp:
     def stop_current_playback(self): self.log("手动触发“停止当前播放”..."); self.playback_command_queue.put(('STOP', None))
 
     def add_task(self):
-        choice_dialog = ctk.CTkToplevel(self.root); choice_dialog.title("选择节目类型"); choice_dialog.geometry("350x280"); choice_dialog.resizable(False, False); choice_dialog.transient(self.root); choice_dialog.grab_set(); self.center_window(choice_dialog, 350, 280)
+        choice_dialog = ctk.CTkToplevel(self.root); choice_dialog.title("选择节目类型"); choice_dialog.resizable(False, False); choice_dialog.transient(self.root); choice_dialog.grab_set()
         main_frame = ctk.CTkFrame(choice_dialog, fg_color="transparent"); main_frame.pack(fill="both", expand=True, padx=20, pady=20)
         ctk.CTkLabel(main_frame, text="请选择要添加的节目类型", font=ctk.CTkFont(family="Microsoft YaHei", size=14, weight="bold")).pack(pady=15)
         ctk.CTkButton(main_frame, text="🎵 音频节目", font=self.font_normal, height=40, command=lambda: self.open_audio_dialog(choice_dialog)).pack(pady=8, fill="x")
         ctk.CTkButton(main_frame, text="🎙️ 语音节目", font=self.font_normal, height=40, command=lambda: self.open_voice_dialog(choice_dialog)).pack(pady=8, fill="x")
+        choice_dialog.update_idletasks()
+        self.center_window(choice_dialog, choice_dialog.winfo_reqwidth(), choice_dialog.winfo_reqheight())
 
     def open_audio_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy(); is_edit_mode = task_to_edit is not None
-        dialog = ctk.CTkToplevel(self.root); dialog.title("修改音频节目" if is_edit_mode else "添加音频节目"); dialog.geometry("950x680"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
+        dialog = ctk.CTkToplevel(self.root); dialog.title("修改音频节目" if is_edit_mode else "添加音频节目"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
         
         main_frame = ctk.CTkFrame(dialog, fg_color="transparent"); main_frame.pack(fill="both", expand=True, padx=15, pady=10)
         content_frame = ctk.CTkFrame(main_frame); content_frame.grid(row=0, column=0, sticky='ew', pady=2)
@@ -1002,7 +1055,7 @@ class TimedBroadcastApp:
         def select_single_audio():
             filename = filedialog.askopenfilename(title="选择音频文件", initialdir=AUDIO_FOLDER, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")])
             if filename: audio_single_entry.delete(0, "end"); audio_single_entry.insert(0, filename)
-        ctk.CTkButton(audio_single_frame, text="选取...", width=80, command=select_single_audio).pack(side="left", padx=5)
+        ctk.CTkButton(audio_single_frame, text="选取...", width=80, command=select_single_audio, font=self.font_small).pack(side="left", padx=5)
         
         ctk.CTkLabel(content_frame, text="音频文件夹", font=self.font_normal).grid(row=2, column=0, sticky='e', padx=5, pady=2)
         audio_folder_frame = ctk.CTkFrame(content_frame, fg_color="transparent"); audio_folder_frame.grid(row=2, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -1011,7 +1064,7 @@ class TimedBroadcastApp:
         def select_folder():
             foldername = filedialog.askdirectory(title="选择音频文件夹", initialdir=AUDIO_FOLDER)
             if foldername: audio_folder_entry.delete(0, "end"); audio_folder_entry.insert(0, foldername)
-        ctk.CTkButton(audio_folder_frame, text="选取...", width=80, command=select_folder).pack(side="left", padx=5)
+        ctk.CTkButton(audio_folder_frame, text="选取...", width=80, command=select_folder, font=self.font_small).pack(side="left", padx=5)
         
         play_order_frame = ctk.CTkFrame(content_frame, fg_color="transparent"); play_order_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=2)
         play_order_var = ctk.StringVar(value="sequential")
@@ -1026,7 +1079,7 @@ class TimedBroadcastApp:
         ctk.CTkLabel(time_frame, text="开始时间:", font=self.font_normal).grid(row=0, column=0, sticky='e', padx=5, pady=2)
         start_time_entry = ctk.CTkEntry(time_frame, font=self.font_normal, width=400); start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
         ctk.CTkLabel(time_frame, text="多个用 , 隔开", font=self.font_small, text_color="gray").grid(row=0, column=2, sticky='w', padx=5)
-        ctk.CTkButton(time_frame, text="设置...", width=80, command=lambda: self.show_time_settings_dialog(start_time_entry)).grid(row=0, column=3, padx=5)
+        ctk.CTkButton(time_frame, text="设置...", width=80, command=lambda: self.show_time_settings_dialog(start_time_entry), font=self.font_small).grid(row=0, column=3, padx=5)
         
         interval_var = ctk.StringVar(value="first")
         interval_frame1 = ctk.CTkFrame(time_frame, fg_color="transparent"); interval_frame1.grid(row=1, column=1, columnspan=2, sticky='w', padx=5, pady=2)
@@ -1042,11 +1095,11 @@ class TimedBroadcastApp:
         
         ctk.CTkLabel(time_frame, text="周几/几号:", font=self.font_normal).grid(row=3, column=0, sticky='e', padx=5, pady=3)
         weekday_entry = ctk.CTkEntry(time_frame, font=self.font_normal, width=400); weekday_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=3)
-        ctk.CTkButton(time_frame, text="选取...", width=80, command=lambda: self.show_weekday_settings_dialog(weekday_entry)).grid(row=3, column=3, padx=5)
+        ctk.CTkButton(time_frame, text="选取...", width=80, command=lambda: self.show_weekday_settings_dialog(weekday_entry), font=self.font_small).grid(row=3, column=3, padx=5)
         
         ctk.CTkLabel(time_frame, text="日期范围:", font=self.font_normal).grid(row=4, column=0, sticky='e', padx=5, pady=3)
         date_range_entry = ctk.CTkEntry(time_frame, font=self.font_normal, width=400); date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=3)
-        ctk.CTkButton(time_frame, text="设置...", width=80, command=lambda: self.show_daterange_settings_dialog(date_range_entry)).grid(row=4, column=3, padx=5)
+        ctk.CTkButton(time_frame, text="设置...", width=80, command=lambda: self.show_daterange_settings_dialog(date_range_entry), font=self.font_small).grid(row=4, column=3, padx=5)
         
         other_frame = ctk.CTkFrame(main_frame); other_frame.grid(row=2, column=0, sticky='ew', pady=5)
         delay_var = ctk.StringVar(value="ontime")
@@ -1064,6 +1117,7 @@ class TimedBroadcastApp:
             play_order_var.set(task.get('play_order', 'sequential')); volume_entry.insert(0, task.get('volume', '80')); interval_var.set(task.get('interval_type', 'first'))
             interval_first_entry.insert(0, task.get('interval_first', '1')); interval_seconds_entry.insert(0, task.get('interval_seconds', '600')); weekday_entry.insert(0, task.get('weekday', '每周:1234567')); date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31')); delay_var.set(task.get('delay', 'ontime'))
         else: volume_entry.insert(0, "80"); interval_first_entry.insert(0, "1"); interval_seconds_entry.insert(0, "600"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
+        
         def save_task():
             audio_path = audio_single_entry.get().strip() if audio_type_var.get() == "single" else audio_folder_entry.get().strip()
             if not audio_path: messagebox.showwarning("警告", "请选择音频文件或文件夹", parent=dialog); return
@@ -1084,12 +1138,15 @@ class TimedBroadcastApp:
         ctk.CTkButton(dialog_button_frame, text="取消", command=dialog.destroy, font=self.font_normal, height=35, width=120, fg_color="gray").pack(side="left", padx=10)
         content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
 
+        dialog.update_idletasks()
+        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
+
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy(); is_edit_mode = task_to_edit is not None
-        dialog = ctk.CTkToplevel(self.root); dialog.title("修改语音节目" if is_edit_mode else "添加语音节目"); dialog.geometry("950x720"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
+        dialog = ctk.CTkToplevel(self.root); dialog.title("修改语音节目" if is_edit_mode else "添加语音节目"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
         
         main_frame = ctk.CTkFrame(dialog, fg_color="transparent"); main_frame.pack(fill="both", expand=True, padx=15, pady=10)
-        main_frame.grid_rowconfigure(0, weight=1) # Allow content frame to expand
+        main_frame.grid_rowconfigure(0, weight=1)
         
         content_frame = ctk.CTkFrame(main_frame); content_frame.grid(row=0, column=0, sticky='nsew', pady=2)
         content_frame.grid_columnconfigure(1, weight=1); content_frame.grid_rowconfigure(1, weight=1)
@@ -1101,8 +1158,8 @@ class TimedBroadcastApp:
         content_text = ctk.CTkTextbox(content_frame, font=self.font_normal, wrap="word"); content_text.grid(row=1, column=1, columnspan=3, sticky='nsew', padx=5, pady=5)
 
         script_btn_frame = ctk.CTkFrame(content_frame, fg_color="transparent"); script_btn_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=(0, 2))
-        ctk.CTkButton(script_btn_frame, text="导入文稿", width=80, command=lambda: self._import_voice_script(content_text)).pack(side="left")
-        ctk.CTkButton(script_btn_frame, text="导出文稿", width=80, command=lambda: self._export_voice_script(content_text, name_entry)).pack(side="left", padx=10)
+        ctk.CTkButton(script_btn_frame, text="导入文稿", width=80, command=lambda: self._import_voice_script(content_text), font=self.font_small).pack(side="left")
+        ctk.CTkButton(script_btn_frame, text="导出文稿", width=80, command=lambda: self._export_voice_script(content_text, name_entry), font=self.font_small).pack(side="left", padx=10)
 
         ctk.CTkLabel(content_frame, text="播音员:", font=self.font_normal).grid(row=3, column=0, sticky='w', padx=5, pady=5)
         available_voices = self.get_available_voices(); voice_var = ctk.StringVar()
@@ -1118,7 +1175,7 @@ class TimedBroadcastApp:
         ctk.CTkCheckBox(prompt_frame, text="提示音:", variable=prompt_var, font=self.font_normal).pack(side="left")
         prompt_file_var, prompt_volume_var = ctk.StringVar(), ctk.StringVar()
         prompt_file_entry = ctk.CTkEntry(prompt_frame, textvariable=prompt_file_var, font=self.font_normal, width=150); prompt_file_entry.pack(side="left", padx=5)
-        ctk.CTkButton(prompt_frame, text="...", width=30, command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var)).pack(side="left")
+        ctk.CTkButton(prompt_frame, text="...", width=30, command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var), font=self.font_small).pack(side="left")
         ctk.CTkLabel(prompt_frame, text="音量:", font=self.font_normal).pack(side="left", padx=(10,5)); ctk.CTkEntry(prompt_frame, textvariable=prompt_volume_var, font=self.font_normal, width=60).pack(side="left", padx=5)
         
         bgm_var = ctk.IntVar()
@@ -1126,22 +1183,22 @@ class TimedBroadcastApp:
         ctk.CTkCheckBox(bgm_frame, text="背景音乐:", variable=bgm_var, font=self.font_normal).pack(side="left")
         bgm_file_var, bgm_volume_var = ctk.StringVar(), ctk.StringVar()
         bgm_file_entry = ctk.CTkEntry(bgm_frame, textvariable=bgm_file_var, font=self.font_normal, width=150); bgm_file_entry.pack(side="left", padx=5)
-        ctk.CTkButton(bgm_frame, text="...", width=30, command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var)).pack(side="left")
+        ctk.CTkButton(bgm_frame, text="...", width=30, command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var), font=self.font_small).pack(side="left")
         ctk.CTkLabel(bgm_frame, text="音量:", font=self.font_normal).pack(side="left", padx=(10,5)); ctk.CTkEntry(bgm_frame, textvariable=bgm_volume_var, font=self.font_normal, width=60).pack(side="left", padx=5)
         
         time_frame = ctk.CTkFrame(main_frame); time_frame.grid(row=1, column=0, sticky='ew', pady=2)
         ctk.CTkLabel(time_frame, text="开始时间:", font=self.font_normal).grid(row=0, column=0, sticky='e', padx=5, pady=2)
         start_time_entry = ctk.CTkEntry(time_frame, font=self.font_normal, width=400); start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
         ctk.CTkLabel(time_frame, text="多个用 , 隔开", font=self.font_small, text_color="gray").grid(row=0, column=2, sticky='w', padx=5)
-        ctk.CTkButton(time_frame, text="设置...", width=80, command=lambda: self.show_time_settings_dialog(start_time_entry)).grid(row=0, column=3, padx=5)
+        ctk.CTkButton(time_frame, text="设置...", width=80, command=lambda: self.show_time_settings_dialog(start_time_entry), font=self.font_small).grid(row=0, column=3, padx=5)
         ctk.CTkLabel(time_frame, text="播 n 遍:", font=self.font_normal).grid(row=1, column=0, sticky='e', padx=5, pady=2)
         repeat_entry = ctk.CTkEntry(time_frame, font=self.font_normal, width=100); repeat_entry.grid(row=1, column=1, sticky='w', padx=5, pady=2)
         ctk.CTkLabel(time_frame, text="周几/几号:", font=self.font_normal).grid(row=2, column=0, sticky='e', padx=5, pady=2)
         weekday_entry = ctk.CTkEntry(time_frame, font=self.font_normal, width=400); weekday_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=2)
-        ctk.CTkButton(time_frame, text="选取...", width=80, command=lambda: self.show_weekday_settings_dialog(weekday_entry)).grid(row=2, column=3, padx=5)
+        ctk.CTkButton(time_frame, text="选取...", width=80, command=lambda: self.show_weekday_settings_dialog(weekday_entry), font=self.font_small).grid(row=2, column=3, padx=5)
         ctk.CTkLabel(time_frame, text="日期范围:", font=self.font_normal).grid(row=3, column=0, sticky='e', padx=5, pady=2)
         date_range_entry = ctk.CTkEntry(time_frame, font=self.font_normal, width=400); date_range_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=2)
-        ctk.CTkButton(time_frame, text="设置...", width=80, command=lambda: self.show_daterange_settings_dialog(date_range_entry)).grid(row=3, column=3, padx=5)
+        ctk.CTkButton(time_frame, text="设置...", width=80, command=lambda: self.show_daterange_settings_dialog(date_range_entry), font=self.font_small).grid(row=3, column=3, padx=5)
         
         other_frame = ctk.CTkFrame(main_frame); other_frame.grid(row=2, column=0, sticky='ew', pady=4)
         delay_var = ctk.StringVar(value="delay")
@@ -1179,8 +1236,10 @@ class TimedBroadcastApp:
                 self.tasks[index] = new_task_data; self.log(f"已修改语音节目(未重新生成语音): {new_task_data['name']}"); self.update_task_list(); self.save_tasks(); dialog.destroy()
                 if delay_var.get() == 'immediate': self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
                 return
-            progress_dialog = ctk.CTkToplevel(dialog); progress_dialog.title("请稍候"); progress_dialog.geometry("300x100"); progress_dialog.resizable(False, False); progress_dialog.transient(dialog); progress_dialog.grab_set()
-            ctk.CTkLabel(progress_dialog, text="语音文件生成中，请稍后...", font=self.font_normal).pack(expand=True); self.center_window(progress_dialog, 300, 100); dialog.update_idletasks()
+            progress_dialog = ctk.CTkToplevel(dialog); progress_dialog.title("请稍候"); progress_dialog.resizable(False, False); progress_dialog.transient(dialog); progress_dialog.grab_set()
+            ctk.CTkLabel(progress_dialog, text="语音文件生成中，请稍后...", font=self.font_normal).pack(expand=True, padx=20, pady=20); 
+            progress_dialog.update_idletasks(); self.center_window(progress_dialog, progress_dialog.winfo_reqwidth(), progress_dialog.winfo_reqheight());
+            
             new_wav_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.wav"; output_path = os.path.join(AUDIO_FOLDER, new_wav_filename); voice_params = {'voice': voice_var.get(), 'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0", 'volume': volume_entry.get().strip() or "80"}
             def _on_synthesis_complete(result):
                 progress_dialog.destroy()
@@ -1202,6 +1261,9 @@ class TimedBroadcastApp:
         ctk.CTkButton(dialog_button_frame, text="保存修改" if is_edit_mode else "添加", command=save_task, font=self.font_normal, height=35, width=120).pack(side="left", padx=10)
         ctk.CTkButton(dialog_button_frame, text="取消", command=dialog.destroy, font=self.font_normal, height=35, width=120, fg_color="gray").pack(side="left", padx=10)
         time_frame.columnconfigure(1, weight=1)
+
+        dialog.update_idletasks()
+        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
 
     def _import_voice_script(self, text_widget):
         filename = filedialog.askopenfilename(title="选择要导入的文稿", initialdir=VOICE_SCRIPT_FOLDER, filetypes=[("文本文档", "*.txt"), ("所有文件", "*.*")])
@@ -1376,16 +1438,30 @@ class TimedBroadcastApp:
             self.update_task_list(); self.save_tasks(); self.log(f"已将 {count} 个{type_name}节目设置为“{status_name}”状态。")
         else: self.log(f"没有需要状态更新的{type_name}节目。")
 
+    # FIX 4: 使用正确的字典赋值方式
     def enable_all_tasks(self):
-        if self.tasks: [setattr(task, 'status', '启用') for task in self.tasks]; self.update_task_list(); self.save_tasks(); self.log("已启用全部节目。")
+        if not self.tasks: return
+        for task in self.tasks:
+            task['status'] = '启用'
+        self.update_task_list()
+        self.save_tasks()
+        self.log("已启用全部节目。")
     
     def disable_all_tasks(self):
-        if self.tasks: [setattr(task, 'status', '禁用') for task in self.tasks]; self.update_task_list(); self.save_tasks(); self.log("已禁用全部节目。")
+        if not self.tasks: return
+        for task in self.tasks:
+            task['status'] = '禁用'
+        self.update_task_list()
+        self.save_tasks()
+        self.log("已禁用全部节目。")
 
     def set_uniform_volume(self):
         if not self.tasks: return
-        dialog = ctk.CTkInputDialog(text="请输入统一音量值 (0-100):", title="统一音量")
-        volume_str = dialog.get_input()
+        # FIX 3: 使用自定义对话框
+        volume_str = self._create_input_dialog(
+            title="统一音量",
+            text="请输入统一音量值 (0-100):"
+        )
         if volume_str:
             try:
                 volume = int(volume_str)
@@ -1407,19 +1483,19 @@ class TimedBroadcastApp:
                     except Exception as e: self.log(f"删除语音文件失败: {e}")
 
     def show_time_settings_dialog(self, time_entry_widget):
-        dialog = ctk.CTkToplevel(self.root); dialog.title("开始时间设置"); dialog.geometry("480x450"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set(); self.center_window(dialog, 480, 450)
+        dialog = ctk.CTkToplevel(self.root); dialog.title("开始时间设置"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
         main_frame = ctk.CTkFrame(dialog, fg_color="transparent"); main_frame.pack(fill="both", expand=True, padx=15, pady=15)
         ctk.CTkLabel(main_frame, text="24小时制 HH:MM:SS", font=self.font_bold).pack(anchor='w', pady=5)
         
         list_frame = ctk.CTkFrame(main_frame); list_frame.pack(fill="both", expand=True, pady=5)
         list_frame.grid_columnconfigure(0, weight=1); list_frame.grid_rowconfigure(0, weight=1)
 
-        scrollable_list = ctk.CTkScrollableFrame(list_frame, label_text="时间列表"); scrollable_list.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        scrollable_list = ctk.CTkScrollableFrame(list_frame, label_text="时间列表", label_font=self.font_normal); scrollable_list.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         
         current_times = [t.strip() for t in time_entry_widget.get().split(',') if t.strip()]
         time_labels = []
         for t in current_times:
-            label = ctk.CTkButton(scrollable_list, text=t, fg_color="transparent", text_color=("gray10", "gray90"), anchor="w"); label.pack(fill="x", pady=1)
+            label = ctk.CTkButton(scrollable_list, text=t, fg_color="transparent", text_color=("gray10", "gray90"), anchor="w", font=self.font_normal); label.pack(fill="x", pady=1)
             time_labels.append(label)
 
         btn_frame = ctk.CTkFrame(list_frame, fg_color="transparent"); btn_frame.grid(row=0, column=1, padx=10, sticky="ns")
@@ -1429,7 +1505,7 @@ class TimedBroadcastApp:
             val = new_entry.get().strip()
             normalized_time = self._normalize_time_string(val)
             if normalized_time and normalized_time not in [lbl.cget("text") for lbl in time_labels]:
-                label = ctk.CTkButton(scrollable_list, text=normalized_time, fg_color="transparent", text_color=("gray10", "gray90"), anchor="w")
+                label = ctk.CTkButton(scrollable_list, text=normalized_time, fg_color="transparent", text_color=("gray10", "gray90"), anchor="w", font=self.font_normal)
                 label.pack(fill="x", pady=1); time_labels.append(label)
                 new_entry.delete(0, "end"); new_entry.insert(0, datetime.now().strftime("%H:%M:%S"))
             elif not normalized_time: messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog)
@@ -1448,9 +1524,12 @@ class TimedBroadcastApp:
             self.save_settings(); dialog.destroy()
         ctk.CTkButton(bottom_frame, text="确定", command=confirm, font=self.font_bold, width=100, height=35).pack(side="left", padx=5)
         ctk.CTkButton(bottom_frame, text="取消", command=dialog.destroy, font=self.font_normal, width=100, height=35, fg_color="gray").pack(side="left", padx=5)
+        
+        dialog.update_idletasks()
+        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
 
     def show_weekday_settings_dialog(self, weekday_var_entry):
-        dialog = ctk.CTkToplevel(self.root); dialog.title("周几或几号"); dialog.geometry("550x550"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set(); self.center_window(dialog, 550, 550)
+        dialog = ctk.CTkToplevel(self.root); dialog.title("周几或几号"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
         main_frame = ctk.CTkFrame(dialog, fg_color="transparent"); main_frame.pack(fill="both", expand=True, padx=20, pady=20)
         week_type_var = ctk.StringVar(value="week")
         
@@ -1479,8 +1558,11 @@ class TimedBroadcastApp:
         ctk.CTkButton(bottom_frame, text="确定", command=confirm, font=self.font_bold, height=35, width=120).pack(side="left", padx=5)
         ctk.CTkButton(bottom_frame, text="取消", command=dialog.destroy, font=self.font_normal, height=35, width=120, fg_color="gray").pack(side="left", padx=5)
 
+        dialog.update_idletasks()
+        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
+
     def show_daterange_settings_dialog(self, date_range_entry):
-        dialog = ctk.CTkToplevel(self.root); dialog.title("日期范围"); dialog.geometry("450x250"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set(); self.center_window(dialog, 450, 250)
+        dialog = ctk.CTkToplevel(self.root); dialog.title("日期范围"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
         main_frame = ctk.CTkFrame(dialog, fg_color="transparent"); main_frame.pack(fill="both", expand=True, padx=20, pady=20)
         
         from_frame = ctk.CTkFrame(main_frame, fg_color="transparent"); from_frame.pack(pady=10, anchor='w')
@@ -1504,8 +1586,11 @@ class TimedBroadcastApp:
         ctk.CTkButton(bottom_frame, text="确定", command=confirm, font=self.font_bold, height=35, width=120).pack(side="left", padx=5)
         ctk.CTkButton(bottom_frame, text="取消", command=dialog.destroy, font=self.font_normal, height=35, width=120, fg_color="gray").pack(side="left", padx=5)
 
+        dialog.update_idletasks()
+        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
+
     def show_single_time_dialog(self, time_var):
-        dialog = ctk.CTkToplevel(self.root); dialog.title("设置时间"); dialog.geometry("320x200"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set(); self.center_window(dialog, 320, 200)
+        dialog = ctk.CTkToplevel(self.root); dialog.title("设置时间"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
         main_frame = ctk.CTkFrame(dialog, fg_color="transparent"); main_frame.pack(fill="both", expand=True, padx=15, pady=15)
         ctk.CTkLabel(main_frame, text="24小时制 HH:MM:SS", font=self.font_bold).pack(pady=5)
         time_entry = ctk.CTkEntry(main_frame, font=ctk.CTkFont(family="Microsoft YaHei", size=13), width=150, justify='center'); time_entry.insert(0, time_var.get()); time_entry.pack(pady=10)
@@ -1517,25 +1602,38 @@ class TimedBroadcastApp:
         ctk.CTkButton(bottom_frame, text="确定", command=confirm, font=self.font_normal).pack(side="left", padx=10)
         ctk.CTkButton(bottom_frame, text="取消", command=dialog.destroy, font=self.font_normal, fg_color="gray").pack(side="left", padx=10)
 
+        dialog.update_idletasks()
+        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
+
     def show_power_week_time_dialog(self, title, days_var, time_var):
-        dialog = ctk.CTkToplevel(self.root); dialog.title(title); dialog.geometry("580x330"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set(); self.center_window(dialog, 580, 330)
-        week_frame = ctk.CTkFrame(dialog,); week_frame.pack(fill="x", pady=10, padx=10)
-        ctk.CTkLabel(week_frame, text="选择周几", font=self.font_bold).grid(row=0, column=0, columnspan=7, pady=5)
+        dialog = ctk.CTkToplevel(self.root); dialog.title(title); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
+        
+        main_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        week_frame = ctk.CTkFrame(main_frame,); week_frame.pack(fill="x", pady=10)
+        ctk.CTkLabel(week_frame, text="选择周几", font=self.font_bold).grid(row=0, column=0, columnspan=7, pady=5, padx=10)
         weekdays = [("周一", 1), ("周二", 2), ("周三", 3), ("周四", 4), ("周五", 5), ("周六", 6), ("周日", 7)]; week_vars = {num: ctk.IntVar() for day, num in weekdays}
         for day_num_str in days_var.get().replace("每周:", ""): week_vars[int(day_num_str)].set(1)
-        for i, (day, num) in enumerate(weekdays): ctk.CTkCheckBox(week_frame, text=day, variable=week_vars[num], font=self.font_normal).grid(row=1, column=i, sticky='w', padx=10, pady=3)
-        time_frame = ctk.CTkFrame(dialog); time_frame.pack(fill="x", pady=10, padx=10)
-        ctk.CTkLabel(time_frame, text="时间 (HH:MM:SS):", font=self.font_normal).pack(side="left")
+        for i, (day, num) in enumerate(weekdays): ctk.CTkCheckBox(week_frame, text=day, variable=week_vars[num], font=self.font_normal).grid(row=1, column=i, sticky='w', padx=10, pady=10)
+        
+        time_frame = ctk.CTkFrame(main_frame); time_frame.pack(fill="x", pady=10)
+        ctk.CTkLabel(time_frame, text="时间 (HH:MM:SS):", font=self.font_normal).pack(side="left", padx=10)
         time_entry = ctk.CTkEntry(time_frame, font=self.font_normal, width=150); time_entry.insert(0, time_var.get()); time_entry.pack(side="left", padx=10)
+        
         def confirm():
             selected_days = sorted([str(n) for n, v in week_vars.items() if v.get()])
             if not selected_days: messagebox.showwarning("提示", "请至少选择一天", parent=dialog); return
             normalized_time = self._normalize_time_string(time_entry.get().strip())
             if not normalized_time: messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog); return
             days_var.set("每周:" + "".join(selected_days)); time_var.set(normalized_time); self.save_settings(); dialog.destroy()
-        bottom_frame = ctk.CTkFrame(dialog, fg_color="transparent"); bottom_frame.pack(pady=15)
+        
+        bottom_frame = ctk.CTkFrame(main_frame, fg_color="transparent"); bottom_frame.pack(pady=15)
         ctk.CTkButton(bottom_frame, text="确定", command=confirm, font=self.font_normal).pack(side="left", padx=10)
         ctk.CTkButton(bottom_frame, text="取消", command=dialog.destroy, font=self.font_normal, fg_color="gray").pack(side="left", padx=10)
+
+        dialog.update_idletasks()
+        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
 
     def update_task_list(self):
         if not hasattr(self, 'task_tree') or not self.task_tree.winfo_exists(): return
@@ -1819,12 +1917,19 @@ class TimedBroadcastApp:
         except (ValueError, IndexError): return False, "日期范围格式无效，应为 'YYYY-MM-DD ~ YYYY-MM-DD'"
 
     def show_quit_dialog(self):
-        dialog = ctk.CTkToplevel(self.root); dialog.title("确认"); dialog.geometry("380x170"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set(); self.center_window(dialog, 380, 170)
-        ctk.CTkLabel(dialog, text="您想要如何操作？", font=ctk.CTkFont(family="Microsoft YaHei", size=13)).pack(pady=20)
-        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent"); btn_frame.pack(pady=10)
+        dialog = ctk.CTkToplevel(self.root); dialog.title("确认"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
+        
+        main_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        ctk.CTkLabel(main_frame, text="您想要如何操作？", font=self.font_bold).pack(pady=20)
+        btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent"); btn_frame.pack(pady=10)
         ctk.CTkButton(btn_frame, text="退出程序", command=lambda: [dialog.destroy(), self.quit_app()], font=self.font_normal, fg_color="#E74C3C").pack(side="left", padx=10)
         if TRAY_AVAILABLE: ctk.CTkButton(btn_frame, text="最小化到托盘", command=lambda: [dialog.destroy(), self.hide_to_tray()], font=self.font_normal).pack(side="left", padx=10)
         ctk.CTkButton(btn_frame, text="取消", command=dialog.destroy, font=self.font_normal, fg_color="gray").pack(side="left", padx=10)
+
+        dialog.update_idletasks()
+        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
 
     def hide_to_tray(self):
         if not TRAY_AVAILABLE: messagebox.showwarning("功能不可用", "pystray 或 Pillow 库未安装，无法最小化到托盘。"); return
@@ -1908,7 +2013,7 @@ class TimedBroadcastApp:
         self.update_holiday_list(); self.save_holidays()
 
     def open_holiday_dialog(self, holiday_to_edit=None, index=None):
-        dialog = ctk.CTkToplevel(self.root); dialog.title("修改节假日" if holiday_to_edit else "添加节假日"); dialog.geometry("500x300"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set(); self.center_window(dialog, 500, 300)
+        dialog = ctk.CTkToplevel(self.root); dialog.title("修改节假日" if holiday_to_edit else "添加节假日"); dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
         main_frame = ctk.CTkFrame(dialog, fg_color="transparent"); main_frame.pack(fill="both", expand=True, padx=20, pady=20)
         
         ctk.CTkLabel(main_frame, text="名称:", font=self.font_normal).grid(row=0, column=0, sticky='w', pady=5)
@@ -1947,6 +2052,9 @@ class TimedBroadcastApp:
         ctk.CTkButton(button_frame, text="保存", command=save, font=self.font_normal, width=100).pack(side="left", padx=10)
         ctk.CTkButton(button_frame, text="取消", command=dialog.destroy, font=self.font_normal, width=100, fg_color="gray").pack(side="left", padx=10)
 
+        dialog.update_idletasks()
+        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
+
     def show_holiday_context_menu(self, event):
         if self.is_locked: return
         iid = self.holiday_tree.identify_row(event.y)
@@ -1983,11 +2091,22 @@ class TimedBroadcastApp:
             self.holidays.append(self.holidays.pop(index)); self.update_holiday_list(); self.save_holidays()
             new_selection_id = self.holiday_tree.get_children()[-1]; self.holiday_tree.selection_set(new_selection_id); self.holiday_tree.focus(new_selection_id)
 
+    # FIX 4: 使用正确的字典赋值方式
     def enable_all_holidays(self):
-        if self.holidays: [setattr(h, 'status', '启用') for h in self.holidays]; self.update_holiday_list(); self.save_holidays(); self.log("已启用全部节假日。")
+        if not self.holidays: return
+        for holiday in self.holidays:
+            holiday['status'] = '启用'
+        self.update_holiday_list()
+        self.save_holidays()
+        self.log("已启用全部节假日。")
 
     def disable_all_holidays(self):
-        if self.holidays: [setattr(h, 'status', '禁用') for h in self.holidays]; self.update_holiday_list(); self.save_holidays(); self.log("已禁用全部节假日。")
+        if not self.holidays: return
+        for holiday in self.holidays:
+            holiday['status'] = '禁用'
+        self.update_holiday_list()
+        self.save_holidays()
+        self.log("已禁用全部节假日。")
     
     def import_holidays(self):
         filename = filedialog.askopenfilename(title="选择导入节假日文件", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
