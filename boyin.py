@@ -2390,7 +2390,7 @@ class TimedBroadcastApp:
         # MODIFIED: 增加星期显示
         week_map = {"1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "日"}
         day_of_week = week_map.get(str(now.isoweekday()), '')
-        time_str = now.strftime(f'%Y-%m-%d (星期{day_of_week}) %H:%M:%S')
+        time_str = now.strftime(f'%Y-%m-%d 星期{day_of_week} %H:%M:%S')
         
         self.status_labels[0].config(text=f"当前时间: {time_str}")
         self.status_labels[1].config(text="系统状态: 运行中")
