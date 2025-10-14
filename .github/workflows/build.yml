@@ -46,18 +46,27 @@ jobs:
             ${{ runner.os }}-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
 
       - name: Install dependencies and configure pywin32
-        # 使用默认的 PowerShell shell
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
-          # --- 最终修改点在这里 ---
-          # 使用 PowerShell 的 Get-Command 明确找到脚本路径并用 python 执行
           python (Get-Command pywin32_postinstall.py).Source -install
 
+      # --- 关键修改点在这里 ---
       - name: Build application with PyInstaller
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico --add-data "icon.ico;." boyin.py
+          pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico `
+          --add-data="icon.ico;." `
+          --add-data="customtkinter;customtkinter" `
+          boyin.py
+          # ------------------- 修改解释 ------------------- #
+          # 1. 我添加了 --add-data="customtkinter;customtkinter" 这一行。
+          #    这会告诉 PyInstaller 将 customtkinter 库的整个文件夹（包含主题、字体等资源）
+          #    复制到打包后的程序根目录下的一个同名文件夹中。
+          # 2. 我使用了 PowerShell 的换行符 ` (反引号) 来提高命令的可读性，
+          #    这与您之前在安装依赖步骤中的做法保持一致。
+          # 3. 我保留了您原有的 --add-data="icon.ico;."，确保图标文件也被正确包含。
+          # ---------------------------------------------- #
 
       - name: Upload artifact (${{ matrix.artifact-name }})
         uses: actions/upload-artifact@v4
