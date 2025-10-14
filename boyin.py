@@ -195,7 +195,6 @@ class TimedBroadcastApp:
         self.page_container = tk.Frame(self.root)
         self.page_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # MODIFIED: 新增“待办事项”
         nav_button_titles = ["定时广播", "节假日", "待办事项", "设置", "注册软件", "超级管理"]
         
         for i, title in enumerate(nav_button_titles):
@@ -268,7 +267,6 @@ class TimedBroadcastApp:
             if page_name not in self.pages:
                 self.pages[page_name] = self.create_holiday_page()
             target_frame = self.pages[page_name]
-        # NEW: 待办事项页面切换逻辑
         elif page_name == "待办事项":
             if page_name not in self.pages:
                 self.pages[page_name] = self.create_todo_page()
@@ -2221,7 +2219,14 @@ class TimedBroadcastApp:
         listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar = tk.Scrollbar(box_frame, orient=tk.VERTICAL, command=listbox.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y); listbox.configure(yscrollcommand=scrollbar.set)
-        for t in [t.strip() for t in time_entry.get().split(',') if t.strip()]: listbox.insert(tk.END, t)
+        
+        current_times_str = ""
+        if isinstance(time_entry, tk.Entry):
+            current_times_str = time_entry.get()
+        
+        for t in [t.strip() for t in current_times_str.split(',') if t.strip()]: 
+            listbox.insert(tk.END, t)
+
         btn_frame = tk.Frame(list_frame, bg='#D7F3F5')
         btn_frame.pack(side=tk.RIGHT, padx=10, fill=tk.Y)
         new_entry = tk.Entry(btn_frame, font=font_spec, width=12)
@@ -2230,8 +2235,12 @@ class TimedBroadcastApp:
             val = new_entry.get().strip()
             normalized_time = self._normalize_time_string(val)
             if normalized_time:
-                if normalized_time not in listbox.get(0, tk.END): listbox.insert(tk.END, normalized_time); new_entry.delete(0, tk.END); new_entry.insert(0, datetime.now().strftime("%H:%M:%S"))
-            else: messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog)
+                if normalized_time not in listbox.get(0, tk.END): 
+                    listbox.insert(tk.END, normalized_time)
+                    new_entry.delete(0, tk.END)
+                    new_entry.insert(0, datetime.now().strftime("%H:%M:%S"))
+            else: 
+                messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog)
         def del_time():
             if listbox.curselection(): listbox.delete(listbox.curselection()[0])
         tk.Button(btn_frame, text="添加 ↑", command=add_time, font=font_spec).pack(pady=3, fill=tk.X)
@@ -2240,12 +2249,14 @@ class TimedBroadcastApp:
         bottom_frame = tk.Frame(main_frame, bg='#D7F3F5'); bottom_frame.pack(pady=10)
         def confirm():
             result = ", ".join(list(listbox.get(0, tk.END)))
-            if isinstance(time_entry, tk.Entry): time_entry.delete(0, tk.END); time_entry.insert(0, result)
-            self.save_settings(); dialog.destroy()
+            if isinstance(time_entry, tk.Entry): 
+                time_entry.delete(0, tk.END)
+                time_entry.insert(0, result)
+            dialog.destroy()
         tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=(font_spec[0], 11, 'bold'), bd=1, padx=25, pady=5).pack(side=tk.LEFT, padx=5)
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=font_spec, bd=1, padx=25, pady=5).pack(side=tk.LEFT, padx=5)
 
-    def show_weekday_settings_dialog(self, weekday_var):
+    def show_weekday_settings_dialog(self, weekday_entry):
         dialog = tk.Toplevel(self.root); dialog.title("周几或几号")
         dialog.geometry("550x550"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
@@ -2266,7 +2277,7 @@ class TimedBroadcastApp:
         day_vars = {i: tk.IntVar(value=0) for i in range(1, 32)}
         for i in range(1, 32): tk.Checkbutton(day_frame, text=f"{i:02d}", variable=day_vars[i], bg='#D7F3F5', font=font_spec).grid(row=((i - 1) // 7) + 1, column=(i - 1) % 7, sticky='w', padx=8, pady=2)
         bottom_frame = tk.Frame(main_frame, bg='#D7F3F5'); bottom_frame.pack(pady=10)
-        current_val = weekday_var.get()
+        current_val = weekday_entry.get()
         if current_val.startswith("每周:"):
             week_type_var.set("week")
             selected_days = current_val.replace("每周:", "")
@@ -2278,8 +2289,8 @@ class TimedBroadcastApp:
         def confirm():
             if week_type_var.get() == "week": result = "每周:" + "".join(sorted([str(n) for n, v in week_vars.items() if v.get()]))
             else: result = "每月:" + ",".join(sorted([f"{n:02d}" for n, v in day_vars.items() if v.get()]))
-            if isinstance(weekday_var, tk.Entry): weekday_var.delete(0, tk.END); weekday_var.insert(0, result)
-            self.save_settings(); dialog.destroy()
+            if isinstance(weekday_entry, tk.Entry): weekday_entry.delete(0, tk.END); weekday_entry.insert(0, result)
+            dialog.destroy()
         tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=(font_spec[0], 11, 'bold'), bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=font_spec, bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
 
@@ -2308,7 +2319,10 @@ class TimedBroadcastApp:
         def confirm():
             start, end = from_date_entry.get().strip(), to_date_entry.get().strip()
             norm_start, norm_end = self._normalize_date_string(start), self._normalize_date_string(end)
-            if norm_start and norm_end: date_range_entry.delete(0, tk.END); date_range_entry.insert(0, f"{norm_start} ~ {norm_end}"); dialog.destroy()
+            if norm_start and norm_end: 
+                date_range_entry.delete(0, tk.END)
+                date_range_entry.insert(0, f"{norm_start} ~ {norm_end}")
+                dialog.destroy()
             else: messagebox.showerror("格式错误", "日期格式不正确, 应为 YYYY-MM-DD", parent=dialog)
         tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=(font_spec[0], 11, 'bold'), bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=font_spec, bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
@@ -2327,7 +2341,10 @@ class TimedBroadcastApp:
         def confirm():
             val = time_entry.get().strip()
             normalized_time = self._normalize_time_string(val)
-            if normalized_time: time_var.set(normalized_time); self.save_settings(); dialog.destroy()
+            if normalized_time: 
+                time_var.set(normalized_time)
+                self.save_settings()
+                dialog.destroy()
             else: messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog)
         bottom_frame = tk.Frame(main_frame, bg='#D7F3F5'); bottom_frame.pack(pady=10)
         tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=font_spec).pack(side=tk.LEFT, padx=10)
@@ -2356,7 +2373,10 @@ class TimedBroadcastApp:
             if not selected_days: messagebox.showwarning("提示", "请至少选择一天", parent=dialog); return
             normalized_time = self._normalize_time_string(time_entry.get().strip())
             if not normalized_time: messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog); return
-            days_var.set("每周:" + "".join(selected_days)); time_var.set(normalized_time); self.save_settings(); dialog.destroy()
+            days_var.set("每周:" + "".join(selected_days))
+            time_var.set(normalized_time)
+            self.save_settings()
+            dialog.destroy()
         bottom_frame = tk.Frame(dialog, bg='#D7F3F5'); bottom_frame.pack(pady=15)
         tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=font_spec).pack(side=tk.LEFT, padx=10)
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=font_spec).pack(side=tk.LEFT, padx=10)
@@ -2387,7 +2407,6 @@ class TimedBroadcastApp:
     def update_status_bar(self):
         if not self.running: return
         now = datetime.now()
-        # MODIFIED: 增加星期显示
         week_map = {"1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "日"}
         day_of_week = week_map.get(str(now.isoweekday()), '')
         time_str = now.strftime(f'%Y-%m-%d 星期{day_of_week} %H:%M:%S')
@@ -2399,7 +2418,6 @@ class TimedBroadcastApp:
     def start_background_threads(self):
         threading.Thread(target=self._scheduler_worker, daemon=True).start()
         threading.Thread(target=self._playback_worker, daemon=True).start()
-        # NEW: 启动待办事项队列处理器
         self.root.after(1000, self._process_reminder_queue)
 
     def _scheduler_worker(self):
@@ -3034,7 +3052,7 @@ class TimedBroadcastApp:
             if normalized: normalized_times.append(normalized)
             else: invalid_times.append(t)
         if invalid_times: return False, f"以下时间格式无效: {', '.join(invalid_times)}"
-        return True, ", ".join(normalized_times)
+        return True, ", ".join(sorted(list(set(normalized_times)))) # 去重并排序
 
     def _normalize_date_string(self, date_str):
         try: return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d")
@@ -3409,7 +3427,7 @@ class TimedBroadcastApp:
             self.update_holiday_list()
             self.save_holidays()
             self.log("已清空所有节假日。")
-            
+
 # --- 代码第一部分结束 ---
 # --- 第二部分将从下面的“待办事项”相关函数开始 ---
 # --- NEW & REWORKED: 待办事项所有相关函数 ---
@@ -3431,7 +3449,7 @@ class TimedBroadcastApp:
         table_frame = tk.Frame(content_frame, bg='white')
         table_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        columns = ('待办事项名称', '状态', '类型', '内容', '下次提醒时间')
+        columns = ('待办事项名称', '状态', '类型', '内容', '提醒规则')
         self.todo_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended')
 
         self.todo_tree.heading('待办事项名称', text='待办事项名称')
@@ -3442,8 +3460,8 @@ class TimedBroadcastApp:
         self.todo_tree.column('类型', width=80, anchor='center')
         self.todo_tree.heading('内容', text='内容')
         self.todo_tree.column('内容', width=300, anchor='w')
-        self.todo_tree.heading('下次提醒时间', text='下次提醒时间')
-        self.todo_tree.column('下次提醒时间', width=250, anchor='center')
+        self.todo_tree.heading('提醒规则', text='提醒规则')
+        self.todo_tree.column('提醒规则', width=250, anchor='center')
 
         self.todo_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.todo_tree.yview)
@@ -3489,6 +3507,21 @@ class TimedBroadcastApp:
         try:
             with open(TODO_FILE, 'r', encoding='utf-8') as f:
                 self.todos = json.load(f)
+            
+            # 数据迁移逻辑
+            migrated = False
+            for todo in self.todos:
+                if 'type' not in todo:
+                    todo['type'] = 'onetime' # 默认为一次性
+                    migrated = True
+                if todo.get('status') == '待处理':
+                    todo['status'] = '启用' # 修复因意外关闭导致的永久待处理状态
+                    migrated = True
+
+            if migrated:
+                self.log("检测到旧版待办事项数据，已自动迁移。")
+                self.save_todos()
+
             self.log(f"已加载 {len(self.todos)} 个待办事项")
             if hasattr(self, 'todo_tree'):
                 self.update_todo_list()
@@ -3506,8 +3539,18 @@ class TimedBroadcastApp:
             content_preview = (content[:30] + '...') if len(content) > 30 else content
             
             task_type = "一次性" if todo.get('type') == 'onetime' else "循环"
-            remind_info = todo.get('remind_datetime', '') if task_type == '一次性' else todo.get('start_times', '')
-
+            
+            remind_info = ""
+            if task_type == '一次性':
+                remind_info = todo.get('remind_datetime', '')
+            else: # 循环
+                times = todo.get('start_times', '无')
+                interval = todo.get('interval_minutes', 0)
+                if interval > 0:
+                    remind_info = f"{times} (每{interval}分钟)"
+                else:
+                    remind_info = times
+            
             self.todo_tree.insert('', tk.END, values=(
                 todo.get('name', ''),
                 todo.get('status', '启用'),
@@ -3529,6 +3572,9 @@ class TimedBroadcastApp:
         selection = self.todo_tree.selection()
         if not selection:
             messagebox.showwarning("警告", "请先选择要修改的待办事项")
+            return
+        if len(selection) > 1:
+            messagebox.showwarning("警告", "一次只能修改一个待办事项")
             return
         index = self.todo_tree.index(selection[0])
         todo_to_edit = self.todos[index]
@@ -3560,7 +3606,7 @@ class TimedBroadcastApp:
     def open_todo_dialog(self, todo_to_edit=None, index=None):
         dialog = tk.Toplevel(self.root)
         dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
-        dialog.geometry("750x600") # 增加窗口大小以容纳更多控件
+        dialog.geometry("750x600")
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
@@ -3571,7 +3617,6 @@ class TimedBroadcastApp:
         main_frame = tk.Frame(dialog, bg='#F0F8FF', padx=20, pady=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # --- 通用部分 ---
         tk.Label(main_frame, text="名称:", font=font_spec, bg='#F0F8FF').grid(row=0, column=0, sticky='e', pady=5, padx=5)
         name_entry = tk.Entry(main_frame, font=font_spec, width=60)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='w', pady=5)
@@ -3580,7 +3625,6 @@ class TimedBroadcastApp:
         content_text = scrolledtext.ScrolledText(main_frame, height=5, font=font_spec, width=60, wrap=tk.WORD)
         content_text.grid(row=1, column=1, columnspan=3, sticky='w', pady=5)
         
-        # --- 类型选择 ---
         type_var = tk.StringVar(value="onetime")
         type_frame = tk.Frame(main_frame, bg='#F0F8FF')
         type_frame.grid(row=2, column=1, columnspan=3, sticky='w', pady=10)
@@ -3590,11 +3634,9 @@ class TimedBroadcastApp:
         recurring_rb = tk.Radiobutton(type_frame, text="循环任务", variable=type_var, value="recurring", bg='#F0F8FF', font=font_spec)
         recurring_rb.pack(side=tk.LEFT, padx=10)
         
-        # --- 容器 ---
         onetime_lf = tk.LabelFrame(main_frame, text="一次性任务设置", font=font_spec, bg='#F0F8FF', padx=10, pady=10)
         recurring_lf = tk.LabelFrame(main_frame, text="循环任务设置", font=font_spec, bg='#F0F8FF', padx=10, pady=10)
         
-        # --- 一次性任务控件 ---
         tk.Label(onetime_lf, text="执行日期:", font=font_spec, bg='#F0F8FF').grid(row=0, column=0, sticky='e', pady=5, padx=5)
         onetime_date_entry = tk.Entry(onetime_lf, font=font_spec, width=20)
         onetime_date_entry.grid(row=0, column=1, sticky='w', pady=5)
@@ -3602,7 +3644,6 @@ class TimedBroadcastApp:
         onetime_time_entry = tk.Entry(onetime_lf, font=font_spec, width=20)
         onetime_time_entry.grid(row=1, column=1, sticky='w', pady=5)
 
-        # --- 循环任务控件 ---
         tk.Label(recurring_lf, text="开始时间:", font=font_spec, bg='#F0F8FF').grid(row=0, column=0, sticky='e', padx=5, pady=5)
         recurring_time_entry = tk.Entry(recurring_lf, font=font_spec, width=40)
         recurring_time_entry.grid(row=0, column=1, sticky='w', padx=5, pady=5)
@@ -3617,8 +3658,14 @@ class TimedBroadcastApp:
         recurring_daterange_entry = tk.Entry(recurring_lf, font=font_spec, width=40)
         recurring_daterange_entry.grid(row=2, column=1, sticky='w', padx=5, pady=5)
         tk.Button(recurring_lf, text="设置...", command=lambda: self.show_daterange_settings_dialog(recurring_daterange_entry), bg='#D0D0D0', font=font_spec).grid(row=2, column=2, padx=5)
+
+        tk.Label(recurring_lf, text="循环间隔:", font=font_spec, bg='#F0F8FF').grid(row=3, column=0, sticky='e', padx=5, pady=5)
+        interval_frame = tk.Frame(recurring_lf, bg='#F0F8FF')
+        interval_frame.grid(row=3, column=1, sticky='w', padx=5, pady=5)
+        recurring_interval_entry = tk.Entry(interval_frame, font=font_spec, width=8)
+        recurring_interval_entry.pack(side=tk.LEFT)
+        tk.Label(interval_frame, text="分钟 (0表示仅在'开始时间'提醒)", font=('Microsoft YaHei', 10), bg='#F0F8FF').pack(side=tk.LEFT, padx=5)
         
-        # --- 切换逻辑 ---
         def toggle_frames(*args):
             if type_var.get() == 'onetime':
                 recurring_lf.grid_forget()
@@ -3629,30 +3676,29 @@ class TimedBroadcastApp:
         
         type_var.trace_add("write", toggle_frames)
         
-        # --- 加载数据 ---
         now = datetime.now()
         if todo_to_edit:
             name_entry.insert(0, todo_to_edit.get('name', ''))
             content_text.insert('1.0', todo_to_edit.get('content', ''))
             type_var.set(todo_to_edit.get('type', 'onetime'))
             
-            # 填充一次性任务数据
             dt_str = todo_to_edit.get('remind_datetime', now.strftime('%Y-%m-%d %H:%M:%S'))
             d, t = dt_str.split(' ') if ' ' in dt_str else ('', '')
             onetime_date_entry.insert(0, d)
             onetime_time_entry.insert(0, t)
 
-            # 填充循环任务数据
             recurring_time_entry.insert(0, todo_to_edit.get('start_times', ''))
             recurring_weekday_entry.insert(0, todo_to_edit.get('weekday', '每周:1234567'))
             recurring_daterange_entry.insert(0, todo_to_edit.get('date_range', '2000-01-01 ~ 2099-12-31'))
-        else: # 新建任务的默认值
+            recurring_interval_entry.insert(0, todo_to_edit.get('interval_minutes', '0'))
+        else:
             onetime_date_entry.insert(0, now.strftime('%Y-%m-%d'))
             onetime_time_entry.insert(0, (now + timedelta(minutes=5)).strftime('%H:%M:%S'))
             recurring_weekday_entry.insert(0, '每周:1234567')
             recurring_daterange_entry.insert(0, '2000-01-01 ~ 2099-12-31')
+            recurring_interval_entry.insert(0, '0')
 
-        toggle_frames() # 初始化显示正确的Frame
+        toggle_frames()
 
         def save():
             name = name_entry.get().strip()
@@ -3676,6 +3722,13 @@ class TimedBroadcastApp:
                     return
                 new_todo_data['remind_datetime'] = f"{date_str} {time_str}"
             else: # recurring
+                try:
+                    interval = int(recurring_interval_entry.get().strip() or '0')
+                    if not (0 <= interval <= 60): raise ValueError
+                except ValueError:
+                    messagebox.showerror("格式错误", "循环间隔必须是 0-60 之间的整数。", parent=dialog)
+                    return
+
                 is_valid_time, time_msg = self._normalize_multiple_times_string(recurring_time_entry.get().strip())
                 if not is_valid_time:
                     messagebox.showerror("格式错误", time_msg, parent=dialog); return
@@ -3686,6 +3739,8 @@ class TimedBroadcastApp:
                 new_todo_data['start_times'] = time_msg
                 new_todo_data['weekday'] = recurring_weekday_entry.get().strip()
                 new_todo_data['date_range'] = date_msg
+                new_todo_data['interval_minutes'] = interval
+                new_todo_data['last_interval_run'] = ""
 
             if todo_to_edit:
                 self.todos[index] = new_todo_data
@@ -3824,29 +3879,51 @@ class TimedBroadcastApp:
                     todo_with_index = todo.copy()
                     todo_with_index['original_index'] = index
                     self.reminder_queue.put(todo_with_index)
-                    todo['status'] = '待处理' # 避免重复触发
-                    self.update_todo_list()
+                    todo['status'] = '待处理' 
+                    self.root.after(0, self.update_todo_list)
             
             elif todo.get('type') == 'recurring':
+                # 检查基础约束
                 try:
                     start, end = [d.strip() for d in todo.get('date_range', '').split('~')]
-                    if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()): continue
+                    if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()): 
+                        continue
                 except (ValueError, IndexError): pass
                 
                 schedule = todo.get('weekday', '每周:1234567')
                 run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or \
                             (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
                 if not run_today: continue
-
+                
+                # 检查固定时间点触发
                 for trigger_time in [t.strip() for t in todo.get('start_times', '').split(',')]:
                     if trigger_time == now_str_time and todo.get('last_run', {}).get(trigger_time) != now_str_date:
-                        self.log(f"触发循环待办事项: {todo['name']}")
+                        self.log(f"触发循环待办事项 (固定时间): {todo['name']}")
                         todo_with_index = todo.copy()
                         todo_with_index['original_index'] = index
                         self.reminder_queue.put(todo_with_index)
                         
                         todo.setdefault('last_run', {})[trigger_time] = now_str_date
+                        todo['last_interval_run'] = now_str_dt # 更新最后一次触发时间
                         self.save_todos()
+
+                # 检查周期性间隔触发
+                interval = todo.get('interval_minutes', 0)
+                if interval > 0:
+                    last_run_str = todo.get('last_interval_run')
+                    if last_run_str:
+                        try:
+                            last_run_dt = datetime.strptime(last_run_str, '%Y-%m-%d %H:%M:%S')
+                            if now >= last_run_dt + timedelta(minutes=interval):
+                                self.log(f"触发循环待办事项 (间隔): {todo['name']}")
+                                todo_with_index = todo.copy()
+                                todo_with_index['original_index'] = index
+                                self.reminder_queue.put(todo_with_index)
+                                
+                                todo['last_interval_run'] = now_str_dt
+                                self.save_todos()
+                        except ValueError:
+                            pass
 
     def _process_reminder_queue(self):
         if not self.is_reminder_active and not self.reminder_queue.empty():
@@ -3855,7 +3932,7 @@ class TimedBroadcastApp:
                 self.is_reminder_active = True
                 self.show_todo_reminder(todo_task)
             except queue.Empty:
-                pass # Just in case of race condition
+                pass
         
         self.root.after(1000, self._process_reminder_queue)
 
@@ -3866,11 +3943,9 @@ class TimedBroadcastApp:
         reminder_win.resizable(False, False)
         reminder_win.transient(self.root)
         reminder_win.grab_set()
-        reminder_win.attributes('-topmost', True) # 强制置顶
+        reminder_win.attributes('-topmost', True)
         self.center_window(reminder_win, 480, 320)
         reminder_win.configure(bg='#FFFFE0')
-
-        # 禁用关闭按钮
         reminder_win.protocol("WM_DELETE_WINDOW", lambda: None)
         
         original_index = todo.get('original_index')
@@ -3907,7 +3982,7 @@ class TimedBroadcastApp:
                 new_remind_time = datetime.now() + timedelta(minutes=minutes)
                 if original_index is not None and original_index < len(self.todos):
                     self.todos[original_index]['remind_datetime'] = new_remind_time.strftime('%Y-%m-%d %H:%M:%S')
-                    self.todos[original_index]['status'] = '启用' # 重新启用
+                    self.todos[original_index]['status'] = '启用' 
                     self.save_todos()
                     self.update_todo_list()
                     self.log(f"待办事项 '{todo['name']}' 已推迟 {minutes} 分钟。")
@@ -3926,10 +4001,11 @@ class TimedBroadcastApp:
             tk.Button(btn_frame, text="已完成", font=font_spec, bg='#27AE60', fg='white', width=10, command=_handle_complete).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="稍后提醒", font=font_spec, width=10, command=_handle_snooze).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=_handle_delete).pack(side=tk.LEFT, padx=10)
-        else: # recurring
+        elif todo.get('type') == 'recurring':
             tk.Button(btn_frame, text="本次完成", font=font_spec, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=_handle_delete).pack(side=tk.LEFT, padx=10)
-
+        else: # 后备方案，以防万一
+            tk.Button(btn_frame, text="确定", font=font_spec, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
 
 def main():
     root = tk.Tk()
