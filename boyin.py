@@ -1,3 +1,4 @@
+# --- 第一部分开始 ---
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog, simpledialog
 import json
@@ -16,9 +17,9 @@ import shutil
 TRAY_AVAILABLE = False
 try:
     from pystray import MenuItem as item, Icon
-    from PIL import Image, ImageTk # MODIFIED: ImageTk is needed for display
+    from PIL import Image, ImageTk
     TRAY_AVAILABLE = True
-    IMAGE_AVAILABLE = True # NEW: Flag for image functionality
+    IMAGE_AVAILABLE = True
 except ImportError:
     print("警告: pystray 或 Pillow 未安装，最小化到托盘和背景图片功能不可用。")
     TRAY_AVAILABLE = False
@@ -69,7 +70,7 @@ else:
 TASK_FILE = os.path.join(application_path, "broadcast_tasks.json")
 SETTINGS_FILE = os.path.join(application_path, "settings.json")
 HOLIDAY_FILE = os.path.join(application_path, "holidays.json")
-TODO_FILE = os.path.join(application_path, "todos.json") # NEW: 待办事项文件
+TODO_FILE = os.path.join(application_path, "todos.json")
 PROMPT_FOLDER = os.path.join(application_path, "提示音")
 AUDIO_FOLDER = os.path.join(application_path, "音频文件")
 BGM_FOLDER = os.path.join(application_path, "文稿背景")
@@ -97,7 +98,7 @@ class TimedBroadcastApp:
 
         self.tasks = []
         self.holidays = []
-        self.todos = [] # NEW: 待办事项列表
+        self.todos = []
         self.settings = {}
         self.running = True
         self.tray_icon = None
@@ -133,7 +134,7 @@ class TimedBroadcastApp:
         self.create_widgets()
         self.load_tasks()
         self.load_holidays()
-        self.load_todos() # NEW: 加载待办事项
+        self.load_todos()
         
         self.start_background_threads()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
@@ -193,7 +194,6 @@ class TimedBroadcastApp:
         self.page_container = tk.Frame(self.root)
         self.page_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # MODIFIED: 新增“待办事项”
         nav_button_titles = ["定时广播", "节假日", "待办事项", "设置", "注册软件", "超级管理"]
         
         for i, title in enumerate(nav_button_titles):
@@ -266,7 +266,6 @@ class TimedBroadcastApp:
             if page_name not in self.pages:
                 self.pages[page_name] = self.create_holiday_page()
             target_frame = self.pages[page_name]
-        # NEW: 待办事项页面切换逻辑
         elif page_name == "待办事项":
             if page_name not in self.pages:
                 self.pages[page_name] = self.create_todo_page()
@@ -720,7 +719,7 @@ class TimedBroadcastApp:
 
             self.tasks = backup_data['tasks']
             self.holidays = backup_data['holidays']
-            self.todos = backup_data.get('todos', []) # Safely get todos
+            self.todos = backup_data.get('todos', [])
             self.settings = backup_data['settings']
             self.lock_password_b64 = backup_data['lock_password_b64']
             
@@ -786,7 +785,7 @@ class TimedBroadcastApp:
             messagebox.askyesno = lambda title, message: True
             self.clear_all_tasks(delete_associated_files=False)
             self.clear_all_holidays()
-            self.clear_all_todos() # NEW
+            self.clear_all_todos()
             messagebox.askyesno = original_askyesno
 
             self._save_to_registry("LockPasswordB64", "")
@@ -811,7 +810,8 @@ class TimedBroadcastApp:
             messagebox.showinfo("重置成功", "软件已恢复到初始状态。\n\n请点击“确定”后手动关闭并重新启动软件。")
         except Exception as e:
             self.log(f"重置失败: {e}"); messagebox.showerror("重置失败", f"发生错误: {e}")
-
+# --- 第一部分结束 ---
+# --- 第二部分开始 ---
     def create_scheduled_broadcast_page(self):
         page_frame = self.pages["定时广播"]
         font_11 = ('Microsoft YaHei', 11)
@@ -1001,7 +1001,6 @@ class TimedBroadcastApp:
         tk.Checkbutton(general_frame, text="登录windows后自动启动", variable=self.autostart_var, font=('Microsoft YaHei', 11), bg='white', anchor='w', command=self._handle_autostart_setting).pack(fill=tk.X, pady=5)
         tk.Checkbutton(general_frame, text="启动后最小化到系统托盘", variable=self.start_minimized_var, font=('Microsoft YaHei', 11), bg='white', anchor='w', command=self.save_settings).pack(fill=tk.X, pady=5)
         
-        # MODIFIED: 微调布局
         lock_and_buttons_frame = tk.Frame(general_frame, bg='white')
         lock_and_buttons_frame.pack(fill=tk.X, pady=5)
         
@@ -1015,7 +1014,6 @@ class TimedBroadcastApp:
         self.clear_password_btn = tk.Button(lock_and_buttons_frame, text="清除锁定密码", font=('Microsoft YaHei', 11), command=self.clear_lock_password)
         self.clear_password_btn.grid(row=0, column=1, padx=20)
         
-        # NEW: 新增按钮
         self.cancel_bg_images_btn = tk.Button(lock_and_buttons_frame, text="取消所有节目背景图片", font=('Microsoft YaHei', 11), command=self._cancel_all_background_images)
         self.cancel_bg_images_btn.grid(row=0, column=2, padx=10)
 
@@ -1101,7 +1099,6 @@ class TimedBroadcastApp:
                 messagebox.showinfo("操作成功", f"已成功取消 {count} 个节目的背景图片设置。")
             else:
                 messagebox.showinfo("提示", "没有节目设置了背景图片，无需操作。")
-
 
     def _on_chime_params_changed(self, event=None, is_voice_change=False):
         current_voice = self.time_chime_voice_var.get()
@@ -1467,7 +1464,8 @@ class TimedBroadcastApp:
                              bg='#3498DB', fg='white', font=('Microsoft YaHei', 12, 'bold'),
                              bd=0, padx=30, pady=12, cursor='hand2', width=15, command=lambda: self.open_voice_dialog(choice_dialog))
         voice_btn.pack(pady=8)
-
+# --- 第二部分结束 ---
+# --- 第三部分开始 ---
     def open_audio_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
@@ -1993,7 +1991,8 @@ class TimedBroadcastApp:
                 else: self.root.after(100, check_dialog_closed)
             except tk.TclError: pass 
         self.root.after(100, check_dialog_closed)
-
+# --- 第二部分结束 ---
+# --- 第三部分开始 ---
     def copy_task(self):
         selections = self.task_tree.selection()
         if not selections: messagebox.showwarning("警告", "请先选择要复制的节目"); return
@@ -2361,35 +2360,23 @@ class TimedBroadcastApp:
         tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=font_spec).pack(side=tk.LEFT, padx=10)
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=font_spec).pack(side=tk.LEFT, padx=10)
 
-    def update_task_list(self):
-        if not hasattr(self, 'task_tree') or not self.task_tree.winfo_exists(): return
-        selection = self.task_tree.selection()
-        self.task_tree.delete(*self.task_tree.get_children())
-        for task in self.tasks:
-            content = task.get('content', '')
-            if task.get('type') == 'voice':
-                source_text = task.get('source_text', '')
-                clean_content = source_text.replace('\n', ' ').replace('\r', '')
-                content_preview = (clean_content[:30] + '...') if len(clean_content) > 30 else clean_content
-            else:
-                content_preview = os.path.basename(content)
-                
-            display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
-            self.task_tree.insert('', tk.END, values=(task.get('name', ''), task.get('status', ''), task.get('time', ''), display_mode, content_preview, task.get('volume', ''), task.get('weekday', ''), task.get('date_range', '')))
-        if selection:
-            try: 
-                valid_selection = [s for s in selection if self.task_tree.exists(s)]
-                if valid_selection: self.task_tree.selection_set(valid_selection)
-            except tk.TclError: pass
-        self.stats_label.config(text=f"节目单：{len(self.tasks)}")
-        if hasattr(self, 'status_labels'): self.status_labels[3].config(text=f"任务数量: {len(self.tasks)}")
-
+    # =================================================================
+    # ===== MODIFICATION START: 1. 状态栏增加星期显示 =====
+    # =================================================================
     def update_status_bar(self):
         if not self.running: return
-        self.status_labels[0].config(text=f"当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        now = datetime.now()
+        weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+        weekday_str = weekdays[now.weekday()]
+        
+        time_str = f"{now.strftime('%Y-%m-%d')} ({weekday_str}) {now.strftime('%H:%M:%S')}"
+        
+        self.status_labels[0].config(text=f"当前时间: {time_str}")
         self.status_labels[1].config(text="系统状态: 运行中")
         self.root.after(1000, self.update_status_bar)
-
+    # =================================================================
+    # ===== MODIFICATION END: 1. 状态栏增加星期显示 =====
+    # =================================================================
     def start_background_threads(self):
         threading.Thread(target=self._scheduler_worker, daemon=True).start()
         threading.Thread(target=self._playback_worker, daemon=True).start()
@@ -2400,7 +2387,7 @@ class TimedBroadcastApp:
             if not self.is_app_locked_down:
                 self._check_broadcast_tasks(now)
                 self._check_time_chime(now)
-                self._check_todo_tasks(now) # NEW: 检查待办事项
+                self._check_todo_tasks(now)
             
             self._check_power_tasks(now)
             time.sleep(1)
@@ -2436,7 +2423,8 @@ class TimedBroadcastApp:
                 self.playback_command_queue.put(('PLAY_CHIME', chime_file))
             else:
                 self.log(f"警告：找不到整点报时文件 {chime_file}，报时失败。")
-
+# --- 第三部分结束 ---
+# --- 第四部分开始 ---
     def _check_broadcast_tasks(self, now):
         current_date_str = now.strftime("%Y-%m-%d")
         current_time_str = now.strftime("%H:%M:%S")
@@ -3073,7 +3061,7 @@ class TimedBroadcastApp:
         self.save_tasks()
         self.save_settings()
         self.save_holidays()
-        self.save_todos() # NEW
+        self.save_todos()
         
         if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
         self.root.destroy()
@@ -3133,725 +3121,758 @@ class TimedBroadcastApp:
                 json.dump(self.holidays, f, ensure_ascii=False, indent=2)
         except Exception as e:
             self.log(f"保存节假日失败: {e}")
-
-    def load_holidays(self):
-        if not os.path.exists(HOLIDAY_FILE):
-            return
-        try:
-            with open(HOLIDAY_FILE, 'r', encoding='utf-8') as f:
-                self.holidays = json.load(f)
-            self.log(f"已加载 {len(self.holidays)} 个节假日设置")
-            if hasattr(self, 'holiday_tree'): 
-                self.update_holiday_list()
-        except Exception as e:
-            self.log(f"加载节假日失败: {e}")
-            self.holidays = []
-
-    def update_holiday_list(self):
-        if not hasattr(self, 'holiday_tree') or not self.holiday_tree.winfo_exists(): return
-        selection = self.holiday_tree.selection()
-        self.holiday_tree.delete(*self.holiday_tree.get_children())
-        for holiday in self.holidays:
-            self.holiday_tree.insert('', tk.END, values=(
-                holiday.get('name', ''),
-                holiday.get('status', '启用'),
-                holiday.get('start_datetime', ''),
-                holiday.get('end_datetime', '')
-            ))
-        if selection:
-            try:
-                valid_selection = [s for s in selection if self.holiday_tree.exists(s)]
-                if valid_selection: self.holiday_tree.selection_set(valid_selection)
-            except tk.TclError:
-                pass
-
-    def add_holiday(self):
-        self.open_holiday_dialog()
-
-    def edit_holiday(self):
-        selection = self.holiday_tree.selection()
-        if not selection:
-            messagebox.showwarning("警告", "请先选择要修改的节假日")
-            return
-        index = self.holiday_tree.index(selection[0])
-        holiday_to_edit = self.holidays[index]
-        self.open_holiday_dialog(holiday_to_edit=holiday_to_edit, index=index)
-
-    def delete_holiday(self):
-        selections = self.holiday_tree.selection()
-        if not selections:
-            messagebox.showwarning("警告", "请先选择要删除的节假日")
-            return
-        if messagebox.askyesno("确认", f"确定要删除选中的 {len(selections)} 个节假日吗？"):
-            indices = sorted([self.holiday_tree.index(s) for s in selections], reverse=True)
-            for index in indices:
-                self.holidays.pop(index)
+# --- 第三部分结束 ---
+def load_holidays(self):
+    if not os.path.exists(HOLIDAY_FILE):
+        return
+    try:
+        with open(HOLIDAY_FILE, 'r', encoding='utf-8') as f:
+            self.holidays = json.load(f)
+        self.log(f"已加载 {len(self.holidays)} 个节假日设置")
+        if hasattr(self, 'holiday_tree'): 
             self.update_holiday_list()
-            self.save_holidays()
+    except Exception as e:
+        self.log(f"加载节假日失败: {e}")
+        self.holidays = []
 
-    def _set_holiday_status(self, status):
-        selection = self.holiday_tree.selection()
-        if not selection:
-            messagebox.showwarning("警告", f"请先选择要{status}的节假日")
-            return
-        for item_id in selection:
-            index = self.holiday_tree.index(item_id)
-            self.holidays[index]['status'] = status
+def update_holiday_list(self):
+    if not hasattr(self, 'holiday_tree') or not self.holiday_tree.winfo_exists(): return
+    selection = self.holiday_tree.selection()
+    self.holiday_tree.delete(*self.holiday_tree.get_children())
+    for holiday in self.holidays:
+        self.holiday_tree.insert('', tk.END, values=(
+            holiday.get('name', ''),
+            holiday.get('status', '启用'),
+            holiday.get('start_datetime', ''),
+            holiday.get('end_datetime', '')
+        ))
+    if selection:
+        try:
+            valid_selection = [s for s in selection if self.holiday_tree.exists(s)]
+            if valid_selection: self.holiday_tree.selection_set(valid_selection)
+        except tk.TclError:
+            pass
+
+def add_holiday(self):
+    self.open_holiday_dialog()
+
+def edit_holiday(self):
+    selection = self.holiday_tree.selection()
+    if not selection:
+        messagebox.showwarning("警告", "请先选择要修改的节假日")
+        return
+    index = self.holiday_tree.index(selection[0])
+    holiday_to_edit = self.holidays[index]
+    self.open_holiday_dialog(holiday_to_edit=holiday_to_edit, index=index)
+
+def delete_holiday(self):
+    selections = self.holiday_tree.selection()
+    if not selections:
+        messagebox.showwarning("警告", "请先选择要删除的节假日")
+        return
+    if messagebox.askyesno("确认", f"确定要删除选中的 {len(selections)} 个节假日吗？"):
+        indices = sorted([self.holiday_tree.index(s) for s in selections], reverse=True)
+        for index in indices:
+            self.holidays.pop(index)
         self.update_holiday_list()
         self.save_holidays()
 
-    def open_holiday_dialog(self, holiday_to_edit=None, index=None):
-        dialog = tk.Toplevel(self.root)
-        dialog.title("修改节假日" if holiday_to_edit else "添加节假日")
-        dialog.geometry("500x300"); dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#F0F8FF')
-        self.center_window(dialog, 500, 300)
+def _set_holiday_status(self, status):
+    selection = self.holiday_tree.selection()
+    if not selection:
+        messagebox.showwarning("警告", f"请先选择要{status}的节假日")
+        return
+    for item_id in selection:
+        index = self.holiday_tree.index(item_id)
+        self.holidays[index]['status'] = status
+    self.update_holiday_list()
+    self.save_holidays()
 
-        font_spec = ('Microsoft YaHei', 11)
-        main_frame = tk.Frame(dialog, bg='#F0F8FF', padx=20, pady=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+def open_holiday_dialog(self, holiday_to_edit=None, index=None):
+    dialog = tk.Toplevel(self.root)
+    dialog.title("修改节假日" if holiday_to_edit else "添加节假日")
+    dialog.geometry("500x300"); dialog.resizable(False, False)
+    dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#F0F8FF')
+    self.center_window(dialog, 500, 300)
 
-        tk.Label(main_frame, text="名称:", font=font_spec, bg='#F0F8FF').grid(row=0, column=0, sticky='w', pady=5)
-        name_entry = tk.Entry(main_frame, font=font_spec, width=40)
-        name_entry.grid(row=0, column=1, columnspan=2, sticky='ew', pady=5)
+    font_spec = ('Microsoft YaHei', 11)
+    main_frame = tk.Frame(dialog, bg='#F0F8FF', padx=20, pady=20)
+    main_frame.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(main_frame, text="开始时间:", font=font_spec, bg='#F0F8FF').grid(row=1, column=0, sticky='w', pady=5)
-        start_date_entry = tk.Entry(main_frame, font=font_spec, width=15)
-        start_date_entry.grid(row=1, column=1, sticky='w', pady=5)
-        start_time_entry = tk.Entry(main_frame, font=font_spec, width=15)
-        start_time_entry.grid(row=1, column=2, sticky='w', pady=5, padx=5)
+    tk.Label(main_frame, text="名称:", font=font_spec, bg='#F0F8FF').grid(row=0, column=0, sticky='w', pady=5)
+    name_entry = tk.Entry(main_frame, font=font_spec, width=40)
+    name_entry.grid(row=0, column=1, columnspan=2, sticky='ew', pady=5)
 
-        tk.Label(main_frame, text="结束时间:", font=font_spec, bg='#F0F8FF').grid(row=2, column=0, sticky='w', pady=5)
-        end_date_entry = tk.Entry(main_frame, font=font_spec, width=15)
-        end_date_entry.grid(row=2, column=1, sticky='w', pady=5)
-        end_time_entry = tk.Entry(main_frame, font=font_spec, width=15)
-        end_time_entry.grid(row=2, column=2, sticky='w', pady=5, padx=5)
+    tk.Label(main_frame, text="开始时间:", font=font_spec, bg='#F0F8FF').grid(row=1, column=0, sticky='w', pady=5)
+    start_date_entry = tk.Entry(main_frame, font=font_spec, width=15)
+    start_date_entry.grid(row=1, column=1, sticky='w', pady=5)
+    start_time_entry = tk.Entry(main_frame, font=font_spec, width=15)
+    start_time_entry.grid(row=1, column=2, sticky='w', pady=5, padx=5)
+
+    tk.Label(main_frame, text="结束时间:", font=font_spec, bg='#F0F8FF').grid(row=2, column=0, sticky='w', pady=5)
+    end_date_entry = tk.Entry(main_frame, font=font_spec, width=15)
+    end_date_entry.grid(row=2, column=1, sticky='w', pady=5)
+    end_time_entry = tk.Entry(main_frame, font=font_spec, width=15)
+    end_time_entry.grid(row=2, column=2, sticky='w', pady=5, padx=5)
+    
+    tk.Label(main_frame, text="格式: YYYY-MM-DD", font=('Microsoft YaHei', 9), bg='#F0F8FF', fg='grey').grid(row=3, column=1, sticky='n')
+    tk.Label(main_frame, text="格式: HH:MM:SS", font=('Microsoft YaHei', 9), bg='#F0F8FF', fg='grey').grid(row=3, column=2, sticky='n')
+
+    if holiday_to_edit:
+        name_entry.insert(0, holiday_to_edit.get('name', ''))
+        start_dt_str = holiday_to_edit.get('start_datetime', ' ')
+        end_dt_str = holiday_to_edit.get('end_datetime', ' ')
+        start_date, start_time = start_dt_str.split(' ') if ' ' in start_dt_str else ('', '')
+        end_date, end_time = end_dt_str.split(' ') if ' ' in end_dt_str else ('', '')
+        start_date_entry.insert(0, start_date)
+        start_time_entry.insert(0, start_time)
+        end_date_entry.insert(0, end_date)
+        end_time_entry.insert(0, end_time)
+    else:
+        now = datetime.now()
+        start_date_entry.insert(0, now.strftime('%Y-%m-%d'))
+        start_time_entry.insert(0, "00:00:00")
+        end_date_entry.insert(0, now.strftime('%Y-%m-%d'))
+        end_time_entry.insert(0, "23:59:59")
+
+    def save():
+        name = name_entry.get().strip()
+        if not name:
+            messagebox.showerror("错误", "节假日名称不能为空", parent=dialog)
+            return
         
-        tk.Label(main_frame, text="格式: YYYY-MM-DD", font=('Microsoft YaHei', 9), bg='#F0F8FF', fg='grey').grid(row=3, column=1, sticky='n')
-        tk.Label(main_frame, text="格式: HH:MM:SS", font=('Microsoft YaHei', 9), bg='#F0F8FF', fg='grey').grid(row=3, column=2, sticky='n')
+        start_date = self._normalize_date_string(start_date_entry.get().strip())
+        start_time = self._normalize_time_string(start_time_entry.get().strip())
+        end_date = self._normalize_date_string(end_date_entry.get().strip())
+        end_time = self._normalize_time_string(end_time_entry.get().strip())
+
+        if not all([start_date, start_time, end_date, end_time]):
+            messagebox.showerror("格式错误", "日期或时间格式不正确。\n日期: YYYY-MM-DD, 时间: HH:MM:SS", parent=dialog)
+            return
+
+        try:
+            start_dt = datetime.strptime(f"{start_date} {start_time}", '%Y-%m-%d %H:%M:%S')
+            end_dt = datetime.strptime(f"{end_date} {end_time}", '%Y-%m-%d %H:%M:%S')
+            if start_dt >= end_dt:
+                messagebox.showerror("逻辑错误", "开始时间必须早于结束时间", parent=dialog)
+                return
+        except ValueError:
+            messagebox.showerror("错误", "无法解析日期时间", parent=dialog)
+            return
+
+        new_holiday_data = {
+            "name": name,
+            "start_datetime": start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+            "end_datetime": end_dt.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": "启用" if not holiday_to_edit else holiday_to_edit.get('status', '启用')
+        }
 
         if holiday_to_edit:
-            name_entry.insert(0, holiday_to_edit.get('name', ''))
-            start_dt_str = holiday_to_edit.get('start_datetime', ' ')
-            end_dt_str = holiday_to_edit.get('end_datetime', ' ')
-            start_date, start_time = start_dt_str.split(' ') if ' ' in start_dt_str else ('', '')
-            end_date, end_time = end_dt_str.split(' ') if ' ' in end_dt_str else ('', '')
-            start_date_entry.insert(0, start_date)
-            start_time_entry.insert(0, start_time)
-            end_date_entry.insert(0, end_date)
-            end_time_entry.insert(0, end_time)
+            self.holidays[index] = new_holiday_data
         else:
-            now = datetime.now()
-            start_date_entry.insert(0, now.strftime('%Y-%m-%d'))
-            start_time_entry.insert(0, "00:00:00")
-            end_date_entry.insert(0, now.strftime('%Y-%m-%d'))
-            end_time_entry.insert(0, "23:59:59")
-
-        def save():
-            name = name_entry.get().strip()
-            if not name:
-                messagebox.showerror("错误", "节假日名称不能为空", parent=dialog)
-                return
-            
-            start_date = self._normalize_date_string(start_date_entry.get().strip())
-            start_time = self._normalize_time_string(start_time_entry.get().strip())
-            end_date = self._normalize_date_string(end_date_entry.get().strip())
-            end_time = self._normalize_time_string(end_time_entry.get().strip())
-
-            if not all([start_date, start_time, end_date, end_time]):
-                messagebox.showerror("格式错误", "日期或时间格式不正确。\n日期: YYYY-MM-DD, 时间: HH:MM:SS", parent=dialog)
-                return
-
-            try:
-                start_dt = datetime.strptime(f"{start_date} {start_time}", '%Y-%m-%d %H:%M:%S')
-                end_dt = datetime.strptime(f"{end_date} {end_time}", '%Y-%m-%d %H:%M:%S')
-                if start_dt >= end_dt:
-                    messagebox.showerror("逻辑错误", "开始时间必须早于结束时间", parent=dialog)
-                    return
-            except ValueError:
-                messagebox.showerror("错误", "无法解析日期时间", parent=dialog)
-                return
-
-            new_holiday_data = {
-                "name": name,
-                "start_datetime": start_dt.strftime('%Y-%m-%d %H:%M:%S'),
-                "end_datetime": end_dt.strftime('%Y-%m-%d %H:%M:%S'),
-                "status": "启用" if not holiday_to_edit else holiday_to_edit.get('status', '启用')
-            }
-
-            if holiday_to_edit:
-                self.holidays[index] = new_holiday_data
-            else:
-                self.holidays.append(new_holiday_data)
-            
-            self.update_holiday_list()
-            self.save_holidays()
-            dialog.destroy()
-
-        button_frame = tk.Frame(main_frame, bg='#F0F8FF')
-        button_frame.grid(row=4, column=0, columnspan=3, pady=20)
-        tk.Button(button_frame, text="保存", command=save, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
-        tk.Button(button_frame, text="取消", command=dialog.destroy, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
-
-    def show_holiday_context_menu(self, event):
-        if self.is_locked: return
-        iid = self.holiday_tree.identify_row(event.y)
-        if not iid: return
-
-        context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 11))
+            self.holidays.append(new_holiday_data)
         
-        self.holiday_tree.selection_set(iid)
-        
-        context_menu.add_command(label="修改", command=self.edit_holiday)
-        context_menu.add_command(label="删除", command=self.delete_holiday)
-        context_menu.add_separator()
-        context_menu.add_command(label="置顶", command=self.move_holiday_to_top)
-        context_menu.add_command(label="上移", command=lambda: self.move_holiday(-1))
-        context_menu.add_command(label="下移", command=lambda: self.move_holiday(1))
-        context_menu.add_command(label="置末", command=self.move_holiday_to_bottom)
-        context_menu.add_separator()
-        context_menu.add_command(label="启用", command=lambda: self._set_holiday_status('启用'))
-        context_menu.add_command(label="禁用", command=lambda: self._set_holiday_status('禁用'))
-        
-        context_menu.post(event.x_root, event.y_root)
+        self.update_holiday_list()
+        self.save_holidays()
+        dialog.destroy()
 
-    def move_holiday(self, direction):
-        selection = self.holiday_tree.selection()
-        if not selection or len(selection) > 1: return
-        index = self.holiday_tree.index(selection[0])
-        new_index = index + direction
-        if 0 <= new_index < len(self.holidays):
-            item = self.holidays.pop(index)
-            self.holidays.insert(new_index, item)
-            self.update_holiday_list(); self.save_holidays()
-            new_selection_id = self.holiday_tree.get_children()[new_index]
-            self.holiday_tree.selection_set(new_selection_id)
-            self.holiday_tree.focus(new_selection_id)
+    button_frame = tk.Frame(main_frame, bg='#F0F8FF')
+    button_frame.grid(row=4, column=0, columnspan=3, pady=20)
+    tk.Button(button_frame, text="保存", command=save, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
+    tk.Button(button_frame, text="取消", command=dialog.destroy, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
 
-    def move_holiday_to_top(self):
-        selection = self.holiday_tree.selection()
-        if not selection or len(selection) > 1: return
-        index = self.holiday_tree.index(selection[0])
-        if index > 0:
-            item = self.holidays.pop(index)
-            self.holidays.insert(0, item)
-            self.update_holiday_list(); self.save_holidays()
-            new_selection_id = self.holiday_tree.get_children()[0]
-            self.holiday_tree.selection_set(new_selection_id)
-            self.holiday_tree.focus(new_selection_id)
+def show_holiday_context_menu(self, event):
+    if self.is_locked: return
+    iid = self.holiday_tree.identify_row(event.y)
+    if not iid: return
 
-    def move_holiday_to_bottom(self):
-        selection = self.holiday_tree.selection()
-        if not selection or len(selection) > 1: return
-        index = self.holiday_tree.index(selection[0])
-        if index < len(self.holidays) - 1:
-            item = self.holidays.pop(index)
-            self.holidays.append(item)
-            self.update_holiday_list(); self.save_holidays()
-            new_selection_id = self.holiday_tree.get_children()[-1]
-            self.holiday_tree.selection_set(new_selection_id)
-            self.holiday_tree.focus(new_selection_id)
-
-    def enable_all_holidays(self):
-        if not self.holidays: return
-        for holiday in self.holidays: holiday['status'] = '启用'
-        self.update_holiday_list(); self.save_holidays(); self.log("已启用全部节假日。")
-
-    def disable_all_holidays(self):
-        if not self.holidays: return
-        for holiday in self.holidays: holiday['status'] = '禁用'
-        self.update_holiday_list(); self.save_holidays(); self.log("已禁用全部节假日。")
+    context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 11))
     
-    def import_holidays(self):
-        filename = filedialog.askopenfilename(title="选择导入节假日文件", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
-        if filename:
-            try:
-                with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
-
-                if not isinstance(imported, list) or \
-                   (imported and (not isinstance(imported[0], dict) or 'start_datetime' not in imported[0] or 'end_datetime' not in imported[0])):
-                    messagebox.showerror("导入失败", "文件格式不正确，看起来不是一个有效的节假日备份文件。")
-                    self.log(f"尝试导入格式错误的节假日文件: {os.path.basename(filename)}")
-                    return
-
-                self.holidays.extend(imported)
-                self.update_holiday_list(); self.save_holidays()
-                self.log(f"已从 {os.path.basename(filename)} 导入 {len(imported)} 个节假日")
-            except Exception as e:
-                messagebox.showerror("错误", f"导入失败: {e}")
-
-    def export_holidays(self):
-        if not self.holidays:
-            messagebox.showwarning("警告", "没有节假日可以导出")
-            return
-        filename = filedialog.asksaveasfilename(title="导出节假日到...", defaultextension=".json",
-                                              initialfile="holidays_backup.json", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
-        if filename:
-            try:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    json.dump(self.holidays, f, ensure_ascii=False, indent=2)
-                self.log(f"已导出 {len(self.holidays)} 个节假日到 {os.path.basename(filename)}")
-            except Exception as e:
-                messagebox.showerror("错误", f"导出失败: {e}")
+    self.holiday_tree.selection_set(iid)
     
-    def clear_all_holidays(self):
-        if not self.holidays:
-            return
-        if messagebox.askyesno("严重警告", "您确定要清空所有节假日吗？\n此操作不可恢复！"):
-            self.holidays.clear()
-            self.update_holiday_list()
-            self.save_holidays()
-            self.log("已清空所有节假日。")
-            
-    # --- NEW & CORRECTED: 待办事项所有相关函数 ---
+    context_menu.add_command(label="修改", command=self.edit_holiday)
+    context_menu.add_command(label="删除", command=self.delete_holiday)
+    context_menu.add_separator()
+    context_menu.add_command(label="置顶", command=self.move_holiday_to_top)
+    context_menu.add_command(label="上移", command=lambda: self.move_holiday(-1))
+    context_menu.add_command(label="下移", command=lambda: self.move_holiday(1))
+    context_menu.add_command(label="置末", command=self.move_holiday_to_bottom)
+    context_menu.add_separator()
+    context_menu.add_command(label="启用", command=lambda: self._set_holiday_status('启用'))
+    context_menu.add_command(label="禁用", command=lambda: self._set_holiday_status('禁用'))
+    
+    context_menu.post(event.x_root, event.y_root)
 
-    def create_todo_page(self):
-        page_frame = tk.Frame(self.page_container, bg='white')
+def move_holiday(self, direction):
+    selection = self.holiday_tree.selection()
+    if not selection or len(selection) > 1: return
+    index = self.holiday_tree.index(selection[0])
+    new_index = index + direction
+    if 0 <= new_index < len(self.holidays):
+        item = self.holidays.pop(index)
+        self.holidays.insert(new_index, item)
+        self.update_holiday_list(); self.save_holidays()
+        new_selection_id = self.holiday_tree.get_children()[new_index]
+        self.holiday_tree.selection_set(new_selection_id)
+        self.holiday_tree.focus(new_selection_id)
 
-        top_frame = tk.Frame(page_frame, bg='white')
-        top_frame.pack(fill=tk.X, padx=10, pady=10)
-        title_label = tk.Label(top_frame, text="待办事项", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#2C5F7C')
-        title_label.pack(side=tk.LEFT)
+def move_holiday_to_top(self):
+    selection = self.holiday_tree.selection()
+    if not selection or len(selection) > 1: return
+    index = self.holiday_tree.index(selection[0])
+    if index > 0:
+        item = self.holidays.pop(index)
+        self.holidays.insert(0, item)
+        self.update_holiday_list(); self.save_holidays()
+        new_selection_id = self.holiday_tree.get_children()[0]
+        self.holiday_tree.selection_set(new_selection_id)
+        self.holiday_tree.focus(new_selection_id)
 
-        desc_label = tk.Label(page_frame, text="到达提醒时间时会弹出窗口提醒，提醒功能受节假日约束。", font=('Microsoft YaHei', 11), bg='white', fg='#555')
-        desc_label.pack(anchor='w', padx=10, pady=(0, 10))
+def move_holiday_to_bottom(self):
+    selection = self.holiday_tree.selection()
+    if not selection or len(selection) > 1: return
+    index = self.holiday_tree.index(selection[0])
+    if index < len(self.holidays) - 1:
+        item = self.holidays.pop(index)
+        self.holidays.append(item)
+        self.update_holiday_list(); self.save_holidays()
+        new_selection_id = self.holiday_tree.get_children()[-1]
+        self.holiday_tree.selection_set(new_selection_id)
+        self.holiday_tree.focus(new_selection_id)
 
-        content_frame = tk.Frame(page_frame, bg='white')
-        # <--- 修正：这行是之前遗漏的关键代码，用于显示下面的所有内容
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+def enable_all_holidays(self):
+    if not self.holidays: return
+    for holiday in self.holidays: holiday['status'] = '启用'
+    self.update_holiday_list(); self.save_holidays(); self.log("已启用全部节假日。")
 
-        table_frame = tk.Frame(content_frame, bg='white')
-        table_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+def disable_all_holidays(self):
+    if not self.holidays: return
+    for holiday in self.holidays: holiday['status'] = '禁用'
+    self.update_holiday_list(); self.save_holidays(); self.log("已禁用全部节假日。")
 
-        columns = ('待办事项名称', '状态', '内容', '提醒日期时间')
-        self.todo_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended')
-
-        self.todo_tree.heading('待办事项名称', text='待办事项名称')
-        self.todo_tree.column('待办事项名称', width=200, anchor='w')
-        self.todo_tree.heading('状态', text='状态')
-        self.todo_tree.column('状态', width=80, anchor='center')
-        self.todo_tree.heading('内容', text='内容')
-        self.todo_tree.column('内容', width=300, anchor='w')
-        self.todo_tree.heading('提醒日期时间', text='提醒日期时间')
-        self.todo_tree.column('提醒日期时间', width=250, anchor='center')
-
-        self.todo_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.todo_tree.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.todo_tree.configure(yscrollcommand=scrollbar.set)
-
-        self.todo_tree.bind("<Double-1>", lambda e: self.edit_todo())
-        self.todo_tree.bind("<Button-3>", self.show_todo_context_menu)
-        self._enable_drag_selection(self.todo_tree)
-
-        action_frame = tk.Frame(content_frame, bg='white', padx=10)
-        action_frame.pack(side=tk.RIGHT, fill=tk.Y)
-
-        btn_font = ('Microsoft YaHei', 11)
-        btn_width = 10
-        buttons_config = [
-            ("添加", self.add_todo), ("修改", self.edit_todo), ("删除", self.delete_todo),
-            (None, None),
-            ("全部启用", self.enable_all_todos), ("全部禁用", self.disable_all_todos),
-            (None, None),
-            ("导入事项", self.import_todos), ("导出事项", self.export_todos), ("清空事项", self.clear_all_todos),
-        ]
-
-        for text, cmd in buttons_config:
-            if text is None:
-                tk.Frame(action_frame, height=20, bg='white').pack()
-                continue
-            tk.Button(action_frame, text=text, command=cmd, font=btn_font, width=btn_width, pady=5).pack(pady=5)
-
-        self.update_todo_list()
-        return page_frame
-
-    def save_todos(self):
+def import_holidays(self):
+    filename = filedialog.askopenfilename(title="选择导入节假日文件", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
+    if filename:
         try:
-            with open(TODO_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.todos, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            self.log(f"保存待办事项失败: {e}")
+            with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
 
-    def load_todos(self):
-        if not os.path.exists(TODO_FILE):
-            return
+            if not isinstance(imported, list) or \
+               (imported and (not isinstance(imported[0], dict) or 'start_datetime' not in imported[0] or 'end_datetime' not in imported[0])):
+                messagebox.showerror("导入失败", "文件格式不正确，看起来不是一个有效的节假日备份文件。")
+                self.log(f"尝试导入格式错误的节假日文件: {os.path.basename(filename)}")
+                return
+
+            self.holidays.extend(imported)
+            self.update_holiday_list(); self.save_holidays()
+            self.log(f"已从 {os.path.basename(filename)} 导入 {len(imported)} 个节假日")
+        except Exception as e:
+            messagebox.showerror("错误", f"导入失败: {e}")
+
+def export_holidays(self):
+    if not self.holidays:
+        messagebox.showwarning("警告", "没有节假日可以导出")
+        return
+    filename = filedialog.asksaveasfilename(title="导出节假日到...", defaultextension=".json",
+                                          initialfile="holidays_backup.json", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
+    if filename:
         try:
-            with open(TODO_FILE, 'r', encoding='utf-8') as f:
-                self.todos = json.load(f)
-            self.log(f"已加载 {len(self.todos)} 个待办事项")
-            if hasattr(self, 'todo_tree'):
-                self.update_todo_list()
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(self.holidays, f, ensure_ascii=False, indent=2)
+            self.log(f"已导出 {len(self.holidays)} 个节假日到 {os.path.basename(filename)}")
         except Exception as e:
-            self.log(f"加载待办事项失败: {e}")
-            self.todos = []
+            messagebox.showerror("错误", f"导出失败: {e}")
 
-    def update_todo_list(self):
-        if not hasattr(self, 'todo_tree') or not self.todo_tree.winfo_exists(): return
-        selection = self.todo_tree.selection()
-        self.todo_tree.delete(*self.todo_tree.get_children())
+def clear_all_holidays(self):
+    if not self.holidays:
+        return
+    if messagebox.askyesno("严重警告", "您确定要清空所有节假日吗？\n此操作不可恢复！"):
+        self.holidays.clear()
+        self.update_holiday_list()
+        self.save_holidays()
+        self.log("已清空所有节假日。")
+        
+# =================================================================
+# ===== MODIFICATION START: 2 & 3 & 4. 待办事项相关功能重构 =====
+# =================================================================
 
-        for todo in self.todos:
-            content = todo.get('content', '').replace('\n', ' ').replace('\r', '')
-            content_preview = (content[:30] + '...') if len(content) > 30 else content
-            
-            remind_info = ""
-            if todo.get('type') == 'onetime':
-                remind_info = todo.get('remind_time', '')
-            elif todo.get('type') == 'recurring':
-                interval = todo.get('interval', 5)
-                unit = todo.get('unit', '分钟')
-                remind_info = f"每 {interval} {unit} (下次: {todo.get('next_run_time', 'N/A')})"
+def create_todo_page(self):
+    page_frame = tk.Frame(self.page_container, bg='white')
 
-            self.todo_tree.insert('', tk.END, values=(
-                todo.get('name', ''),
-                todo.get('status', '启用'),
-                content_preview,
-                remind_info
-            ))
-        if selection:
-            try:
-                valid_selection = [s for s in selection if self.todo_tree.exists(s)]
-                if valid_selection: self.todo_tree.selection_set(valid_selection)
-            except tk.TclError:
-                pass
+    top_frame = tk.Frame(page_frame, bg='white')
+    top_frame.pack(fill=tk.X, padx=10, pady=10)
+    title_label = tk.Label(top_frame, text="待办事项", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#2C5F7C')
+    title_label.pack(side=tk.LEFT)
 
-    def add_todo(self):
-        self.open_todo_dialog()
+    desc_label = tk.Label(page_frame, text="到达提醒时间时会弹出窗口提醒，提醒功能受节假日约束。", font=('Microsoft YaHei', 11), bg='white', fg='#555')
+    desc_label.pack(anchor='w', padx=10, pady=(0, 10))
 
-    def edit_todo(self):
-        selection = self.todo_tree.selection()
-        if not selection:
-            messagebox.showwarning("警告", "请先选择要修改的待办事项")
-            return
-        index = self.todo_tree.index(selection[0])
-        todo_to_edit = self.todos[index]
-        self.open_todo_dialog(todo_to_edit=todo_to_edit, index=index)
+    content_frame = tk.Frame(page_frame, bg='white')
+    content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-    def delete_todo(self):
-        selections = self.todo_tree.selection()
-        if not selections:
-            messagebox.showwarning("警告", "请先选择要删除的待办事项")
-            return
-        if messagebox.askyesno("确认", f"确定要删除选中的 {len(selections)} 个待办事项吗？"):
-            indices = sorted([self.todo_tree.index(s) for s in selections], reverse=True)
-            for index in indices:
-                self.todos.pop(index)
+    table_frame = tk.Frame(content_frame, bg='white')
+    table_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    columns = ('待办事项名称', '状态', '内容', '提醒规则')
+    self.todo_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended')
+
+    self.todo_tree.heading('待办事项名称', text='待办事项名称')
+    self.todo_tree.column('待办事项名称', width=200, anchor='w')
+    self.todo_tree.heading('状态', text='状态')
+    self.todo_tree.column('状态', width=80, anchor='center')
+    self.todo_tree.heading('内容', text='内容')
+    self.todo_tree.column('内容', width=300, anchor='w')
+    self.todo_tree.heading('提醒规则', text='提醒规则')
+    self.todo_tree.column('提醒规则', width=350, anchor='center')
+
+    self.todo_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.todo_tree.yview)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    self.todo_tree.configure(yscrollcommand=scrollbar.set)
+
+    self.todo_tree.bind("<Double-1>", lambda e: self.edit_todo())
+    self.todo_tree.bind("<Button-3>", self.show_todo_context_menu)
+    self._enable_drag_selection(self.todo_tree)
+
+    action_frame = tk.Frame(content_frame, bg='white', padx=10)
+    action_frame.pack(side=tk.RIGHT, fill=tk.Y)
+
+    btn_font = ('Microsoft YaHei', 11)
+    btn_width = 10
+    buttons_config = [
+        ("添加", self.add_todo), ("修改", self.edit_todo), ("删除", self.delete_todo),
+        (None, None),
+        ("全部启用", self.enable_all_todos), ("全部禁用", self.disable_all_todos),
+        (None, None),
+        ("导入事项", self.import_todos), ("导出事项", self.export_todos), ("清空事项", self.clear_all_todos),
+    ]
+
+    for text, cmd in buttons_config:
+        if text is None:
+            tk.Frame(action_frame, height=20, bg='white').pack()
+            continue
+        tk.Button(action_frame, text=text, command=cmd, font=btn_font, width=btn_width, pady=5).pack(pady=5)
+
+    self.update_todo_list()
+    return page_frame
+
+def save_todos(self):
+    try:
+        with open(TODO_FILE, 'w', encoding='utf-8') as f:
+            json.dump(self.todos, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        self.log(f"保存待办事项失败: {e}")
+
+def load_todos(self):
+    if not os.path.exists(TODO_FILE):
+        return
+    try:
+        with open(TODO_FILE, 'r', encoding='utf-8') as f:
+            self.todos = json.load(f)
+        self.log(f"已加载 {len(self.todos)} 个待办事项")
+        if hasattr(self, 'todo_tree'):
             self.update_todo_list()
-            self.save_todos()
+    except Exception as e:
+        self.log(f"加载待办事项失败: {e}")
+        self.todos = []
 
-    def _set_todo_status(self, status):
-        selection = self.todo_tree.selection()
-        if not selection:
-            messagebox.showwarning("警告", f"请先选择要{status}的待办事项")
-            return
-        for item_id in selection:
-            index = self.todo_tree.index(item_id)
-            self.todos[index]['status'] = status
+def update_todo_list(self):
+    if not hasattr(self, 'todo_tree') or not self.todo_tree.winfo_exists(): return
+    selection = self.todo_tree.selection()
+    self.todo_tree.delete(*self.todo_tree.get_children())
+
+    for todo in self.todos:
+        content = todo.get('content', '').replace('\n', ' ').replace('\r', '')
+        content_preview = (content[:30] + '...') if len(content) > 30 else content
+        
+        remind_info = ""
+        if todo.get('type') == 'onetime':
+            remind_info = f"在 {todo.get('remind_time', '')} 提醒"
+        elif todo.get('type') == 'recurring':
+            interval = todo.get('interval', 5)
+            weekday_rule = todo.get('weekday_rule', '')
+            date_range = todo.get('date_range_rule', '')
+            remind_info = f"每 {interval} 分钟; {weekday_rule}; {date_range} (下次: {todo.get('next_run_time', 'N/A')})"
+
+        self.todo_tree.insert('', tk.END, values=(
+            todo.get('name', ''),
+            todo.get('status', '启用'),
+            content_preview,
+            remind_info
+        ))
+    if selection:
+        try:
+            valid_selection = [s for s in selection if self.todo_tree.exists(s)]
+            if valid_selection: self.todo_tree.selection_set(valid_selection)
+        except tk.TclError:
+            pass
+
+def add_todo(self):
+    self.open_todo_dialog()
+
+def edit_todo(self):
+    selection = self.todo_tree.selection()
+    if not selection:
+        messagebox.showwarning("警告", "请先选择要修改的待办事项")
+        return
+    index = self.todo_tree.index(selection[0])
+    todo_to_edit = self.todos[index]
+    self.open_todo_dialog(todo_to_edit=todo_to_edit, index=index)
+
+def delete_todo(self):
+    selections = self.todo_tree.selection()
+    if not selections:
+        messagebox.showwarning("警告", "请先选择要删除的待办事项")
+        return
+    if messagebox.askyesno("确认", f"确定要删除选中的 {len(selections)} 个待办事项吗？"):
+        indices = sorted([self.todo_tree.index(s) for s in selections], reverse=True)
+        for index in indices:
+            self.todos.pop(index)
         self.update_todo_list()
         self.save_todos()
 
-    def open_todo_dialog(self, todo_to_edit=None, index=None):
-        dialog = tk.Toplevel(self.root)
-        dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
-        dialog.geometry("600x450")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.grab_set()
-        dialog.configure(bg='#F0F8FF')
-        self.center_window(dialog, 600, 450)
+def _set_todo_status(self, status):
+    selection = self.todo_tree.selection()
+    if not selection:
+        messagebox.showwarning("警告", f"请先选择要{status}的待办事项")
+        return
+    for item_id in selection:
+        index = self.todo_tree.index(item_id)
+        self.todos[index]['status'] = status
+    self.update_todo_list()
+    self.save_todos()
 
-        font_spec = ('Microsoft YaHei', 11)
-        main_frame = tk.Frame(dialog, bg='#F0F8FF', padx=20, pady=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+def open_todo_dialog(self, todo_to_edit=None, index=None):
+    dialog = tk.Toplevel(self.root)
+    dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
+    dialog.geometry("600x550")
+    dialog.resizable(False, False)
+    dialog.transient(self.root)
+    dialog.grab_set()
+    dialog.configure(bg='#F0F8FF')
+    self.center_window(dialog, 600, 550)
 
-        tk.Label(main_frame, text="名称:", font=font_spec, bg='#F0F8FF').grid(row=0, column=0, sticky='w', pady=5)
-        name_entry = tk.Entry(main_frame, font=font_spec, width=50)
-        name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', pady=5)
+    font_spec = ('Microsoft YaHei', 11)
+    main_frame = tk.Frame(dialog, bg='#F0F8FF', padx=20, pady=20)
+    main_frame.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(main_frame, text="内容:", font=font_spec, bg='#F0F8FF').grid(row=1, column=0, sticky='nw', pady=5)
-        content_text = scrolledtext.ScrolledText(main_frame, height=5, font=font_spec, width=50, wrap=tk.WORD)
-        content_text.grid(row=1, column=1, columnspan=3, sticky='ew', pady=5)
+    tk.Label(main_frame, text="名称:", font=font_spec, bg='#F0F8FF').grid(row=0, column=0, sticky='w', pady=5)
+    name_entry = tk.Entry(main_frame, font=font_spec, width=50)
+    name_entry.grid(row=0, column=1, sticky='ew', pady=5)
+
+    tk.Label(main_frame, text="内容:", font=font_spec, bg='#F0F8FF').grid(row=1, column=0, sticky='nw', pady=5)
+    content_text = scrolledtext.ScrolledText(main_frame, height=5, font=font_spec, width=50, wrap=tk.WORD)
+    content_text.grid(row=1, column=1, sticky='ew', pady=5)
+    
+    type_var = tk.StringVar(value="onetime")
+    
+    task_type_frame = tk.LabelFrame(main_frame, text="提醒类型", font=font_spec, bg='#F0F8FF', padx=10, pady=10)
+    task_type_frame.grid(row=2, column=0, columnspan=2, sticky='ew', pady=10)
+    
+    onetime_frame = tk.Frame(task_type_frame, bg='#F0F8FF')
+    recurring_frame = tk.Frame(task_type_frame, bg='#F0F8FF')
+
+    def toggle_frames(*args):
+        is_onetime = type_var.get() == 'onetime'
+        for widget in onetime_frame.winfo_children():
+            if not isinstance(widget, tk.Radiobutton):
+                try: widget.configure(state=tk.NORMAL if is_onetime else tk.DISABLED)
+                except tk.TclError: pass
+        for widget in recurring_frame.winfo_children():
+            if not isinstance(widget, tk.Radiobutton):
+                try: widget.configure(state=tk.DISABLED if is_onetime else tk.NORMAL)
+                except tk.TclError: pass
+
+    type_var.trace_add("write", toggle_frames)
+    
+    rb1 = tk.Radiobutton(onetime_frame, text="一次性任务", variable=type_var, value="onetime", bg='#F0F8FF', font=font_spec)
+    rb1.grid(row=0, column=0, sticky='w', columnspan=3)
+    tk.Label(onetime_frame, text="提醒时间:", font=font_spec, bg='#F0F8FF').grid(row=1, column=0, sticky='e', padx=5, pady=5)
+    onetime_date_entry = tk.Entry(onetime_frame, font=font_spec, width=15)
+    onetime_date_entry.grid(row=1, column=1, padx=5, pady=5)
+    onetime_time_entry = tk.Entry(onetime_frame, font=font_spec, width=15)
+    onetime_time_entry.grid(row=1, column=2, padx=5, pady=5)
+    onetime_frame.pack(fill=tk.X)
+
+    ttk.Separator(task_type_frame, orient='horizontal').pack(fill=tk.X, pady=10)
+
+    rb2 = tk.Radiobutton(recurring_frame, text="循环任务", variable=type_var, value="recurring", bg='#F0F8FF', font=font_spec)
+    rb2.grid(row=0, column=0, sticky='w', columnspan=3)
+    
+    tk.Label(recurring_frame, text="循环间隔:", font=font_spec, bg='#F0F8FF').grid(row=1, column=0, sticky='e', padx=5, pady=5)
+    interval_entry = tk.Entry(recurring_frame, font=font_spec, width=8)
+    interval_entry.grid(row=1, column=1, padx=5, pady=5, sticky='w')
+    tk.Label(recurring_frame, text="分钟", font=font_spec, bg='#F0F8FF').grid(row=1, column=2, sticky='w')
+
+    tk.Label(recurring_frame, text="周几/几号:", font=font_spec, bg='#F0F8FF').grid(row=2, column=0, sticky='e', padx=5, pady=5)
+    weekday_entry = tk.Entry(recurring_frame, font=font_spec, width=30)
+    weekday_entry.grid(row=2, column=1, columnspan=2, sticky='ew', padx=5, pady=5)
+    tk.Button(recurring_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), font=font_spec).grid(row=2, column=3, padx=5)
+
+    tk.Label(recurring_frame, text="日期范围:", font=font_spec, bg='#F0F8FF').grid(row=3, column=0, sticky='e', padx=5, pady=5)
+    date_range_entry = tk.Entry(recurring_frame, font=font_spec, width=30)
+    date_range_entry.grid(row=3, column=1, columnspan=2, sticky='ew', padx=5, pady=5)
+    tk.Button(recurring_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), font=font_spec).grid(row=3, column=3, padx=5)
+    recurring_frame.pack(fill=tk.X, pady=(5,0))
+
+    now = datetime.now()
+    if todo_to_edit:
+        name_entry.insert(0, todo_to_edit.get('name', ''))
+        content_text.insert('1.0', todo_to_edit.get('content', ''))
+        task_type = todo_to_edit.get('type', 'onetime')
+        type_var.set(task_type)
+
+        dt_str = todo_to_edit.get('remind_time', now.strftime('%Y-%m-%d %H:%M:%S'))
+        d, t = dt_str.split(' ') if ' ' in dt_str else (now.strftime('%Y-%m-%d'), (now + timedelta(minutes=5)).strftime('%H:%M:%S'))
+        onetime_date_entry.insert(0, d)
+        onetime_time_entry.insert(0, t)
+
+        interval_entry.insert(0, todo_to_edit.get('interval', '5'))
+        weekday_entry.insert(0, todo_to_edit.get('weekday_rule', '每周:1234567'))
+        date_range_entry.insert(0, todo_to_edit.get('date_range_rule', '2000-01-01 ~ 2099-12-31'))
+    else:
+        onetime_date_entry.insert(0, now.strftime('%Y-%m-%d'))
+        onetime_time_entry.insert(0, (now + timedelta(minutes=5)).strftime('%H:%M:%S'))
+        interval_entry.insert(0, "5")
+        weekday_entry.insert(0, "每周:1234567")
+        date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
+    
+    toggle_frames()
+
+    def save():
+        name = name_entry.get().strip()
+        if not name:
+            messagebox.showerror("错误", "待办事项名称不能为空", parent=dialog)
+            return
         
-        tk.Label(main_frame, text="提醒类型:", font=font_spec, bg='#F0F8FF').grid(row=2, column=0, sticky='w', pady=10)
-        
-        type_var = tk.StringVar(value="onetime")
-        
-        onetime_frame = tk.Frame(main_frame, bg='#F0F8FF')
-        onetime_frame.grid(row=3, column=1, columnspan=3, sticky='w')
-        recurring_frame = tk.Frame(main_frame, bg='#F0F8FF')
-        recurring_frame.grid(row=4, column=1, columnspan=3, sticky='w')
+        new_todo_data = {
+            "name": name,
+            "content": content_text.get('1.0', tk.END).strip(),
+            "type": type_var.get(),
+            "status": "启用" if not todo_to_edit else todo_to_edit.get('status', '启用')
+        }
 
-        def toggle_frames():
-            if type_var.get() == 'onetime':
-                for widget in recurring_frame.winfo_children(): widget.configure(state=tk.DISABLED)
-                for widget in onetime_frame.winfo_children(): widget.configure(state=tk.NORMAL)
-            else:
-                for widget in onetime_frame.winfo_children(): widget.configure(state=tk.DISABLED)
-                for widget in recurring_frame.winfo_children(): widget.configure(state=tk.NORMAL)
-        
-        tk.Radiobutton(main_frame, text="一次性任务", variable=type_var, value="onetime", bg='#F0F8FF', font=font_spec, command=toggle_frames).grid(row=2, column=1, sticky='w')
-        tk.Radiobutton(main_frame, text="循环任务", variable=type_var, value="recurring", bg='#F0F8FF', font=font_spec, command=toggle_frames).grid(row=2, column=2, sticky='w')
-
-        # 一次性任务控件
-        tk.Label(onetime_frame, text="提醒时间:", font=font_spec, bg='#F0F8FF').pack(side=tk.LEFT)
-        onetime_date_entry = tk.Entry(onetime_frame, font=font_spec, width=15)
-        onetime_date_entry.pack(side=tk.LEFT, padx=5)
-        onetime_time_entry = tk.Entry(onetime_frame, font=font_spec, width=15)
-        onetime_time_entry.pack(side=tk.LEFT, padx=5)
-
-        # 循环任务控件
-        tk.Label(recurring_frame, text="每隔", font=font_spec, bg='#F0F8FF').pack(side=tk.LEFT)
-        recurring_interval_entry = tk.Entry(recurring_frame, font=font_spec, width=5)
-        recurring_interval_entry.pack(side=tk.LEFT, padx=5)
-        recurring_unit_var = tk.StringVar(value="分钟")
-        unit_combo = ttk.Combobox(recurring_frame, textvariable=recurring_unit_var, values=["分钟", "小时", "天", "周"], font=font_spec, width=6, state='readonly')
-        unit_combo.pack(side=tk.LEFT, padx=5)
-        tk.Label(recurring_frame, text="提醒一次, 从", font=font_spec, bg='#F0F8FF').pack(side=tk.LEFT)
-        recurring_start_time_entry = tk.Entry(recurring_frame, font=font_spec, width=15)
-        recurring_start_time_entry.pack(side=tk.LEFT, padx=5)
-
-        # 加载数据
-        now = datetime.now()
-        if todo_to_edit:
-            name_entry.insert(0, todo_to_edit.get('name', ''))
-            content_text.insert('1.0', todo_to_edit.get('content', ''))
-            type_var.set(todo_to_edit.get('type', 'onetime'))
-
-            if todo_to_edit.get('type') == 'onetime':
-                dt_str = todo_to_edit.get('remind_time', now.strftime('%Y-%m-%d %H:%M:%S'))
-                d, t = dt_str.split(' ') if ' ' in dt_str else ('', '')
-                onetime_date_entry.insert(0, d)
-                onetime_time_entry.insert(0, t)
-            else: # recurring
-                recurring_interval_entry.insert(0, todo_to_edit.get('interval', '5'))
-                recurring_unit_var.set(todo_to_edit.get('unit', '分钟'))
-                next_run_str = todo_to_edit.get('next_run_time', now.strftime('%Y-%m-%d %H:%M:%S'))
-                recurring_start_time_entry.insert(0, next_run_str)
-        else:
-            onetime_date_entry.insert(0, now.strftime('%Y-%m-%d'))
-            onetime_time_entry.insert(0, (now + timedelta(minutes=5)).strftime('%H:%M:%S'))
-            recurring_interval_entry.insert(0, "5")
-            recurring_start_time_entry.insert(0, (now + timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S'))
-        
-        toggle_frames()
-
-        def save():
-            name = name_entry.get().strip()
-            if not name:
-                messagebox.showerror("错误", "待办事项名称不能为空", parent=dialog)
+        if new_todo_data['type'] == 'onetime':
+            date_str = self._normalize_date_string(onetime_date_entry.get().strip())
+            time_str = self._normalize_time_string(onetime_time_entry.get().strip())
+            if not date_str or not time_str:
+                messagebox.showerror("格式错误", "一次性任务的日期或时间格式不正确。", parent=dialog)
+                return
+            new_todo_data['remind_time'] = f"{date_str} {time_str}"
+        else: 
+            try:
+                interval = int(interval_entry.get().strip())
+                if interval <= 0: raise ValueError
+            except ValueError:
+                messagebox.showerror("格式错误", "循环间隔必须是一个正整数。", parent=dialog)
                 return
             
-            new_todo_data = {
-                "name": name,
-                "content": content_text.get('1.0', tk.END).strip(),
-                "type": type_var.get(),
-                "status": "启用" if not todo_to_edit else todo_to_edit.get('status', '启用')
-            }
+            is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
+            if not is_valid_date:
+                messagebox.showwarning("格式错误", date_msg, parent=dialog)
+                return
 
-            if new_todo_data['type'] == 'onetime':
-                date_str = self._normalize_date_string(onetime_date_entry.get().strip())
-                time_str = self._normalize_time_string(onetime_time_entry.get().strip())
-                if not date_str or not time_str:
-                    messagebox.showerror("格式错误", "一次性任务的日期或时间格式不正确。", parent=dialog)
-                    return
-                new_todo_data['remind_time'] = f"{date_str} {time_str}"
-            else: # recurring
-                try:
-                    interval = int(recurring_interval_entry.get().strip())
-                    if interval <= 0: raise ValueError
-                except ValueError:
-                    messagebox.showerror("格式错误", "循环间隔必须是一个正整数。", parent=dialog)
-                    return
-                
-                try:
-                    start_dt = datetime.strptime(recurring_start_time_entry.get().strip(), '%Y-%m-%d %H:%M:%S')
-                except ValueError:
-                    messagebox.showerror("格式错误", "循环任务的起始时间格式不正确 (YYYY-MM-DD HH:MM:SS)。", parent=dialog)
-                    return
-                
-                new_todo_data['interval'] = interval
-                new_todo_data['unit'] = recurring_unit_var.get()
-                new_todo_data['next_run_time'] = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-
-            if todo_to_edit:
-                self.todos[index] = new_todo_data
-            else:
-                self.todos.append(new_todo_data)
+            new_todo_data['interval'] = interval
+            new_todo_data['weekday_rule'] = weekday_entry.get().strip()
+            new_todo_data['date_range_rule'] = date_msg
             
-            self.update_todo_list()
-            self.save_todos()
-            dialog.destroy()
+            if not todo_to_edit or todo_to_edit.get('type') != 'recurring':
+                new_todo_data['next_run_time'] = (datetime.now() + timedelta(minutes=1)).strftime('%Y-%m-%d %H:%M:00')
+            else:
+                new_todo_data['next_run_time'] = todo_to_edit.get('next_run_time', (datetime.now() + timedelta(minutes=interval)).strftime('%Y-%m-%d %H:%M:%S'))
 
-        button_frame = tk.Frame(main_frame, bg='#F0F8FF')
-        button_frame.grid(row=5, column=0, columnspan=4, pady=20)
-        tk.Button(button_frame, text="保存", command=save, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
-        tk.Button(button_frame, text="取消", command=dialog.destroy, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
-    
-    def show_todo_context_menu(self, event):
-        if self.is_locked: return
-        iid = self.todo_tree.identify_row(event.y)
-        if not iid: return
 
-        context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 11))
+        if todo_to_edit:
+            self.todos[index] = new_todo_data
+        else:
+            self.todos.append(new_todo_data)
         
+        self.update_todo_list()
+        self.save_todos()
+        dialog.destroy()
+
+    button_frame = tk.Frame(main_frame, bg='#F0F8FF')
+    button_frame.grid(row=3, column=0, columnspan=2, pady=20)
+    tk.Button(button_frame, text="保存", command=save, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
+    tk.Button(button_frame, text="取消", command=dialog.destroy, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
+
+def show_todo_context_menu(self, event):
+    if self.is_locked: return
+    iid = self.todo_tree.identify_row(event.y)
+    if not iid: return
+
+    context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 11))
+    
+    if iid not in self.todo_tree.selection():
         self.todo_tree.selection_set(iid)
-        
-        context_menu.add_command(label="修改", command=self.edit_todo)
-        context_menu.add_command(label="删除", command=self.delete_todo)
-        context_menu.add_separator()
-        context_menu.add_command(label="置顶", command=self.move_todo_to_top)
-        context_menu.add_command(label="上移", command=lambda: self.move_todo(-1))
-        context_menu.add_command(label="下移", command=lambda: self.move_todo(1))
-        context_menu.add_command(label="置末", command=self.move_todo_to_bottom)
-        context_menu.add_separator()
-        context_menu.add_command(label="启用", command=lambda: self._set_todo_status('启用'))
-        context_menu.add_command(label="禁用", command=lambda: self._set_todo_status('禁用'))
-        
-        context_menu.post(event.x_root, event.y_root)
-
-    def move_todo(self, direction):
-        selection = self.todo_tree.selection()
-        if not selection or len(selection) > 1: return
-        index = self.todo_tree.index(selection[0])
-        new_index = index + direction
-        if 0 <= new_index < len(self.todos):
-            item = self.todos.pop(index)
-            self.todos.insert(new_index, item)
-            self.update_todo_list(); self.save_todos()
-            new_selection_id = self.todo_tree.get_children()[new_index]
-            self.todo_tree.selection_set(new_selection_id)
-            self.todo_tree.focus(new_selection_id)
-
-    def move_todo_to_top(self):
-        selection = self.todo_tree.selection()
-        if not selection or len(selection) > 1: return
-        index = self.todo_tree.index(selection[0])
-        if index > 0:
-            item = self.todos.pop(index)
-            self.todos.insert(0, item)
-            self.update_todo_list(); self.save_todos()
-            new_selection_id = self.todo_tree.get_children()[0]
-            self.todo_tree.selection_set(new_selection_id)
-            self.todo_tree.focus(new_selection_id)
-
-    def move_todo_to_bottom(self):
-        selection = self.todo_tree.selection()
-        if not selection or len(selection) > 1: return
-        index = self.todo_tree.index(selection[0])
-        if index < len(self.todos) - 1:
-            item = self.todos.pop(index)
-            self.todos.append(item)
-            self.update_todo_list(); self.save_todos()
-            new_selection_id = self.todo_tree.get_children()[-1]
-            self.todo_tree.selection_set(new_selection_id)
-            self.todo_tree.focus(new_selection_id)
-
-    def enable_all_todos(self):
-        if not self.todos: return
-        for todo in self.todos: todo['status'] = '启用'
-        self.update_todo_list(); self.save_todos(); self.log("已启用全部待办事项。")
-
-    def disable_all_todos(self):
-        if not self.todos: return
-        for todo in self.todos: todo['status'] = '禁用'
-        self.update_todo_list(); self.save_todos(); self.log("已禁用全部待办事项。")
-
-    def import_todos(self):
-        filename = filedialog.askopenfilename(title="选择导入待办事项文件", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
-        if filename:
-            try:
-                with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
-
-                if not isinstance(imported, list) or \
-                   (imported and (not isinstance(imported[0], dict) or 'name' not in imported[0] or 'type' not in imported[0])):
-                    messagebox.showerror("导入失败", "文件格式不正确，看起来不是一个有效的待办事项备份文件。")
-                    return
-
-                self.todos.extend(imported)
-                self.update_todo_list(); self.save_todos()
-                self.log(f"已从 {os.path.basename(filename)} 导入 {len(imported)} 个待办事项")
-            except Exception as e:
-                messagebox.showerror("错误", f"导入失败: {e}")
-
-    def export_todos(self):
-        if not self.todos:
-            messagebox.showwarning("警告", "没有待办事项可以导出")
-            return
-        filename = filedialog.asksaveasfilename(title="导出待办事项到...", defaultextension=".json",
-                                              initialfile="todos_backup.json", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
-        if filename:
-            try:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    json.dump(self.todos, f, ensure_ascii=False, indent=2)
-                self.log(f"已导出 {len(self.todos)} 个待办事项到 {os.path.basename(filename)}")
-            except Exception as e:
-                messagebox.showerror("错误", f"导出失败: {e}")
     
-    def clear_all_todos(self):
-        if not self.todos: return
-        if messagebox.askyesno("严重警告", "您确定要清空所有待办事项吗？\n此操作不可恢复！"):
-            self.todos.clear()
-            self.update_todo_list()
-            self.save_todos()
-            self.log("已清空所有待办事项。")
+    context_menu.add_command(label="修改", command=self.edit_todo)
+    context_menu.add_command(label="删除", command=self.delete_todo)
+    context_menu.add_separator()
+    context_menu.add_command(label="置顶", command=self.move_todo_to_top)
+    context_menu.add_command(label="上移", command=lambda: self.move_todo(-1))
+    context_menu.add_command(label="下移", command=lambda: self.move_todo(1))
+    context_menu.add_command(label="置末", command=self.move_todo_to_bottom)
+    context_menu.add_separator()
+    context_menu.add_command(label="启用", command=lambda: self._set_todo_status('启用'))
+    context_menu.add_command(label="禁用", command=lambda: self._set_todo_status('禁用'))
+    
+    context_menu.post(event.x_root, event.y_root)
 
-    def _check_todo_tasks(self, now):
-        is_holiday_now = self._is_in_holiday(now)
-        if is_holiday_now:
-            return
+def move_todo(self, direction):
+    selection = self.todo_tree.selection()
+    if not selection or len(selection) > 1: return
+    index = self.todo_tree.index(selection[0])
+    new_index = index + direction
+    if 0 <= new_index < len(self.todos):
+        item = self.todos.pop(index)
+        self.todos.insert(new_index, item)
+        self.update_todo_list(); self.save_todos()
+        new_selection_id = self.todo_tree.get_children()[new_index]
+        self.todo_tree.selection_set(new_selection_id)
+        self.todo_tree.focus(new_selection_id)
 
-        now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+def move_todo_to_top(self):
+    selection = self.todo_tree.selection()
+    if not selection or len(selection) > 1: return
+    index = self.todo_tree.index(selection[0])
+    if index > 0:
+        item = self.todos.pop(index)
+        self.todos.insert(0, item)
+        self.update_todo_list(); self.save_todos()
+        new_selection_id = self.todo_tree.get_children()[0]
+        self.todo_tree.selection_set(new_selection_id)
+        self.todo_tree.focus(new_selection_id)
 
-        for index, todo in enumerate(self.todos):
-            if todo.get('status') != '启用':
+def move_todo_to_bottom(self):
+    selection = self.todo_tree.selection()
+    if not selection or len(selection) > 1: return
+    index = self.todo_tree.index(selection[0])
+    if index < len(self.todos) - 1:
+        item = self.todos.pop(index)
+        self.todos.append(item)
+        self.update_todo_list(); self.save_todos()
+        new_selection_id = self.todo_tree.get_children()[-1]
+        self.todo_tree.selection_set(new_selection_id)
+        self.todo_tree.focus(new_selection_id)
+
+def enable_all_todos(self):
+    if not self.todos: return
+    for todo in self.todos: todo['status'] = '启用'
+    self.update_todo_list(); self.save_todos(); self.log("已启用全部待办事项。")
+
+def disable_all_todos(self):
+    if not self.todos: return
+    for todo in self.todos: todo['status'] = '禁用'
+    self.update_todo_list(); self.save_todos(); self.log("已禁用全部待办事项。")
+
+def import_todos(self):
+    filename = filedialog.askopenfilename(title="选择导入待办事项文件", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
+    if filename:
+        try:
+            with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
+
+            if not isinstance(imported, list) or \
+               (imported and (not isinstance(imported[0], dict) or 'name' not in imported[0] or 'type' not in imported[0])):
+                messagebox.showerror("导入失败", "文件格式不正确，看起来不是一个有效的待办事项备份文件。")
+                return
+
+            self.todos.extend(imported)
+            self.update_todo_list(); self.save_todos()
+            self.log(f"已从 {os.path.basename(filename)} 导入 {len(imported)} 个待办事项")
+        except Exception as e:
+            messagebox.showerror("错误", f"导入失败: {e}")
+
+def export_todos(self):
+    if not self.todos:
+        messagebox.showwarning("警告", "没有待办事项可以导出")
+        return
+    filename = filedialog.asksaveasfilename(title="导出待办事项到...", defaultextension=".json",
+                                          initialfile="todos_backup.json", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
+    if filename:
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(self.todos, f, ensure_ascii=False, indent=2)
+            self.log(f"已导出 {len(self.todos)} 个待办事项到 {os.path.basename(filename)}")
+        except Exception as e:
+            messagebox.showerror("错误", f"导出失败: {e}")
+
+def clear_all_todos(self):
+    if not self.todos: return
+    if messagebox.askyesno("严重警告", "您确定要清空所有待办事项吗？\n此操作不可恢复！"):
+        self.todos.clear()
+        self.update_todo_list()
+        self.save_todos()
+        self.log("已清空所有待办事项。")
+
+def _check_todo_tasks(self, now):
+    is_holiday_now = self._is_in_holiday(now)
+    if is_holiday_now:
+        return
+
+    now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+
+    for index, todo in enumerate(list(self.todos)): # 使用副本进行迭代
+        if todo.get('status') != '启用':
+            continue
+
+        if todo.get('type') == 'onetime':
+            if todo.get('remind_time') == now_str:
+                self.log(f"触发一次性待办事项: {todo['name']}")
+                self.root.after(0, self.show_todo_reminder, todo, index)
+                todo['status'] = '禁用' # 标记为禁用
+                self.save_todos()
+                self.root.after(100, self.update_todo_list)
+
+        elif todo.get('type') == 'recurring':
+            try:
+                start_str, end_str = [d.strip() for d in todo.get('date_range_rule', '').split('~')]
+                if not (datetime.strptime(start_str, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end_str, "%Y-%m-%d").date()):
+                    continue
+            except (ValueError, IndexError):
+                pass
+            
+            schedule = todo.get('weekday_rule', '每周:1234567')
+            run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or \
+                        (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
+            if not run_today:
                 continue
 
-            if todo.get('type') == 'onetime':
-                if todo.get('remind_time') == now_str:
-                    self.log(f"触发一次性待办事项: {todo['name']}")
+            next_run_str = todo.get('next_run_time')
+            if not next_run_str: continue
+
+            try:
+                next_run_dt = datetime.strptime(next_run_str, '%Y-%m-%d %H:%M:%S')
+                if now >= next_run_dt:
+                    self.log(f"触发循环待办事项: {todo['name']}")
                     self.root.after(0, self.show_todo_reminder, todo, index)
-                    todo['status'] = '禁用'
+                    
+                    interval = int(todo.get('interval', 5))
+                    delta = timedelta(minutes=interval)
+                    
+                    # 从当前时间计算下一次提醒时间
+                    new_next_run_dt = now + delta
+                    todo['next_run_time'] = new_next_run_dt.strftime('%Y-%m-%d %H:%M:%S')
                     self.save_todos()
                     self.root.after(100, self.update_todo_list)
 
-            elif todo.get('type') == 'recurring':
-                next_run_str = todo.get('next_run_time')
-                if not next_run_str: continue
-
-                try:
-                    next_run_dt = datetime.strptime(next_run_str, '%Y-%m-%d %H:%M:%S')
-                    if now >= next_run_dt:
-                        self.log(f"触发循环待办事项: {todo['name']}")
-                        self.root.after(0, self.show_todo_reminder, todo, index)
-                        
-                        unit = todo.get('unit', '分钟')
-                        interval = int(todo.get('interval', 5))
-                        delta = None
-                        if unit == '分钟': delta = timedelta(minutes=interval)
-                        elif unit == '小时': delta = timedelta(hours=interval)
-                        elif unit == '天': delta = timedelta(days=interval)
-                        elif unit == '周': delta = timedelta(weeks=interval)
-                        
-                        if delta:
-                            new_next_run_dt = now + delta
-                            todo['next_run_time'] = new_next_run_dt.strftime('%Y-%m-%d %H:%M:%S')
-                            self.save_todos()
-                            self.root.after(100, self.update_todo_list)
-
-                except ValueError:
-                    self.log(f"待办事项 '{todo['name']}' 的下次运行时间格式错误。")
-                    continue
-    
+            except ValueError:
+                self.log(f"待办事项 '{todo['name']}' 的下次运行时间格式错误。")
+                continue
+# --- 第四部分开始 ---
     def show_todo_reminder(self, todo, index):
         reminder_win = tk.Toplevel(self.root)
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
+        reminder_win.attributes("-topmost", True)
         reminder_win.geometry("480x320")
         reminder_win.resizable(False, False)
         reminder_win.transient(self.root)
         reminder_win.grab_set()
         self.center_window(reminder_win, 480, 320)
         reminder_win.configure(bg='#FFFFE0')
+
+        # 确保窗口能立即获得焦点
+        reminder_win.focus_force()
+        self.root.bell() # 发出提示音
 
         title_label = tk.Label(reminder_win, text=todo.get('name', '无标题'), font=('Microsoft YaHei', 14, 'bold'), bg='#FFFFE0', wraplength=460)
         title_label.pack(pady=(15, 10))
@@ -3867,39 +3888,64 @@ class TimedBroadcastApp:
         btn_frame.pack(pady=15)
         font_spec = ('Microsoft YaHei', 11)
 
-        def _handle_complete():
-            self.todos[index]['status'] = '禁用'
-            self.save_todos()
-            self.update_todo_list()
-            self.log(f"待办事项 '{todo['name']}' 已标记为完成。")
-            reminder_win.destroy()
-
-        def _handle_snooze():
-            minutes = simpledialog.askinteger("稍后提醒", "您想在多少分钟后再次提醒？ (1-60)", parent=reminder_win, minvalue=1, maxvalue=60, initialvalue=5)
-            if minutes:
-                new_remind_time = datetime.now() + timedelta(minutes=minutes)
-                self.todos[index]['remind_time'] = new_remind_time.strftime('%Y-%m-%d %H:%M:%S')
-                self.todos[index]['status'] = '启用' # 重新启用
-                self.save_todos()
-                self.update_todo_list()
-                self.log(f"待办事项 '{todo['name']}' 已推迟 {minutes} 分钟。")
-            reminder_win.destroy()
-
         def _handle_delete():
             if messagebox.askyesno("确认删除", f"您确定要永久删除待办事项“{todo['name']}”吗？\n此操作不可恢复。", parent=reminder_win):
-                self.todos.pop(index)
-                self.save_todos()
-                self.update_todo_list()
-                self.log(f"已删除待办事项: {todo['name']}")
+                try:
+                    # 通过内容和名称在当前列表中查找任务以安全删除
+                    current_index = -1
+                    for i, t in enumerate(self.todos):
+                        if t.get('name') == todo.get('name') and t.get('content') == todo.get('content') and t.get('type') == todo.get('type'):
+                            current_index = i
+                            break
+                    if current_index != -1:
+                        self.todos.pop(current_index)
+                        self.save_todos()
+                        self.update_todo_list()
+                        self.log(f"已删除待办事项: {todo['name']}")
+                    else:
+                         self.log(f"删除失败：无法在列表中找到待办事项 '{todo['name']}'。")
+                except Exception as e:
+                    self.log(f"删除待办事项时发生错误: {e}")
+                reminder_win.destroy()
+        
+        if todo.get('type') == 'onetime':
+            def _handle_complete():
+                try:
+                    current_index = self.todos.index(todo)
+                    self.todos[current_index]['status'] = '禁用'
+                    self.save_todos()
+                    self.update_todo_list()
+                    self.log(f"待办事项 '{todo['name']}' 已标记为完成。")
+                except ValueError:
+                    self.log(f"标记完成失败：无法找到任务 '{todo['name']}'。")
                 reminder_win.destroy()
 
-        if todo.get('type') == 'onetime':
+            def _handle_snooze():
+                minutes = simpledialog.askinteger("稍后提醒", "您想在多少分钟后再次提醒？ (1-60)", parent=reminder_win, minvalue=1, maxvalue=60, initialvalue=5)
+                if minutes:
+                    try:
+                        current_index = self.todos.index(todo)
+                        new_remind_time = datetime.now() + timedelta(minutes=minutes)
+                        self.todos[current_index]['remind_time'] = new_remind_time.strftime('%Y-%m-%d %H:%M:%S')
+                        self.todos[current_index]['status'] = '启用'
+                        self.save_todos()
+                        self.update_todo_list()
+                        self.log(f"待办事项 '{todo['name']}' 已推迟 {minutes} 分钟。")
+                    except ValueError:
+                        self.log(f"推迟失败：无法找到任务 '{todo['name']}'。")
+                reminder_win.destroy()
+
             tk.Button(btn_frame, text="已完成", font=font_spec, bg='#27AE60', fg='white', width=10, command=_handle_complete).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="稍后提醒", font=font_spec, width=10, command=_handle_snooze).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=_handle_delete).pack(side=tk.LEFT, padx=10)
-        else:
-            tk.Button(btn_frame, text="确定", font=font_spec, bg='#3498DB', fg='white', width=10, command=reminder_win.destroy).pack(side=tk.LEFT, padx=10)
+        
+        else: # 'recurring'
+            tk.Button(btn_frame, text="本次完成", font=font_spec, bg='#3498DB', fg='white', width=10, command=reminder_win.destroy).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=_handle_delete).pack(side=tk.LEFT, padx=10)
+
+# =================================================================
+# ===== MODIFICATION END: 2 & 3 & 4. 待办事项相关功能重构 =====
+# =================================================================
 
 def main():
     root = tk.Tk()
@@ -3914,3 +3960,4 @@ if __name__ == "__main__":
         messagebox.showerror("核心依赖缺失", "psutil 库未安装，软件无法获取机器码以进行授权验证，即将退出。")
         sys.exit()
     main()
+# --- 第四部分结束 ---
