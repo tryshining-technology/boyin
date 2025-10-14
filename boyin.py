@@ -16,9 +16,9 @@ import shutil
 TRAY_AVAILABLE = False
 try:
     from pystray import MenuItem as item, Icon
-    from PIL import Image, ImageTk # MODIFIED: ImageTk is needed for display
+    from PIL import Image, ImageTk
     TRAY_AVAILABLE = True
-    IMAGE_AVAILABLE = True # NEW: Flag for image functionality
+    IMAGE_AVAILABLE = True
 except ImportError:
     print("警告: pystray 或 Pillow 未安装，最小化到托盘和背景图片功能不可用。")
     TRAY_AVAILABLE = False
@@ -112,8 +112,8 @@ class TimedBroadcastApp:
         self.drag_start_item = None
         
         self.playback_command_queue = queue.Queue()
-        self.reminder_queue = queue.Queue() # NEW: 待办事项提醒队列
-        self.is_reminder_active = False # NEW: 提醒窗口激活标志
+        self.reminder_queue = queue.Queue()
+        self.is_reminder_active = False
         
         self.pages = {}
         self.nav_buttons = {}
@@ -3052,7 +3052,7 @@ class TimedBroadcastApp:
             if normalized: normalized_times.append(normalized)
             else: invalid_times.append(t)
         if invalid_times: return False, f"以下时间格式无效: {', '.join(invalid_times)}"
-        return True, ", ".join(sorted(list(set(normalized_times)))) # 去重并排序
+        return True, ", ".join(sorted(list(set(normalized_times))))
 
     def _normalize_date_string(self, date_str):
         try: return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d")
@@ -3429,7 +3429,6 @@ class TimedBroadcastApp:
             self.log("已清空所有节假日。")
 
 # --- 代码第一部分结束 ---
-# --- 第二部分将从下面的“待办事项”相关函数开始 ---
 # --- NEW & REWORKED: 待办事项所有相关函数 ---
 
     def create_todo_page(self):
@@ -3508,18 +3507,17 @@ class TimedBroadcastApp:
             with open(TODO_FILE, 'r', encoding='utf-8') as f:
                 self.todos = json.load(f)
             
-            # 数据迁移逻辑
             migrated = False
             for todo in self.todos:
                 if 'type' not in todo:
-                    todo['type'] = 'onetime' # 默认为一次性
+                    todo['type'] = 'onetime'
                     migrated = True
                 if todo.get('status') == '待处理':
-                    todo['status'] = '启用' # 修复因意外关闭导致的永久待处理状态
+                    todo['status'] = '启用'
                     migrated = True
 
             if migrated:
-                self.log("检测到旧版待办事项数据，已自动迁移。")
+                self.log("检测到旧版或异常状态的待办事项数据，已自动修复。")
                 self.save_todos()
 
             self.log(f"已加载 {len(self.todos)} 个待办事项")
@@ -3543,8 +3541,8 @@ class TimedBroadcastApp:
             remind_info = ""
             if task_type == '一次性':
                 remind_info = todo.get('remind_datetime', '')
-            else: # 循环
-                times = todo.get('start_times', '无')
+            else: 
+                times = todo.get('start_times') or "无固定时间"
                 interval = todo.get('interval_minutes', 0)
                 if interval > 0:
                     remind_info = f"{times} (每{interval}分钟)"
@@ -3879,11 +3877,10 @@ class TimedBroadcastApp:
                     todo_with_index = todo.copy()
                     todo_with_index['original_index'] = index
                     self.reminder_queue.put(todo_with_index)
-                    todo['status'] = '待处理' 
+                    todo['status'] = '待处理'
                     self.root.after(0, self.update_todo_list)
             
             elif todo.get('type') == 'recurring':
-                # 检查基础约束
                 try:
                     start, end = [d.strip() for d in todo.get('date_range', '').split('~')]
                     if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()): 
@@ -3895,35 +3892,30 @@ class TimedBroadcastApp:
                             (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
                 if not run_today: continue
                 
-                # 检查固定时间点触发
+                triggered = False
                 for trigger_time in [t.strip() for t in todo.get('start_times', '').split(',')]:
                     if trigger_time == now_str_time and todo.get('last_run', {}).get(trigger_time) != now_str_date:
-                        self.log(f"触发循环待办事项 (固定时间): {todo['name']}")
-                        todo_with_index = todo.copy()
-                        todo_with_index['original_index'] = index
-                        self.reminder_queue.put(todo_with_index)
-                        
+                        triggered = True
                         todo.setdefault('last_run', {})[trigger_time] = now_str_date
-                        todo['last_interval_run'] = now_str_dt # 更新最后一次触发时间
-                        self.save_todos()
-
-                # 检查周期性间隔触发
+                        break
+                
                 interval = todo.get('interval_minutes', 0)
-                if interval > 0:
+                if not triggered and interval > 0:
                     last_run_str = todo.get('last_interval_run')
                     if last_run_str:
                         try:
                             last_run_dt = datetime.strptime(last_run_str, '%Y-%m-%d %H:%M:%S')
                             if now >= last_run_dt + timedelta(minutes=interval):
-                                self.log(f"触发循环待办事项 (间隔): {todo['name']}")
-                                todo_with_index = todo.copy()
-                                todo_with_index['original_index'] = index
-                                self.reminder_queue.put(todo_with_index)
-                                
-                                todo['last_interval_run'] = now_str_dt
-                                self.save_todos()
-                        except ValueError:
-                            pass
+                                triggered = True
+                        except ValueError: pass
+
+                if triggered:
+                    self.log(f"触发循环待办事项: {todo['name']}")
+                    todo_with_index = todo.copy()
+                    todo_with_index['original_index'] = index
+                    self.reminder_queue.put(todo_with_index)
+                    todo['last_interval_run'] = now_str_dt
+                    self.save_todos()
 
     def _process_reminder_queue(self):
         if not self.is_reminder_active and not self.reminder_queue.empty():
@@ -3942,7 +3934,6 @@ class TimedBroadcastApp:
         reminder_win.geometry("480x320")
         reminder_win.resizable(False, False)
         reminder_win.transient(self.root)
-        # 移除 grab_set() 从这里...
         reminder_win.attributes('-topmost', True)
         self.center_window(reminder_win, 480, 320)
         reminder_win.configure(bg='#FFFFE0')
@@ -3950,8 +3941,6 @@ class TimedBroadcastApp:
         
         original_index = todo.get('original_index')
 
-        # 在提醒框显示时，立即将主列表中的任务状态更新为'待处理'
-        # 这样后台线程就不会重复触发它
         if original_index is not None and original_index < len(self.todos):
             if self.todos[original_index]['status'] != '禁用':
                 self.todos[original_index]['status'] = '待处理'
@@ -3998,7 +3987,6 @@ class TimedBroadcastApp:
         def _handle_delete():
             if messagebox.askyesno("确认删除", f"您确定要永久删除待办事项“{todo['name']}”吗？\n此操作不可恢复。", parent=reminder_win):
                 if original_index is not None and original_index < len(self.todos):
-                    # 安全地删除
                     if self.todos[original_index]['name'] == todo['name']:
                         self.todos.pop(original_index)
                         self.save_todos()
@@ -4006,19 +3994,21 @@ class TimedBroadcastApp:
                         self.log(f"已删除待办事项: {todo['name']}")
                 close_and_release()
 
-        # --- 按钮创建逻辑 ---
-        if todo.get('type') == 'onetime':
+        task_type = todo.get('type')
+        if task_type == 'onetime':
             tk.Button(btn_frame, text="已完成", font=font_spec, bg='#27AE60', fg='white', width=10, command=_handle_complete).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="稍后提醒", font=font_spec, width=10, command=_handle_snooze).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=_handle_delete).pack(side=tk.LEFT, padx=10)
-        elif todo.get('type') == 'recurring':
+        elif task_type == 'recurring':
             tk.Button(btn_frame, text="本次完成", font=font_spec, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=_handle_delete).pack(side=tk.LEFT, padx=10)
-        else: # 后备方案, 用于处理可能存在的旧数据或未知类型
+        else:
             tk.Button(btn_frame, text="确定", font=font_spec, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
 
-        # --- 将 grab_set() 移动到函数末尾！ ---
+        reminder_win.update_idletasks()
+        reminder_win.update()
         reminder_win.grab_set()
+
 
 def main():
     root = tk.Tk()
