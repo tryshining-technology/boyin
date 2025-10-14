@@ -52,20 +52,23 @@ jobs:
           pip install pyinstaller
           python (Get-Command pywin32_postinstall.py).Source -install
 
-      # --- 关键修改点在这里 ---
+      # --- 关键修改在这里 ---
       - name: Build application with PyInstaller
+        shell: powershell # 明确指定使用 PowerShell
         run: |
+          # 步骤1: 动态获取 customtkinter 库的安装路径
+          $ctk_path = python -c "import os, customtkinter; print(os.path.dirname(customtkinter.__file__))"
+          
+          # 步骤2: 在 PyInstaller 命令中使用这个准确的路径
           pyinstaller --noconfirm --onefile --windowed --name boyin --icon=icon.ico `
+          --add-data="${ctk_path};customtkinter" `
           --add-data="icon.ico;." `
-          --add-data="customtkinter;customtkinter" `
           boyin.py
           # ------------------- 修改解释 ------------------- #
-          # 1. 我添加了 --add-data="customtkinter;customtkinter" 这一行。
-          #    这会告诉 PyInstaller 将 customtkinter 库的整个文件夹（包含主题、字体等资源）
-          #    复制到打包后的程序根目录下的一个同名文件夹中。
-          # 2. 我使用了 PowerShell 的换行符 ` (反引号) 来提高命令的可读性，
-          #    这与您之前在安装依赖步骤中的做法保持一致。
-          # 3. 我保留了您原有的 --add-data="icon.ico;."，确保图标文件也被正确包含。
+          # 1. 我们首先运行一个 python 命令来打印 customtkinter 的目录，并将其存入 PowerShell 变量 $ctk_path。
+          # 2. 然后在 --add-data 参数中，我们使用这个变量 $ctk_path 作为源路径。
+          #    这确保了 PyInstaller 总能找到正确的文件夹，无论它被安装在哪里。
+          # 3. 注意源路径和目标路径之间仍然使用分号 ; 分隔。
           # ---------------------------------------------- #
 
       - name: Upload artifact (${{ matrix.artifact-name }})
