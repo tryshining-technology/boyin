@@ -3942,13 +3942,20 @@ class TimedBroadcastApp:
         reminder_win.geometry("480x320")
         reminder_win.resizable(False, False)
         reminder_win.transient(self.root)
-        reminder_win.grab_set()
+        # 移除 grab_set() 从这里...
         reminder_win.attributes('-topmost', True)
         self.center_window(reminder_win, 480, 320)
         reminder_win.configure(bg='#FFFFE0')
         reminder_win.protocol("WM_DELETE_WINDOW", lambda: None)
         
         original_index = todo.get('original_index')
+
+        # 在提醒框显示时，立即将主列表中的任务状态更新为'待处理'
+        # 这样后台线程就不会重复触发它
+        if original_index is not None and original_index < len(self.todos):
+            if self.todos[original_index]['status'] != '禁用':
+                self.todos[original_index]['status'] = '待处理'
+                self.root.after(0, self.update_todo_list)
 
         title_label = tk.Label(reminder_win, text=todo.get('name', '无标题'), font=('Microsoft YaHei', 14, 'bold'), bg='#FFFFE0', wraplength=460)
         title_label.pack(pady=(15, 10))
@@ -3991,12 +3998,15 @@ class TimedBroadcastApp:
         def _handle_delete():
             if messagebox.askyesno("确认删除", f"您确定要永久删除待办事项“{todo['name']}”吗？\n此操作不可恢复。", parent=reminder_win):
                 if original_index is not None and original_index < len(self.todos):
-                    self.todos.pop(original_index)
-                    self.save_todos()
-                    self.update_todo_list()
-                    self.log(f"已删除待办事项: {todo['name']}")
+                    # 安全地删除
+                    if self.todos[original_index]['name'] == todo['name']:
+                        self.todos.pop(original_index)
+                        self.save_todos()
+                        self.update_todo_list()
+                        self.log(f"已删除待办事项: {todo['name']}")
                 close_and_release()
 
+        # --- 按钮创建逻辑 ---
         if todo.get('type') == 'onetime':
             tk.Button(btn_frame, text="已完成", font=font_spec, bg='#27AE60', fg='white', width=10, command=_handle_complete).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="稍后提醒", font=font_spec, width=10, command=_handle_snooze).pack(side=tk.LEFT, padx=10)
@@ -4004,8 +4014,11 @@ class TimedBroadcastApp:
         elif todo.get('type') == 'recurring':
             tk.Button(btn_frame, text="本次完成", font=font_spec, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=_handle_delete).pack(side=tk.LEFT, padx=10)
-        else: # 后备方案，以防万一
+        else: # 后备方案, 用于处理可能存在的旧数据或未知类型
             tk.Button(btn_frame, text="确定", font=font_spec, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
+
+        # --- 将 grab_set() 移动到函数末尾！ ---
+        reminder_win.grab_set()
 
 def main():
     root = tk.Tk()
