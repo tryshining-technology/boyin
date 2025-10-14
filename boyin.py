@@ -146,6 +146,21 @@ class TimedBroadcastApp:
             winreg.CloseKey(key); return value
         except FileNotFoundError: return None
         except Exception as e: self.log(f"错误: 无法读取注册表项 '{key_name}' - {e}"); return None
+
+    # --- 已添加缺失的方法 ---
+    def load_settings(self):
+        """加载设置文件"""
+        try:
+            if os.path.exists(SETTINGS_FILE):
+                with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                    self.settings = json.load(f)
+            else:
+                self.settings = {}  # 如果文件不存在，初始化为空字典
+        except (json.JSONDecodeError, IOError) as e:
+            # 如果文件损坏或无法读取，也初始化为空字典
+            print(f"警告：无法加载设置文件 ({e})，将使用默认设置。")
+            self.settings = {}
+    # --- 添加结束 ---
             
     def load_lock_password(self):
         self.lock_password_b64 = self._load_from_registry("LockPasswordB64") or ""
