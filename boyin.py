@@ -3786,7 +3786,7 @@ class TimedBroadcastApp:
             info.cbSize = ctypes.sizeof(info)
             info.hwnd = hwnd
             info.dwFlags = 2 | 12  # FLASHW_TRAY | FLASHW_TIMERNOFG
-            info.uCount = 0  # Flash indefinitely
+            info.uCount = 0
             info.dwTimeout = 0
             
             ctypes.windll.user32.FlashWindowEx(ctypes.byref(info))
@@ -3794,8 +3794,6 @@ class TimedBroadcastApp:
             print(f"警告: 无法使窗口闪烁 - {e}")
 
     def show_todo_reminder(self, todo):
-        self.is_reminder_active = True
-
         reminder_win = tk.Toplevel(self.root)
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
         reminder_win.geometry("480x320")
