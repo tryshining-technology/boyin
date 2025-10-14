@@ -804,21 +804,20 @@ class TimedBroadcastApp:
             if messagebox.askyesno("确认操作", "您确定要禁用整点报时功能吗？\n这将删除所有已生成的报时音频文件。"):
                 self.save_settings(); threading.Thread(target=self._delete_chime_files_worker, daemon=True).start()
             else: self.time_chime_enabled_var.set(True)
-    
-# 正确的代码
-def _get_time_period_string(self, hour):
-    if 0 <= hour < 6:
-        return "凌晨"
-    elif 6 <= hour < 9:
-        return "早上"
-    elif 9 <= hour < 12:
-        return "上午"
-    elif 12 <= hour < 14:
-        return "中午"
-    elif 14 <= hour < 18:
-        return "下午"
-    else:
-        return "晚上"
+
+    def _get_time_period_string(self, hour):
+        if 0 <= hour < 6:
+            return "凌晨"
+        elif 6 <= hour < 9:
+            return "早上"
+        elif 9 <= hour < 12:
+            return "上午"
+        elif 12 <= hour < 14:
+            return "中午"
+        elif 14 <= hour < 18:
+            return "下午"
+        else:
+            return "晚上"
 
     def _generate_chime_files_worker(self, voice, progress_dialog, progress_label):
         if not os.path.exists(CHIME_FOLDER): os.makedirs(CHIME_FOLDER)
@@ -961,7 +960,6 @@ def _get_time_period_string(self, hour):
     def show_context_menu(self, event):
         if self.is_locked: return
         iid = self.task_tree.identify_row(event.y)
-        context_menu = ctk.CTkMenu(self.root, tearoff=0) # Placeholder, tk.Menu is used for context
         from tkinter import Menu
         context_menu = Menu(self.root, tearoff=0, font=('Microsoft YaHei', 11))
         if iid:
