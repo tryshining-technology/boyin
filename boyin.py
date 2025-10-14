@@ -84,11 +84,9 @@ class TimedBroadcastApp:
         self.root.title(" 创翔多功能定时播音旗舰版")
         self.root.geometry("1400x800")
         
-        # FIX 4: 彻底解决高 DPI 缩放问题
         try:
             dpi = ctypes.windll.user32.GetDpiForWindow(self.root.winfo_id())
             scaling_factor = dpi / 96
-            
             self.root.tk.call('tk', 'scaling', scaling_factor)
             ctk.set_widget_scaling(scaling_factor)
             ctk.set_window_scaling(scaling_factor)
@@ -101,7 +99,6 @@ class TimedBroadcastApp:
             except Exception as e:
                 print(f"加载窗口图标失败: {e}")
 
-        # FIX 1: 统一调整字体大小为 12 号
         self.font_nav = ctk.CTkFont(family="Microsoft YaHei", size=22, weight="bold")
         self.font_bold = ctk.CTkFont(family="Microsoft YaHei", size=12, weight="bold")
         self.font_normal = ctk.CTkFont(family="Microsoft YaHei", size=12)
@@ -488,9 +485,9 @@ class TimedBroadcastApp:
         
         style = ttk.Style()
         style.theme_use("default")
-        style.configure("Treeview.Heading", font=('Microsoft YaHei', 12, 'bold'), background="#E1E1E1", foreground="black", relief="flat")
+        style.configure("Treeview.Heading", font=self.font_bold.actual(), background="#E1E1E1", foreground="black", relief="flat")
         style.map("Treeview.Heading", background=[('active', '#C1C1C1')])
-        style.configure("Treeview", font=('Microsoft YaHei', 12), rowheight=30, background="#FFFFFF", fieldbackground="#FFFFFF", foreground="black")
+        style.configure("Treeview", font=self.font_normal.actual(), rowheight=30, background="#FFFFFF", fieldbackground="#FFFFFF", foreground="black")
         style.map('Treeview', background=[('selected', '#3470B2')], foreground=[('selected', 'white')])
         style.layout("Treeview", [('Treeview.treearea', {'sticky': 'nswe'})])
 
@@ -562,11 +559,69 @@ class TimedBroadcastApp:
 
         self.update_holiday_list(); return page_frame
 
+    def create_settings_page(self):
+        settings_frame = ctk.CTkScrollableFrame(self.page_container, fg_color="transparent")
+        ctk.CTkLabel(settings_frame, text="系统设置", font=self.font_bold).pack(anchor='w', padx=20, pady=20)
+
+        general_frame = ctk.CTkFrame(settings_frame); general_frame.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(general_frame, text="通用设置", font=self.font_bold).pack(anchor="w", padx=15, pady=(10, 5))
+        
+        self.autostart_var, self.start_minimized_var, self.lock_on_start_var = ctk.BooleanVar(), ctk.BooleanVar(), ctk.BooleanVar()
+        ctk.CTkCheckBox(general_frame, text="登录windows后自动启动", variable=self.autostart_var, font=self.font_normal, command=self._handle_autostart_setting).pack(fill="x", padx=15, pady=5)
+        ctk.CTkCheckBox(general_frame, text="启动后最小化到系统托盘", variable=self.start_minimized_var, font=self.font_normal, command=self.save_settings).pack(fill="x", padx=15, pady=5)
+        
+        lock_frame = ctk.CTkFrame(general_frame, fg_color="transparent"); lock_frame.pack(fill="x", padx=15, pady=5)
+        self.lock_on_start_cb = ctk.CTkCheckBox(lock_frame, text="启动软件后立即锁定", variable=self.lock_on_start_var, font=self.font_normal, command=self._handle_lock_on_start_toggle); self.lock_on_start_cb.pack(side="left")
+        if not WIN32COM_AVAILABLE: self.lock_on_start_cb.configure(state="disabled")
+        ctk.CTkLabel(lock_frame, text="(请先在主界面设置锁定密码)", font=self.font_small, text_color='gray').pack(side="left", padx=5)
+        
+        self.clear_password_btn = ctk.CTkButton(general_frame, text="清除锁定密码", font=self.font_normal, command=self.clear_lock_password); self.clear_password_btn.pack(pady=10)
+        
+        time_chime_frame = ctk.CTkFrame(settings_frame); time_chime_frame.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(time_chime_frame, text="整点报时", font=self.font_bold).pack(anchor="w", padx=15, pady=(10, 5))
+        
+        self.time_chime_enabled_var, self.time_chime_voice_var, self.time_chime_speed_var, self.time_chime_pitch_var = ctk.BooleanVar(), ctk.StringVar(), ctk.StringVar(), ctk.StringVar()
+        chime_control_frame = ctk.CTkFrame(time_chime_frame, fg_color="transparent"); chime_control_frame.pack(fill="x", padx=15, pady=5)
+        ctk.CTkCheckBox(chime_control_frame, text="启用整点报时功能", variable=self.time_chime_enabled_var, font=self.font_normal, command=self._handle_time_chime_toggle).pack(side="left")
+
+        self.chime_voice_combo = ctk.CTkComboBox(chime_control_frame, variable=self.time_chime_voice_var, values=self.get_available_voices(), font=self.font_small, width=350, state='readonly', command=lambda e: self._on_chime_params_changed(is_voice_change=True)); self.chime_voice_combo.pack(side="left", padx=10)
+        
+        ctk.CTkLabel(chime_control_frame, text="语速:", font=self.font_small).pack(side="left", padx=(10,0))
+        speed_entry = ctk.CTkEntry(chime_control_frame, textvariable=self.time_chime_speed_var, font=self.font_small, width=40); speed_entry.pack(side="left")
+        ctk.CTkLabel(chime_control_frame, text="音调:", font=self.font_small).pack(side="left", padx=(10,0))
+        pitch_entry = ctk.CTkEntry(chime_control_frame, textvariable=self.time_chime_pitch_var, font=self.font_small, width=40); pitch_entry.pack(side="left")
+        
+        speed_entry.bind("<FocusOut>", self._on_chime_params_changed); pitch_entry.bind("<FocusOut>", self._on_chime_params_changed)
+
+        power_frame = ctk.CTkFrame(settings_frame); power_frame.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(power_frame, text="电源管理", font=self.font_bold).pack(anchor="w", padx=15, pady=(10, 5))
+        self.daily_shutdown_enabled_var, self.daily_shutdown_time_var = ctk.BooleanVar(), ctk.StringVar()
+        self.weekly_shutdown_enabled_var, self.weekly_shutdown_time_var, self.weekly_shutdown_days_var = ctk.BooleanVar(), ctk.StringVar(), ctk.StringVar()
+        self.weekly_reboot_enabled_var, self.weekly_reboot_time_var, self.weekly_reboot_days_var = ctk.BooleanVar(), ctk.StringVar(), ctk.StringVar()
+        
+        daily_frame = ctk.CTkFrame(power_frame, fg_color="transparent"); daily_frame.pack(fill="x", pady=4, padx=15)
+        ctk.CTkCheckBox(daily_frame, text="每天关机", variable=self.daily_shutdown_enabled_var, font=self.font_normal, command=self.save_settings).pack(side="left")
+        ctk.CTkEntry(daily_frame, textvariable=self.daily_shutdown_time_var, font=self.font_normal, width=120).pack(side="left", padx=10)
+        ctk.CTkButton(daily_frame, text="设置", font=self.font_small, command=lambda: self.show_single_time_dialog(self.daily_shutdown_time_var), width=60).pack(side="left")
+
+        weekly_frame = ctk.CTkFrame(power_frame, fg_color="transparent"); weekly_frame.pack(fill="x", pady=4, padx=15)
+        ctk.CTkCheckBox(weekly_frame, text="每周关机", variable=self.weekly_shutdown_enabled_var, font=self.font_normal, command=self.save_settings).pack(side="left")
+        ctk.CTkEntry(weekly_frame, textvariable=self.weekly_shutdown_days_var, font=self.font_normal, width=150).pack(side="left", padx=(10,5))
+        ctk.CTkEntry(weekly_frame, textvariable=self.weekly_shutdown_time_var, font=self.font_normal, width=120).pack(side="left", padx=5)
+        ctk.CTkButton(weekly_frame, text="设置", font=self.font_small, command=lambda: self.show_power_week_time_dialog("设置每周关机", self.weekly_shutdown_days_var, self.weekly_shutdown_time_var), width=60).pack(side="left")
+
+        reboot_frame = ctk.CTkFrame(power_frame, fg_color="transparent"); reboot_frame.pack(fill="x", pady=4, padx=15)
+        ctk.CTkCheckBox(reboot_frame, text="每周重启", variable=self.weekly_reboot_enabled_var, font=self.font_normal, command=self.save_settings).pack(side="left")
+        ctk.CTkEntry(reboot_frame, textvariable=self.weekly_reboot_days_var, font=self.font_normal, width=150).pack(side="left", padx=(10,5))
+        ctk.CTkEntry(reboot_frame, textvariable=self.weekly_reboot_time_var, font=self.font_normal, width=120).pack(side="left", padx=5)
+        ctk.CTkButton(reboot_frame, text="设置", font=self.font_small, command=lambda: self.show_power_week_time_dialog("设置每周重启", self.weekly_reboot_days_var, self.weekly_reboot_time_var), width=60).pack(side="left")
+        
+        return settings_frame
+
     def _on_chime_params_changed(self, event=None, is_voice_change=False):
         current_voice, current_speed, current_pitch = self.time_chime_voice_var.get(), self.time_chime_speed_var.get(), self.time_chime_pitch_var.get()
         saved_voice, saved_speed, saved_pitch = self.settings.get("time_chime_voice", ""), self.settings.get("time_chime_speed", "0"), self.settings.get("time_chime_pitch", "0")
-        params_changed = (current_voice != saved_voice or current_speed != saved_speed or current_pitch != saved_pitch)
-        if self.time_chime_enabled_var.get() and params_changed:
+        if self.time_chime_enabled_var.get() and any([current_voice != saved_voice, current_speed != saved_speed, current_pitch != saved_pitch]):
             self.save_settings()
             if messagebox.askyesno("应用更改", "您更改了报时参数，需要重新生成全部24个报时文件。\n是否立即开始？"): self._handle_time_chime_toggle(force_regenerate=True)
             else:
@@ -575,21 +630,18 @@ class TimedBroadcastApp:
         else: self.save_settings()
 
     def _handle_time_chime_toggle(self, force_regenerate=False):
-        is_enabled = self.time_chime_enabled_var.get()
-        if is_enabled or force_regenerate:
-            selected_voice = self.time_chime_voice_var.get()
-            if not selected_voice:
+        if self.time_chime_enabled_var.get() or force_regenerate:
+            if not self.time_chime_voice_var.get():
                 messagebox.showwarning("操作失败", "请先从下拉列表中选择一个播音员。")
                 if not force_regenerate: self.time_chime_enabled_var.set(False)
                 return
-            self.save_settings(); self.log("准备启用/更新整点报时功能，开始生成语音文件...")
+            self.save_settings(); self.log("准备启用/更新整点报时功能...")
             progress_dialog = ctk.CTkToplevel(self.root); progress_dialog.title("请稍候"); progress_dialog.resizable(False, False); progress_dialog.transient(self.root); progress_dialog.grab_set()
             ctk.CTkLabel(progress_dialog, text="正在生成整点报时文件 (0/24)...", font=self.font_normal).pack(padx=20, pady=10)
             progress_label = ctk.CTkLabel(progress_dialog, text="", font=self.font_small); progress_label.pack(pady=5)
-            progress_dialog.update_idletasks()
-            self.center_window(progress_dialog)
-            threading.Thread(target=self._generate_chime_files_worker, args=(selected_voice, progress_dialog, progress_label), daemon=True).start()
-        elif not is_enabled and not force_regenerate:
+            progress_dialog.update_idletasks(); self.center_window(progress_dialog)
+            threading.Thread(target=self._generate_chime_files_worker, args=(self.time_chime_voice_var.get(), progress_dialog, progress_label), daemon=True).start()
+        elif not force_regenerate:
             if messagebox.askyesno("确认操作", "您确定要禁用整点报时功能吗？\n这将删除所有已生成的报时音频文件。"):
                 self.save_settings(); threading.Thread(target=self._delete_chime_files_worker, daemon=True).start()
             else: self.time_chime_enabled_var.set(True)
@@ -611,8 +663,7 @@ class TimedBroadcastApp:
                 display_hour = hour if hour <= 12 else hour - 12
                 if hour == 0: display_hour = 12
                 text = f"现在时刻,北京时间{period}{display_hour}点整"; output_path = os.path.join(CHIME_FOLDER, f"{hour:02d}.wav")
-                progress_text = f"正在生成：{hour:02d}.wav ({hour + 1}/24)"
-                self.root.after(0, lambda p=progress_text: progress_label.configure(text=p))
+                self.root.after(0, lambda p=f"正在生成：{hour:02d}.wav ({hour + 1}/24)": progress_label.configure(text=p))
                 voice_params = {'voice': voice, 'speed': self.settings.get("time_chime_speed", "0"), 'pitch': self.settings.get("time_chime_pitch", "0"), 'volume': '100'}
                 if not self._synthesize_text_to_wav(text, voice_params, output_path): raise Exception(f"生成 {hour:02d}.wav 失败")
         except Exception as e:
@@ -684,12 +735,11 @@ class TimedBroadcastApp:
         ctk.CTkLabel(main_frame, text="请输入密码以解锁", font=self.font_normal).pack(pady=10)
         pass_entry = ctk.CTkEntry(main_frame, show='*', width=250, font=self.font_normal); pass_entry.pack(pady=5); pass_entry.focus_set()
 
-        def is_password_correct(): return base64.b64encode(pass_entry.get().encode('utf-8')).decode('utf-8') == self.lock_password_b64
-        def confirm():
-            if is_password_correct(): dialog.destroy(); self._apply_unlock()
+        def confirm(event=None):
+            if base64.b64encode(pass_entry.get().encode('utf-8')).decode('utf-8') == self.lock_password_b64: dialog.destroy(); self._apply_unlock()
             else: messagebox.showerror("错误", "密码不正确！", parent=dialog)
         def clear_password_action():
-            if not is_password_correct(): messagebox.showerror("错误", "密码不正确！无法清除。", parent=dialog); return
+            if not base64.b64encode(pass_entry.get().encode('utf-8')).decode('utf-8') == self.lock_password_b64: messagebox.showerror("错误", "密码不正确！无法清除。", parent=dialog); return
             if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。", parent=dialog):
                 self._perform_password_clear_logic(); dialog.destroy(); self.root.after(50, self._apply_unlock)
                 self.root.after(100, lambda: messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root))
@@ -698,7 +748,7 @@ class TimedBroadcastApp:
         ctk.CTkButton(btn_frame, text="确定", font=self.font_normal, command=confirm).pack(side="left", padx=5)
         ctk.CTkButton(btn_frame, text="清除密码", font=self.font_normal, command=clear_password_action).pack(side="left", padx=5)
         ctk.CTkButton(btn_frame, text="取消", font=self.font_normal, command=dialog.destroy, fg_color="gray").pack(side="left", padx=5)
-        dialog.bind('<Return>', lambda event: confirm()); dialog.update_idletasks(); self.center_window(dialog)
+        dialog.bind('<Return>', confirm); dialog.update_idletasks(); self.center_window(dialog)
 
     def _perform_password_clear_logic(self):
         if self._save_to_registry("LockPasswordB64", ""):
@@ -745,7 +795,7 @@ class TimedBroadcastApp:
         if self.is_locked: return
         iid = self.task_tree.identify_row(event.y)
         from tkinter import Menu
-        context_menu = Menu(self.root, tearoff=0, font=('Microsoft YaHei', 12))
+        context_menu = Menu(self.root, tearoff=0, font=self.font_normal.actual())
         if iid:
             if iid not in self.task_tree.selection(): self.task_tree.selection_set(iid)
             context_menu.add_command(label="立即播放", command=self.play_now); context_menu.add_separator()
@@ -1353,18 +1403,13 @@ class TimedBroadcastApp:
         self.center_window(dialog)
 
     def center_window(self, win):
-        # FIX 2: 改造为相对主窗口居中
         win.update_idletasks()
-        width = win.winfo_width()
-        height = win.winfo_height()
-        parent_x = self.root.winfo_x()
-        parent_y = self.root.winfo_y()
-        parent_width = self.root.winfo_width()
-        parent_height = self.root.winfo_height()
-        
+        width = win.winfo_reqwidth()
+        height = win.winfo_reqheight()
+        parent_x = self.root.winfo_x(); parent_y = self.root.winfo_y()
+        parent_width = self.root.winfo_width(); parent_height = self.root.winfo_height()
         x = parent_x + (parent_width // 2) - (width // 2)
         y = parent_y + (parent_height // 2) - (height // 2)
-        
         win.geometry(f'{width}x{height}+{x}+{y}')
 
 def main():
@@ -1373,14 +1418,13 @@ def main():
     root.mainloop()
 
 if __name__ == "__main__":
-    # FIX 4: 在创建任何Tkinter/CustomTkinter窗口前，设置DPI感知
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except (AttributeError, OSError):
         try:
             ctypes.windll.user32.SetProcessDPIAware()
         except (AttributeError, OSError):
-            print("警告: 无法设置DPI感知，在高分屏上可能会出现显示问题。")
+            print("警告: 无法设置DPI感知。")
 
     if not WIN32COM_AVAILABLE: messagebox.showerror("核心依赖缺失", "pywin32 库未安装或损坏，软件无法运行注册和锁定等核心功能，即将退出。"); sys.exit()
     if not PSUTIL_AVAILABLE: messagebox.showerror("核心依赖缺失", "psutil 库未安装，软件无法获取机器码以进行授权验证，即将退出。"); sys.exit()
