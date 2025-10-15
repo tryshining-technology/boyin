@@ -1,6 +1,5 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog, simpledialog
-import tkinter.font  # 新增: 用于字体管理
 import json
 import threading
 import time
@@ -12,12 +11,13 @@ import getpass
 import base64
 import queue
 import shutil
+import re
 
 # 尝试导入所需库
 TRAY_AVAILABLE = False
 try:
     from pystray import MenuItem as item, Icon
-    from PIL import Image, ImageTk, ImageEnhance # 修改: 额外导入 ImageEnhance
+    from PIL import Image, ImageTk
     TRAY_AVAILABLE = True
     IMAGE_AVAILABLE = True
 except ImportError:
@@ -43,7 +43,7 @@ try:
     import pygame
     pygame.mixer.init()
     # 为提示音和报时预留单独的通道，避免与背景音乐冲突
-    pygame.mixer.set_num_channels(10) 
+    pygame.mixer.set_num_channels(10)
     AUDIO_AVAILABLE = True
 except ImportError:
     print("警告: pygame 未安装，音频播放功能将不可用。")
@@ -105,7 +105,7 @@ class TimedBroadcastApp:
         self.root.title(" 创翔多功能定时播音旗舰版")
         self.root.geometry("1400x800")
         self.root.configure(bg='#E8F4F8')
-        
+
         if os.path.exists(ICON_FILE):
             try:
                 self.root.iconbitmap(ICON_FILE)
@@ -114,24 +114,24 @@ class TimedBroadcastApp:
 
         self.tasks = []
         self.holidays = []
-        self.todos = [] 
+        self.todos = []
         self.settings = {}
         self.running = True
         self.tray_icon = None
         self.is_locked = False
         self.is_app_locked_down = False
-        
+
         self.auth_info = {'status': 'Unregistered', 'message': '正在验证授权...'}
         self.machine_code = None
 
         self.lock_password_b64 = ""
-        
+
         self.drag_start_item = None
-        
+
         self.playback_command_queue = queue.Queue()
         self.reminder_queue = queue.Queue()
         self.is_reminder_active = False
-        
+
         self.pages = {}
         self.nav_buttons = {}
         self.current_page = None
@@ -140,72 +140,37 @@ class TimedBroadcastApp:
 
         self.fullscreen_window = None
         self.fullscreen_label = None
-        self.image_tk_ref = None 
+        self.image_tk_ref = None
         self.current_stop_visual_event = None
 
         # --- 新增: 用于管理视频播放窗口和播放器实例 ---
         self.video_window = None
         self.vlc_player = None
-        
-        # --- 新增: 用于皮肤背景 ---
-        self.bg_photo = None
+        self.video_stop_event = None # 新增: 用于强制停止整个视频任务的事件
 
         self.create_folder_structure()
         self.load_settings()
-        self._load_and_validate_font() # 新增: 加载并验证字体
         self.load_lock_password()
-        
+
         self.check_authorization()
 
         self.create_widgets()
         self.load_tasks()
         self.load_holidays()
         self.load_todos()
-        
+
         self.start_background_threads()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
         self.start_tray_icon_thread()
-        
+
         if self.settings.get("lock_on_start", False) and self.lock_password_b64:
             self.root.after(100, self.perform_initial_lock)
 
         if self.settings.get("start_minimized", False):
             self.root.after(100, self.hide_to_tray)
-        
+
         if self.is_app_locked_down:
             self.root.after(100, self.perform_lockdown)
-
-    def _load_and_validate_font(self):
-        """加载、验证并设置全局字体"""
-        available_fonts = tkinter.font.families()
-        preferred_font = self.settings.get("font_name", "Microsoft YaHei")
-
-        if preferred_font in available_fonts:
-            self.app_font_name = preferred_font
-        else:
-            # 如果首选字体不存在，尝试备用列表
-            fallback_fonts = ["Microsoft YaHei", "SimSun", "Arial Unicode MS", "TkDefaultFont"]
-            found_fallback = False
-            for font in fallback_fonts:
-                if font in available_fonts:
-                    self.app_font_name = font
-                    self.log(f"警告：字体 '{preferred_font}' 未找到，已回退到 '{font}'。")
-                    found_fallback = True
-                    break
-            if not found_fallback:
-                self.app_font_name = "TkDefaultFont" # 最终回退
-                self.log(f"警告：首选及备用中文字体均未找到，使用系统默认字体。")
-
-        # 定义全局字体元组
-        self.font_11 = (self.app_font_name, 11)
-        self.font_11_bold = (self.app_font_name, 11, 'bold')
-        self.font_12_bold = (self.app_font_name, 12, 'bold')
-        self.font_14_bold = (self.app_font_name, 14, 'bold')
-        self.font_22_bold = (self.app_font_name, 22, 'bold')
-        self.font_9 = (self.app_font_name, 9)
-        self.font_10 = (self.app_font_name, 10)
-        self.font_12 = (self.app_font_name, 12)
-        self.font_13_bold = (self.app_font_name, 13, 'bold')
 
     def _save_to_registry(self, key_name, value):
         if not WIN32_AVAILABLE: return False
@@ -230,10 +195,10 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"错误: 无法读取注册表项 '{key_name}' - {e}")
             return None
-            
+
     def load_lock_password(self):
         self.lock_password_b64 = self._load_from_registry("LockPasswordB64") or ""
-    
+
     def create_folder_structure(self):
         for folder in [PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER, VOICE_SCRIPT_FOLDER]:
             if not os.path.exists(folder):
@@ -245,23 +210,18 @@ class TimedBroadcastApp:
         self.status_frame.pack_propagate(False)
         self.create_status_bar_content()
 
-        # 修改: 导航栏背景色改为白色
+        # --- 修改: 导航栏背景色 ---
         self.nav_frame = tk.Frame(self.root, bg='white', width=160)
         self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
-        
-        # --- 新增: 皮肤背景层 ---
-        self.bg_label = tk.Label(self.root)
-        self.bg_label.place(x=160, y=0, relwidth=1.0, relheight=1.0, anchor='nw', width=-160, height=-30)
-        
-        self.page_container = tk.Frame(self.bg_label, bg='white') # 页面容器放在背景Label上
-        self.page_container.pack(fill=tk.BOTH, expand=True)
-        # --- 皮肤修改结束 ---
+
+        self.page_container = tk.Frame(self.root)
+        self.page_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         nav_button_titles = ["定时广播", "节假日", "待办事项", "设置", "注册软件", "超级管理"]
-        
+
         for i, title in enumerate(nav_button_titles):
-            # 修改: 导航栏按钮背景色改为白色
+            # --- 修改: 导航栏按钮背景色 ---
             btn_frame = tk.Frame(self.nav_frame, bg='white')
             btn_frame.pack(fill=tk.X, pady=1)
 
@@ -271,40 +231,39 @@ class TimedBroadcastApp:
             else:
                 cmd = lambda t=title: self.switch_page(t)
 
-            # 修改: 导航栏按钮背景色改为白色，并使用全局字体
+            # --- 修改: 导航栏按钮背景色 ---
             btn = tk.Button(btn_frame, text=title, bg='white',
-                          fg='black', font=self.font_22_bold,
+                          fg='black', font=('Microsoft YaHei', 22, 'bold'),
                           bd=0, padx=10, pady=8, anchor='w', command=cmd)
             btn.pack(fill=tk.X)
             self.nav_buttons[title] = btn
-        
+
         self.main_frame = tk.Frame(self.page_container, bg='white')
         self.pages["定时广播"] = self.main_frame
         self.create_scheduled_broadcast_page()
 
         self.current_page = self.main_frame
         self.switch_page("定时广播")
-        
+
         self.update_status_bar()
-        self._update_background_skin() # 新增: 初始化皮肤
         self.log(" 创翔多功能定时播音旗舰版软件已启动")
 
     def create_status_bar_content(self):
         self.status_labels = []
         # 新增“待办事项”到状态栏文本列表
         status_texts = ["当前时间", "系统状态", "播放状态", "任务数量", "待办事项"]
-        
-        # 使用全局字体
-        copyright_label = tk.Label(self.status_frame, text="© 创翔科技", font=self.font_11,
+        font_11 = ('Microsoft YaHei', 11)
+
+        copyright_label = tk.Label(self.status_frame, text="© 创翔科技", font=font_11,
                                    bg='#5DADE2', fg='white', padx=15)
         copyright_label.pack(side=tk.RIGHT, padx=2)
-        
-        self.statusbar_unlock_button = tk.Button(self.status_frame, text="🔓 解锁", font=self.font_11,
+
+        self.statusbar_unlock_button = tk.Button(self.status_frame, text="🔓 解锁", font=font_11,
                                                  bg='#2ECC71', fg='white', bd=0, padx=15, cursor='hand2',
                                                  command=self._prompt_for_password_unlock)
 
         for i, text in enumerate(status_texts):
-            label = tk.Label(self.status_frame, text=f"{text}: --", font=self.font_11,
+            label = tk.Label(self.status_frame, text=f"{text}: --", font=font_11,
                            bg='#5DADE2' if i % 2 == 0 else '#7EC8E3', fg='white', padx=15, pady=5)
             label.pack(side=tk.LEFT, padx=2)
             self.status_labels.append(label)
@@ -319,12 +278,12 @@ class TimedBroadcastApp:
         if self.is_locked and page_name not in ["超级管理", "注册软件"]:
             self.log("界面已锁定，请先解锁。")
             return
-            
+
         if self.current_page:
             self.current_page.pack_forget()
 
         for title, btn in self.nav_buttons.items():
-            # 修改: 未选中按钮背景色为白色
+            # --- 修改: 未选中按钮的背景色 ---
             btn.config(bg='white', fg='black')
             btn.master.config(bg='white')
 
@@ -357,10 +316,9 @@ class TimedBroadcastApp:
             target_frame = self.pages["定时广播"]
             page_name = "定时广播"
 
-        # 修改: 确保页面是pack在page_container中
         target_frame.pack(in_=self.page_container, fill=tk.BOTH, expand=True)
         self.current_page = target_frame
-        
+
         selected_btn = self.nav_buttons[page_name]
         selected_btn.config(bg='#5DADE2', fg='white')
         selected_btn.master.config(bg='#5DADE2')
@@ -370,7 +328,7 @@ class TimedBroadcastApp:
             messagebox.showerror("权限不足", "此功能仅对“永久授权”用户开放。\n\n请注册软件并获取永久授权后重试。")
             self.log("非永久授权用户尝试进入超级管理模块被阻止。")
             return
-            
+
         dialog = tk.Toplevel(self.root)
         dialog.title("身份验证")
         dialog.geometry("350x180")
@@ -379,17 +337,17 @@ class TimedBroadcastApp:
         dialog.grab_set()
         self.center_window(dialog, 350, 180)
 
-        result = [None] 
+        result = [None]
 
-        tk.Label(dialog, text="请输入超级管理员密码:", font=self.font_11).pack(pady=20)
-        password_entry = tk.Entry(dialog, show='*', font=self.font_11, width=25)
+        tk.Label(dialog, text="请输入超级管理员密码:", font=('Microsoft YaHei', 11)).pack(pady=20)
+        password_entry = tk.Entry(dialog, show='*', font=('Microsoft YaHei', 11), width=25)
         password_entry.pack(pady=5)
         password_entry.focus_set()
 
         def on_confirm():
             result[0] = password_entry.get()
             dialog.destroy()
-        
+
         def on_cancel():
             dialog.destroy()
 
@@ -403,7 +361,7 @@ class TimedBroadcastApp:
         entered_password = result[0]
 
         correct_password = datetime.now().strftime('%Y%m%d')
-        
+
         if entered_password == correct_password:
             self.log("超级管理员密码正确，进入管理模块。")
             self.switch_page("超级管理")
@@ -413,14 +371,14 @@ class TimedBroadcastApp:
 
     def create_registration_page(self):
         page_frame = tk.Frame(self.page_container, bg='white')
-        title_label = tk.Label(page_frame, text="注册软件", font=self.font_14_bold, bg='white', fg='#2980B9')
+        title_label = tk.Label(page_frame, text="注册软件", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#2980B9')
         title_label.pack(anchor='w', padx=20, pady=20)
-        
+
         main_content_frame = tk.Frame(page_frame, bg='white')
         main_content_frame.pack(padx=20, pady=10)
 
-        font_spec = self.font_12
-        
+        font_spec = ('Microsoft YaHei', 12)
+
         machine_code_frame = tk.Frame(main_content_frame, bg='white')
         machine_code_frame.pack(fill=tk.X, pady=10)
         tk.Label(machine_code_frame, text="机器码:", font=font_spec, bg='white').pack(side=tk.LEFT)
@@ -435,27 +393,27 @@ class TimedBroadcastApp:
         tk.Label(reg_code_frame, text="注册码:", font=font_spec, bg='white').pack(side=tk.LEFT)
         self.reg_code_entry = tk.Entry(reg_code_frame, font=font_spec, width=30)
         self.reg_code_entry.pack(side=tk.LEFT, padx=10)
-        
+
         btn_container = tk.Frame(main_content_frame, bg='white')
         btn_container.pack(pady=20)
 
-        register_btn = tk.Button(btn_container, text="注 册", font=self.font_12_bold, 
+        register_btn = tk.Button(btn_container, text="注 册", font=('Microsoft YaHei', 12, 'bold'),
                                  bg='#27AE60', fg='white', width=15, pady=5, command=self.attempt_registration)
         register_btn.pack(pady=5)
-        
-        cancel_reg_btn = tk.Button(btn_container, text="取消注册", font=self.font_12_bold,
+
+        cancel_reg_btn = tk.Button(btn_container, text="取消注册", font=('Microsoft YaHei', 12, 'bold'),
                                    bg='#E74C3C', fg='white', width=15, pady=5, command=self.cancel_registration)
         cancel_reg_btn.pack(pady=5)
-        
+
         info_text = "请将您的机器码发送给软件提供商以获取注册码。\n注册码分为月度授权和永久授权两种。"
-        tk.Label(main_content_frame, text=info_text, font=self.font_10, bg='white', fg='grey').pack(pady=10)
+        tk.Label(main_content_frame, text=info_text, font=('Microsoft YaHei', 10), bg='white', fg='grey').pack(pady=10)
 
         return page_frame
 
     def cancel_registration(self):
         if not messagebox.askyesno("确认操作", "您确定要取消当前注册吗？\n取消后，软件将恢复到试用或过期状态。"):
             return
-        
+
         self.log("用户请求取消注册...")
         self._save_to_registry('RegistrationStatus', '')
         self._save_to_registry('RegistrationDate', '')
@@ -464,7 +422,7 @@ class TimedBroadcastApp:
 
         messagebox.showinfo("操作完成", f"注册已成功取消。\n当前授权状态: {self.auth_info['message']}")
         self.log(f"注册已取消。新状态: {self.auth_info['message']}")
-        
+
         if self.is_app_locked_down:
             self.perform_lockdown()
         else:
@@ -508,7 +466,7 @@ class TimedBroadcastApp:
         for name, addrs in interfaces.items():
             is_wired = any(keyword in name.lower() for keyword in wired_keywords)
             is_wireless = any(keyword in name.lower() for keyword in wireless_keywords)
-            
+
             is_up = stats.get(name) and getattr(stats.get(name), 'isup', False)
 
             for addr in addrs:
@@ -522,18 +480,18 @@ class TimedBroadcastApp:
                             wireless_macs.append(mac_info)
                         else:
                             other_macs.append(mac_info)
-        
+
         wired_macs.sort(key=lambda x: x['is_up'], reverse=True)
         wireless_macs.sort(key=lambda x: x['is_up'], reverse=True)
         other_macs.sort(key=lambda x: x['is_up'], reverse=True)
-        
+
         if wired_macs:
             return wired_macs[0]['mac']
         if wireless_macs:
             return wireless_macs[0]['mac']
         if other_macs:
             return other_macs[0]['mac']
-            
+
         for name, addrs in interfaces.items():
             for addr in addrs:
                 if addr.family == psutil.AF_LINK:
@@ -545,11 +503,11 @@ class TimedBroadcastApp:
     def _calculate_reg_codes(self, numeric_mac_str):
         try:
             monthly_code = int(int(numeric_mac_str) * 3.14)
-            
+
             reversed_mac_str = numeric_mac_str[::-1]
             permanent_val = int(reversed_mac_str) / 3.14
             permanent_code = f"{permanent_val:.2f}"
-            
+
             return {'monthly': str(monthly_code), 'permanent': permanent_code}
         except (ValueError, TypeError):
             return {'monthly': None, 'permanent': None}
@@ -562,9 +520,9 @@ class TimedBroadcastApp:
 
         numeric_machine_code = self.get_machine_code()
         correct_codes = self._calculate_reg_codes(numeric_machine_code)
-        
+
         today_str = datetime.now().strftime('%Y-%m-%d')
-        
+
         if entered_code == correct_codes['monthly']:
             self._save_to_registry('RegistrationStatus', 'Monthly')
             self._save_to_registry('RegistrationDate', today_str)
@@ -582,7 +540,7 @@ class TimedBroadcastApp:
         today = datetime.now().date()
         status = self._load_from_registry('RegistrationStatus')
         reg_date_str = self._load_from_registry('RegistrationDate')
-        
+
         if status == 'Permanent':
             self.auth_info = {'status': 'Permanent', 'message': '永久授权'}
             self.is_app_locked_down = False
@@ -620,35 +578,35 @@ class TimedBroadcastApp:
                 except (TypeError, ValueError):
                     self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
                     self.is_app_locked_down = True
-        
+
         self.update_title_bar()
 
     def perform_lockdown(self):
         messagebox.showerror("授权过期", "您的软件试用期或授权已到期，功能已受限。\n请在“注册软件”页面输入有效注册码以继续使用。")
         self.log("软件因授权问题被锁定。")
-        
+
         for task in self.tasks:
             task['status'] = '禁用'
         self.update_task_list()
         self.save_tasks()
-        
+
         self.switch_page("注册软件")
 
     def update_title_bar(self):
         self.root.title(f" 创翔多功能定时播音旗舰版 ({self.auth_info['message']})")
-    
+
     def create_super_admin_page(self):
         page_frame = tk.Frame(self.page_container, bg='white')
-        title_label = tk.Label(page_frame, text="超级管理", font=self.font_14_bold, bg='white', fg='#C0392B')
+        title_label = tk.Label(page_frame, text="超级管理", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#C0392B')
         title_label.pack(anchor='w', padx=20, pady=20)
         desc_label = tk.Label(page_frame, text="警告：此处的任何操作都可能导致数据丢失或配置重置，请谨慎操作。\n(此功能仅对“永久授权”用户开放)",
-                              font=self.font_11, bg='white', fg='red', wraplength=700)
+                              font=('Microsoft YaHei', 11), bg='white', fg='red', wraplength=700)
         desc_label.pack(anchor='w', padx=20, pady=(0, 20))
-        
+
         btn_frame = tk.Frame(page_frame, bg='white')
         btn_frame.pack(padx=20, pady=10, fill=tk.X)
-        
-        btn_font = self.font_12_bold
+
+        btn_font = ('Microsoft YaHei', 12, 'bold')
         btn_width = 20; btn_pady = 10
 
         tk.Button(btn_frame, text="备份所有设置", command=self._backup_all_settings,
@@ -657,10 +615,10 @@ class TimedBroadcastApp:
                   font=btn_font, width=btn_width, pady=btn_pady, bg='#27AE60', fg='white').pack(pady=10)
         tk.Button(btn_frame, text="重置软件", command=self._reset_software,
                   font=btn_font, width=btn_width, pady=btn_pady, bg='#E74C3C', fg='white').pack(pady=10)
-        
+
         tk.Button(btn_frame, text="卸载软件", command=self._prompt_for_uninstall,
                   font=btn_font, width=btn_width, pady=btn_pady, bg='#34495E', fg='white').pack(pady=10)
-                  
+
         return page_frame
 
     def _prompt_for_uninstall(self):
@@ -672,17 +630,17 @@ class TimedBroadcastApp:
         dialog.grab_set()
         self.center_window(dialog, 350, 180)
 
-        result = [None] 
+        result = [None]
 
-        tk.Label(dialog, text="请输入卸载密码:", font=self.font_11).pack(pady=20)
-        password_entry = tk.Entry(dialog, show='*', font=self.font_11, width=25)
+        tk.Label(dialog, text="请输入卸载密码:", font=('Microsoft YaHei', 11)).pack(pady=20)
+        password_entry = tk.Entry(dialog, show='*', font=('Microsoft YaHei', 11), width=25)
         password_entry.pack(pady=5)
         password_entry.focus_set()
 
         def on_confirm():
             result[0] = password_entry.get()
             dialog.destroy()
-        
+
         def on_cancel():
             dialog.destroy()
 
@@ -696,7 +654,7 @@ class TimedBroadcastApp:
         entered_password = result[0]
 
         correct_password = datetime.now().strftime('%Y%m%d')[::-1]
-        
+
         if entered_password == correct_password:
             self.log("卸载密码正确，准备执行卸载操作。")
             self._perform_uninstall()
@@ -747,10 +705,10 @@ class TimedBroadcastApp:
                     self.log(f"成功删除文件: {os.path.basename(file)}")
                 except Exception as e:
                     self.log(f"删除文件 {os.path.basename(file)} 时出错: {e}")
-        
+
         self.log("软件数据清理完成。")
         messagebox.showinfo("卸载完成", "软件相关的数据和配置已全部清除。\n\n请手动删除本程序（.exe文件）以完成卸载。\n\n点击“确定”后软件将退出。")
-        
+
         os._exit(0)
 
     def _backup_all_settings(self):
@@ -758,7 +716,7 @@ class TimedBroadcastApp:
         try:
             backup_data = {
                 'backup_date': datetime.now().isoformat(), 'tasks': self.tasks, 'holidays': self.holidays,
-                'todos': self.todos, 'settings': self.settings, 
+                'todos': self.todos, 'settings': self.settings,
                 'lock_password_b64': self._load_from_registry("LockPasswordB64")
             }
             filename = filedialog.asksaveasfilename(
@@ -777,7 +735,7 @@ class TimedBroadcastApp:
     def _restore_all_settings(self):
         if not messagebox.askyesno("确认操作", "您确定要还原所有设置吗？\n当前所有配置将被立即覆盖。"):
             return
-            
+
         self.log("开始还原所有设置...")
         filename = filedialog.askopenfilename(
             title="选择要还原的备份文件",
@@ -797,13 +755,13 @@ class TimedBroadcastApp:
             self.todos = backup_data.get('todos', [])
             self.settings = backup_data['settings']
             self.lock_password_b64 = backup_data['lock_password_b64']
-            
+
             self.save_tasks()
             self.save_holidays()
             self.save_todos()
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, ensure_ascii=False, indent=2)
-            
+
             if self.lock_password_b64:
                 self._save_to_registry("LockPasswordB64", self.lock_password_b64)
             else:
@@ -813,16 +771,15 @@ class TimedBroadcastApp:
             self.update_holiday_list()
             self.update_todo_list()
             self._refresh_settings_ui()
-            self._update_background_skin() # 新增: 还原后更新皮肤
 
             self.log("所有设置已从备份文件成功还原。")
             messagebox.showinfo("还原成功", "所有设置已成功还原并立即应用。")
-            
+
             self.root.after(100, lambda: self.switch_page("定时广播"))
 
         except Exception as e:
             self.log(f"还原失败: {e}"); messagebox.showerror("还原失败", f"发生错误: {e}")
-    
+
     def _refresh_settings_ui(self):
         if "设置" not in self.pages or not hasattr(self, 'autostart_var'):
             return
@@ -843,14 +800,9 @@ class TimedBroadcastApp:
         self.time_chime_voice_var.set(self.settings.get("time_chime_voice", ""))
         self.time_chime_speed_var.set(self.settings.get("time_chime_speed", "0"))
         self.time_chime_pitch_var.set(self.settings.get("time_chime_pitch", "0"))
-        
+
         self.bg_image_interval_var.set(str(self.settings.get("bg_image_interval", 6)))
-        
-        # --- 新增: 刷新外观设置UI ---
-        self.font_selection_var.set(self.settings.get("font_name", "Microsoft YaHei"))
-        self.bg_skin_alpha_var.set(self.settings.get("bg_skin_alpha", 1.0))
-        # --- 结束 ---
-        
+
         if self.lock_password_b64 and WIN32_AVAILABLE:
             self.clear_password_btn.config(state=tk.NORMAL)
         else:
@@ -877,11 +829,19 @@ class TimedBroadcastApp:
                 shutil.rmtree(CHIME_FOLDER)
                 self.log("已删除整点报时缓存文件。")
 
-            # 使用 load_settings 中的 defaults 来重置
-            default_settings = self._get_default_settings()
+            default_settings = {
+                "autostart": False, "start_minimized": False, "lock_on_start": False,
+                "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00",
+                "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00",
+                "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00",
+                "last_power_action_date": "",
+                "time_chime_enabled": False, "time_chime_voice": "",
+                "time_chime_speed": "0", "time_chime_pitch": "0",
+                "bg_image_interval": 6
+            }
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(default_settings, f, ensure_ascii=False, indent=2)
-            
+
             self.log("软件已成功重置。软件需要重启。")
             messagebox.showinfo("重置成功", "软件已恢复到初始状态。\n\n请点击“确定”后手动关闭并重新启动软件。")
         except Exception as e:
@@ -889,36 +849,38 @@ class TimedBroadcastApp:
 
     def create_scheduled_broadcast_page(self):
         page_frame = self.pages["定时广播"]
-        
+        font_11 = ('Microsoft YaHei', 11)
+
         top_frame = tk.Frame(page_frame, bg='white')
         top_frame.pack(fill=tk.X, padx=10, pady=10)
-        title_label = tk.Label(top_frame, text="定时广播", font=self.font_14_bold,
+        title_label = tk.Label(top_frame, text="定时广播", font=('Microsoft YaHei', 14, 'bold'),
                               bg='white', fg='#2C5F7C')
         title_label.pack(side=tk.LEFT)
-        
+
         add_btn = tk.Button(top_frame, text="添加节目", command=self.add_task, bg='#3498DB', fg='white',
-                              font=self.font_11, bd=0, padx=12, pady=5, cursor='hand2')
+                              font=font_11, bd=0, padx=12, pady=5, cursor='hand2')
         add_btn.pack(side=tk.LEFT, padx=10)
 
         self.top_right_btn_frame = tk.Frame(top_frame, bg='white')
         self.top_right_btn_frame.pack(side=tk.RIGHT)
-        
+
         batch_buttons = [
             ("全部启用", self.enable_all_tasks, '#27AE60'),
             ("全部禁用", self.disable_all_tasks, '#F39C12'),
             ("禁音频节目", lambda: self._set_tasks_status_by_type('audio', '禁用'), '#E67E22'),
             ("禁语音节目", lambda: self._set_tasks_status_by_type('voice', '禁用'), '#D35400'),
-            ("禁视频节目", lambda: self._set_tasks_status_by_type('video', '禁用'), '#2980B9'), 
+            # --- 修改: “禁视频节目”按钮颜色 ---
+            ("禁视频节目", lambda: self._set_tasks_status_by_type('video', '禁用'), '#2980B9'),
             ("统一音量", self.set_uniform_volume, '#8E44AD'),
             ("清空节目", self.clear_all_tasks, '#C0392B')
         ]
         for text, cmd, color in batch_buttons:
             btn = tk.Button(self.top_right_btn_frame, text=text, command=cmd, bg=color, fg='white',
-                          font=self.font_11, bd=0, padx=12, pady=5, cursor='hand2')
+                          font=font_11, bd=0, padx=12, pady=5, cursor='hand2')
             btn.pack(side=tk.LEFT, padx=3)
 
         self.lock_button = tk.Button(self.top_right_btn_frame, text="锁定", command=self.toggle_lock_state, bg='#E74C3C', fg='white',
-                                     font=self.font_11, bd=0, padx=12, pady=5, cursor='hand2')
+                                     font=font_11, bd=0, padx=12, pady=5, cursor='hand2')
         self.lock_button.pack(side=tk.LEFT, padx=3)
         if not WIN32_AVAILABLE:
             self.lock_button.config(state=tk.DISABLED, text="锁定(Win)")
@@ -926,12 +888,12 @@ class TimedBroadcastApp:
         io_buttons = [("导入节目单", self.import_tasks, '#1ABC9C'), ("导出节目单", self.export_tasks, '#1ABC9C')]
         for text, cmd, color in io_buttons:
             btn = tk.Button(self.top_right_btn_frame, text=text, command=cmd, bg=color, fg='white',
-                          font=self.font_11, bd=0, padx=12, pady=5, cursor='hand2')
+                          font=font_11, bd=0, padx=12, pady=5, cursor='hand2')
             btn.pack(side=tk.LEFT, padx=3)
 
         stats_frame = tk.Frame(page_frame, bg='#F0F8FF')
         stats_frame.pack(fill=tk.X, padx=10, pady=5)
-        self.stats_label = tk.Label(stats_frame, text="节目单：0", font=self.font_11,
+        self.stats_label = tk.Label(stats_frame, text="节目单：0", font=('Microsoft YaHei', 11),
                                    bg='#F0F8FF', fg='#2C5F7C', anchor='w', padx=10)
         self.stats_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -939,10 +901,10 @@ class TimedBroadcastApp:
         table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         columns = ('节目名称', '状态', '开始时间', '模式', '文件或内容', '音量', '周几/几号', '日期范围')
         self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12, selectmode='extended')
-        
+
         style = ttk.Style()
-        style.configure("Treeview.Heading", font=self.font_11_bold)
-        style.configure("Treeview", font=self.font_11, rowheight=28)
+        style.configure("Treeview.Heading", font=('Microsoft YaHei', 11, 'bold'))
+        style.configure("Treeview", font=('Microsoft YaHei', 11), rowheight=28)
 
         self.task_tree.heading('节目名称', text='节目名称')
         self.task_tree.column('节目名称', width=200, anchor='w')
@@ -965,138 +927,110 @@ class TimedBroadcastApp:
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.task_tree.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.task_tree.configure(yscrollcommand=scrollbar.set)
-        
+
         self.task_tree.bind("<Button-3>", self.show_context_menu)
         self.task_tree.bind("<Double-1>", self.on_double_click_edit)
         self._enable_drag_selection(self.task_tree)
 
-        playing_frame = tk.LabelFrame(page_frame, text="正在播：", font=self.font_11,
+        playing_frame = tk.LabelFrame(page_frame, text="正在播：", font=('Microsoft YaHei', 11),
                                      bg='white', fg='#2C5F7C', padx=10, pady=2)
         playing_frame.pack(fill=tk.X, padx=10, pady=5)
-        self.playing_label = tk.Label(playing_frame, text="等待播放...", font=self.font_11,
+        self.playing_label = tk.Label(playing_frame, text="等待播放...", font=('Microsoft YaHei', 11),
                                       bg='#FFFEF0', anchor='w', justify=tk.LEFT, padx=5)
         self.playing_label.pack(fill=tk.X, expand=True, ipady=4)
         self.update_playing_text("等待播放...")
 
-        log_frame = tk.LabelFrame(page_frame, text="", font=self.font_11,
+        log_frame = tk.LabelFrame(page_frame, text="", font=('Microsoft YaHei', 11),
                                  bg='white', fg='#2C5F7C', padx=10, pady=5)
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
+
         log_header_frame = tk.Frame(log_frame, bg='white')
         log_header_frame.pack(fill=tk.X)
-        log_label = tk.Label(log_header_frame, text="日志：", font=self.font_11_bold,
+        log_label = tk.Label(log_header_frame, text="日志：", font=('Microsoft YaHei', 11, 'bold'),
                              bg='white', fg='#2C5F7C')
         log_label.pack(side=tk.LEFT)
         self.clear_log_btn = tk.Button(log_header_frame, text="清除日志", command=self.clear_log,
-                                       font=(self.app_font_name, 8), bd=0, bg='#EAEAEA',
+                                       font=('Microsoft YaHei', 8), bd=0, bg='#EAEAEA',
                                        fg='#333', cursor='hand2', padx=5, pady=0)
         self.clear_log_btn.pack(side=tk.LEFT, padx=10)
 
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=6, font=self.font_11,
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=6, font=('Microsoft YaHei', 11),
                                                  bg='#F9F9F9', wrap=tk.WORD, state='disabled')
         self.log_text.pack(fill=tk.BOTH, expand=True)
-        
+
     def create_settings_page(self):
         settings_frame = tk.Frame(self.page_container, bg='white')
-        
-        title_label = tk.Label(settings_frame, text="系统设置", font=self.font_14_bold, bg='white', fg='#2C5F7C')
+
+        title_label = tk.Label(settings_frame, text="系统设置", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#2C5F7C')
         title_label.pack(anchor='w', padx=20, pady=20)
-        
-        # --- 新增: 外观设置 ---
-        appearance_frame = tk.LabelFrame(settings_frame, text="外观设置", font=self.font_12_bold, bg='white', padx=15, pady=10)
-        appearance_frame.pack(fill=tk.X, padx=20, pady=10)
-        
-        # 字体选择
-        font_frame = tk.Frame(appearance_frame, bg='white')
-        font_frame.pack(fill=tk.X, pady=5)
-        tk.Label(font_frame, text="界面字体:", font=self.font_11, bg='white').pack(side=tk.LEFT)
-        self.font_selection_var = tk.StringVar()
-        font_combo = ttk.Combobox(font_frame, textvariable=self.font_selection_var, values=self._get_chinese_fonts(), font=self.font_10, width=20, state='readonly')
-        font_combo.pack(side=tk.LEFT, padx=10)
-        font_combo.bind("<<ComboboxSelected>>", self._handle_font_selection)
-        tk.Label(font_frame, text="(重启后生效)", font=self.font_9, bg='white', fg='grey').pack(side=tk.LEFT)
 
-        # 皮肤选择
-        skin_frame = tk.Frame(appearance_frame, bg='white')
-        skin_frame.pack(fill=tk.X, pady=5)
-        tk.Label(skin_frame, text="背景皮肤:", font=self.font_11, bg='white').pack(side=tk.LEFT)
-        tk.Button(skin_frame, text="选择图片...", font=self.font_10, command=self._select_bg_skin).pack(side=tk.LEFT, padx=10)
-        tk.Button(skin_frame, text="清除皮肤", font=self.font_10, command=self._clear_bg_skin).pack(side=tk.LEFT)
-        
-        self.bg_skin_alpha_var = tk.DoubleVar()
-        alpha_slider = tk.Scale(skin_frame, from_=0.0, to=1.0, resolution=0.05, orient=tk.HORIZONTAL,
-                                variable=self.bg_skin_alpha_var, command=lambda e: self._update_background_skin(),
-                                label="透明度", font=self.font_9, bg='white', troughcolor='#DADADA', highlightthickness=0)
-        alpha_slider.pack(side=tk.LEFT, padx=20)
-        # --- 外观设置结束 ---
-
-        general_frame = tk.LabelFrame(settings_frame, text="通用设置", font=self.font_12_bold, bg='white', padx=15, pady=10)
+        general_frame = tk.LabelFrame(settings_frame, text="通用设置", font=('Microsoft YaHei', 12, 'bold'), bg='white', padx=15, pady=10)
         general_frame.pack(fill=tk.X, padx=20, pady=10)
-        
+
         self.autostart_var = tk.BooleanVar()
         self.start_minimized_var = tk.BooleanVar()
         self.lock_on_start_var = tk.BooleanVar()
         self.bg_image_interval_var = tk.StringVar()
-        
-        tk.Checkbutton(general_frame, text="登录windows后自动启动", variable=self.autostart_var, font=self.font_11, bg='white', anchor='w', command=self._handle_autostart_setting).pack(fill=tk.X, pady=5)
-        tk.Checkbutton(general_frame, text="启动后最小化到系统托盘", variable=self.start_minimized_var, font=self.font_11, bg='white', anchor='w', command=self.save_settings).pack(fill=tk.X, pady=5)
-        
+
+        tk.Checkbutton(general_frame, text="登录windows后自动启动", variable=self.autostart_var, font=('Microsoft YaHei', 11), bg='white', anchor='w', command=self._handle_autostart_setting).pack(fill=tk.X, pady=5)
+        tk.Checkbutton(general_frame, text="启动后最小化到系统托盘", variable=self.start_minimized_var, font=('Microsoft YaHei', 11), bg='white', anchor='w', command=self.save_settings).pack(fill=tk.X, pady=5)
+
         lock_and_buttons_frame = tk.Frame(general_frame, bg='white')
         lock_and_buttons_frame.pack(fill=tk.X, pady=5)
-        
-        self.lock_on_start_cb = tk.Checkbutton(lock_and_buttons_frame, text="启动软件后立即锁定", variable=self.lock_on_start_var, font=self.font_11, bg='white', anchor='w', command=self._handle_lock_on_start_toggle)
+
+        self.lock_on_start_cb = tk.Checkbutton(lock_and_buttons_frame, text="启动软件后立即锁定", variable=self.lock_on_start_var, font=('Microsoft YaHei', 11), bg='white', anchor='w', command=self._handle_lock_on_start_toggle)
         self.lock_on_start_cb.grid(row=0, column=0, sticky='w')
         if not WIN32_AVAILABLE:
             self.lock_on_start_cb.config(state=tk.DISABLED)
-            
-        tk.Label(lock_and_buttons_frame, text="(请先在主界面设置锁定密码)", font=self.font_9, bg='white', fg='grey').grid(row=1, column=0, sticky='w', padx=20)
-        
-        self.clear_password_btn = tk.Button(lock_and_buttons_frame, text="清除锁定密码", font=self.font_11, command=self.clear_lock_password)
+
+        tk.Label(lock_and_buttons_frame, text="(请先在主界面设置锁定密码)", font=('Microsoft YaHei', 9), bg='white', fg='grey').grid(row=1, column=0, sticky='w', padx=20)
+
+        self.clear_password_btn = tk.Button(lock_and_buttons_frame, text="清除锁定密码", font=('Microsoft YaHei', 11), command=self.clear_lock_password)
         self.clear_password_btn.grid(row=0, column=1, padx=20)
-        
-        self.cancel_bg_images_btn = tk.Button(lock_and_buttons_frame, text="取消所有节目背景图片", font=self.font_11, command=self._cancel_all_background_images)
+
+        self.cancel_bg_images_btn = tk.Button(lock_and_buttons_frame, text="取消所有节目背景图片", font=('Microsoft YaHei', 11), command=self._cancel_all_background_images)
         self.cancel_bg_images_btn.grid(row=0, column=2, padx=10)
-        
+
         bg_interval_frame = tk.Frame(general_frame, bg='white')
         bg_interval_frame.pack(fill=tk.X, pady=8)
-        tk.Label(bg_interval_frame, text="背景图片切换间隔:", font=self.font_11, bg='white').pack(side=tk.LEFT)
-        interval_entry = tk.Entry(bg_interval_frame, textvariable=self.bg_image_interval_var, font=self.font_11, width=5)
+        tk.Label(bg_interval_frame, text="背景图片切换间隔:", font=('Microsoft YaHei', 11), bg='white').pack(side=tk.LEFT)
+        interval_entry = tk.Entry(bg_interval_frame, textvariable=self.bg_image_interval_var, font=('Microsoft YaHei', 11), width=5)
         interval_entry.pack(side=tk.LEFT, padx=5)
-        tk.Label(bg_interval_frame, text="秒 (范围: 5-60)", font=self.font_10, bg='white', fg='grey').pack(side=tk.LEFT)
+        tk.Label(bg_interval_frame, text="秒 (范围: 5-60)", font=('Microsoft YaHei', 10), bg='white', fg='grey').pack(side=tk.LEFT)
         interval_entry.bind("<FocusOut>", self._validate_bg_interval)
         interval_entry.bind("<Return>", self._validate_bg_interval)
 
-        time_chime_frame = tk.LabelFrame(settings_frame, text="整点报时", font=self.font_12_bold, bg='white', padx=15, pady=10)
+        time_chime_frame = tk.LabelFrame(settings_frame, text="整点报时", font=('Microsoft YaHei', 12, 'bold'), bg='white', padx=15, pady=10)
         time_chime_frame.pack(fill=tk.X, padx=20, pady=10)
-        
+
         self.time_chime_enabled_var = tk.BooleanVar()
         self.time_chime_voice_var = tk.StringVar()
         self.time_chime_speed_var = tk.StringVar()
         self.time_chime_pitch_var = tk.StringVar()
-        
+
         chime_control_frame = tk.Frame(time_chime_frame, bg='white')
         chime_control_frame.pack(fill=tk.X, pady=5)
 
-        tk.Checkbutton(chime_control_frame, text="启用整点报时功能", variable=self.time_chime_enabled_var, font=self.font_11, bg='white', anchor='w', command=self._handle_time_chime_toggle).pack(side=tk.LEFT)
+        tk.Checkbutton(chime_control_frame, text="启用整点报时功能", variable=self.time_chime_enabled_var, font=('Microsoft YaHei', 11), bg='white', anchor='w', command=self._handle_time_chime_toggle).pack(side=tk.LEFT)
 
         available_voices = self.get_available_voices()
-        self.chime_voice_combo = ttk.Combobox(chime_control_frame, textvariable=self.time_chime_voice_var, values=available_voices, font=self.font_10, width=35, state='readonly')
+        self.chime_voice_combo = ttk.Combobox(chime_control_frame, textvariable=self.time_chime_voice_var, values=available_voices, font=('Microsoft YaHei', 10), width=35, state='readonly')
         self.chime_voice_combo.pack(side=tk.LEFT, padx=10)
         self.chime_voice_combo.bind("<<ComboboxSelected>>", lambda e: self._on_chime_params_changed(is_voice_change=True))
 
         params_frame = tk.Frame(chime_control_frame, bg='white')
         params_frame.pack(side=tk.LEFT, padx=10)
-        tk.Label(params_frame, text="语速(-10~10):", font=self.font_10, bg='white').pack(side=tk.LEFT)
-        speed_entry = tk.Entry(params_frame, textvariable=self.time_chime_speed_var, font=self.font_10, width=5)
+        tk.Label(params_frame, text="语速(-10~10):", font=('Microsoft YaHei', 10), bg='white').pack(side=tk.LEFT)
+        speed_entry = tk.Entry(params_frame, textvariable=self.time_chime_speed_var, font=('Microsoft YaHei', 10), width=5)
         speed_entry.pack(side=tk.LEFT, padx=(0, 10))
-        tk.Label(params_frame, text="音调(-10~10):", font=self.font_10, bg='white').pack(side=tk.LEFT)
-        pitch_entry = tk.Entry(params_frame, textvariable=self.time_chime_pitch_var, font=self.font_10, width=5)
+        tk.Label(params_frame, text="音调(-10~10):", font=('Microsoft YaHei', 10), bg='white').pack(side=tk.LEFT)
+        pitch_entry = tk.Entry(params_frame, textvariable=self.time_chime_pitch_var, font=('Microsoft YaHei', 10), width=5)
         pitch_entry.pack(side=tk.LEFT)
-        
+
         speed_entry.bind("<FocusOut>", self._on_chime_params_changed)
         pitch_entry.bind("<FocusOut>", self._on_chime_params_changed)
 
-        power_frame = tk.LabelFrame(settings_frame, text="电源管理", font=self.font_12_bold, bg='white', padx=15, pady=10)
+        power_frame = tk.LabelFrame(settings_frame, text="电源管理", font=('Microsoft YaHei', 12, 'bold'), bg='white', padx=15, pady=10)
         power_frame.pack(fill=tk.X, padx=20, pady=10)
 
         self.daily_shutdown_enabled_var = tk.BooleanVar()
@@ -1110,124 +1044,31 @@ class TimedBroadcastApp:
 
         daily_frame = tk.Frame(power_frame, bg='white')
         daily_frame.pack(fill=tk.X, pady=4)
-        tk.Checkbutton(daily_frame, text="每天关机", variable=self.daily_shutdown_enabled_var, font=self.font_11, bg='white', command=self.save_settings).pack(side=tk.LEFT)
-        daily_time_entry = tk.Entry(daily_frame, textvariable=self.daily_shutdown_time_var, font=self.font_11, width=15)
+        tk.Checkbutton(daily_frame, text="每天关机", variable=self.daily_shutdown_enabled_var, font=('Microsoft YaHei', 11), bg='white', command=self.save_settings).pack(side=tk.LEFT)
+        daily_time_entry = tk.Entry(daily_frame, textvariable=self.daily_shutdown_time_var, font=('Microsoft YaHei', 11), width=15)
         daily_time_entry.pack(side=tk.LEFT, padx=10)
         self._bind_mousewheel_to_entry(daily_time_entry, self._handle_time_scroll) # 滚轮
-        tk.Button(daily_frame, text="设置", font=self.font_11, command=lambda: self.show_single_time_dialog(self.daily_shutdown_time_var)).pack(side=tk.LEFT)
+        tk.Button(daily_frame, text="设置", font=('Microsoft YaHei', 11), command=lambda: self.show_single_time_dialog(self.daily_shutdown_time_var)).pack(side=tk.LEFT)
 
         weekly_frame = tk.Frame(power_frame, bg='white')
         weekly_frame.pack(fill=tk.X, pady=4)
-        tk.Checkbutton(weekly_frame, text="每周关机", variable=self.weekly_shutdown_enabled_var, font=self.font_11, bg='white', command=self.save_settings).pack(side=tk.LEFT)
-        tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_days_var, font=self.font_11, width=20).pack(side=tk.LEFT, padx=(10,5))
-        weekly_shutdown_time_entry = tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_time_var, font=self.font_11, width=15)
+        tk.Checkbutton(weekly_frame, text="每周关机", variable=self.weekly_shutdown_enabled_var, font=('Microsoft YaHei', 11), bg='white', command=self.save_settings).pack(side=tk.LEFT)
+        tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_days_var, font=('Microsoft YaHei', 11), width=20).pack(side=tk.LEFT, padx=(10,5))
+        weekly_shutdown_time_entry = tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_time_var, font=('Microsoft YaHei', 11), width=15)
         weekly_shutdown_time_entry.pack(side=tk.LEFT, padx=5)
         self._bind_mousewheel_to_entry(weekly_shutdown_time_entry, self._handle_time_scroll) # 滚轮
-        tk.Button(weekly_frame, text="设置", font=self.font_11, command=lambda: self.show_power_week_time_dialog("设置每周关机", self.weekly_shutdown_days_var, self.weekly_shutdown_time_var)).pack(side=tk.LEFT)
+        tk.Button(weekly_frame, text="设置", font=('Microsoft YaHei', 11), command=lambda: self.show_power_week_time_dialog("设置每周关机", self.weekly_shutdown_days_var, self.weekly_shutdown_time_var)).pack(side=tk.LEFT)
 
         reboot_frame = tk.Frame(power_frame, bg='white')
         reboot_frame.pack(fill=tk.X, pady=4)
-        tk.Checkbutton(reboot_frame, text="每周重启", variable=self.weekly_reboot_enabled_var, font=self.font_11, bg='white', command=self.save_settings).pack(side=tk.LEFT)
-        tk.Entry(reboot_frame, textvariable=self.weekly_reboot_days_var, font=self.font_11, width=20).pack(side=tk.LEFT, padx=(10,5))
-        weekly_reboot_time_entry = tk.Entry(reboot_frame, textvariable=self.weekly_reboot_time_var, font=self.font_11, width=15)
+        tk.Checkbutton(reboot_frame, text="每周重启", variable=self.weekly_reboot_enabled_var, font=('Microsoft YaHei', 11), bg='white', command=self.save_settings).pack(side=tk.LEFT)
+        tk.Entry(reboot_frame, textvariable=self.weekly_reboot_days_var, font=('Microsoft YaHei', 11), width=20).pack(side=tk.LEFT, padx=(10,5))
+        weekly_reboot_time_entry = tk.Entry(reboot_frame, textvariable=self.weekly_reboot_time_var, font=('Microsoft YaHei', 11), width=15)
         weekly_reboot_time_entry.pack(side=tk.LEFT, padx=5)
         self._bind_mousewheel_to_entry(weekly_reboot_time_entry, self._handle_time_scroll) # 滚轮
-        tk.Button(reboot_frame, text="设置", font=self.font_11, command=lambda: self.show_power_week_time_dialog("设置每周重启", self.weekly_reboot_days_var, self.weekly_reboot_time_var)).pack(side=tk.LEFT)
+        tk.Button(reboot_frame, text="设置", font=('Microsoft YaHei', 11), command=lambda: self.show_power_week_time_dialog("设置每周重启", self.weekly_reboot_days_var, self.weekly_reboot_time_var)).pack(side=tk.LEFT)
 
         return settings_frame
-
-    def _get_chinese_fonts(self):
-        """获取系统中常见的、可用的中文字体列表"""
-        common_chinese_fonts = [
-            "Microsoft YaHei", "SimSun", "SimHei", "KaiTi", "FangSong",
-            "DengXian", "YouYuan", "LiSu", "STXihei", "STKaiti", "STSong"
-        ]
-        available_fonts = tkinter.font.families()
-        return [font for font in common_chinese_fonts if font in available_fonts]
-
-    def _handle_font_selection(self, event=None):
-        """处理字体选择事件"""
-        selected_font = self.font_selection_var.get()
-        if selected_font != self.settings.get("font_name"):
-            self.settings["font_name"] = selected_font
-            self.save_settings()
-            messagebox.showinfo("设置已保存", f"字体已设置为“{selected_font}”。\n\n此设置将在您下次启动软件后生效。", parent=self.root)
-
-    def _select_bg_skin(self):
-        """选择背景皮肤图片"""
-        if not IMAGE_AVAILABLE:
-            messagebox.showerror("功能受限", "Pillow 库未安装，无法使用皮肤功能。")
-            return
-        
-        filepath = filedialog.askopenfilename(
-            title="选择背景图片",
-            filetypes=[("图片文件", "*.jpg *.jpeg *.png *.bmp"), ("所有文件", "*.*")]
-        )
-        if filepath:
-            self.settings['bg_skin_path'] = filepath
-            self.save_settings()
-            self._update_background_skin()
-
-    def _clear_bg_skin(self):
-        """清除背景皮肤"""
-        if self.settings.get("bg_skin_path"):
-            self.settings['bg_skin_path'] = ""
-            self.save_settings()
-            self._update_background_skin()
-            self.log("背景皮肤已清除。")
-
-    def _update_background_skin(self):
-        """根据设置更新主内容区的背景"""
-        if not IMAGE_AVAILABLE: return
-
-        skin_path = self.settings.get("bg_skin_path", "")
-        alpha = self.settings.get("bg_skin_alpha", 1.0)
-
-        if not skin_path or not os.path.exists(skin_path):
-            # 如果没有皮肤，确保背景是纯白
-            self.page_container.config(bg='white')
-            self.bg_label.config(image='')
-            self.bg_photo = None
-            # 确保所有子页面也是白色
-            for page in self.pages.values():
-                if page and page.winfo_exists():
-                    page.config(bg='white')
-            return
-
-        try:
-            # 有皮肤，让页面容器透明，以显示下层的背景Label
-            self.page_container.config(bg=self.bg_label.cget('bg'))
-            for page in self.pages.values():
-                 if page and page.winfo_exists():
-                    page.config(bg=self.bg_label.cget('bg'))
-
-            self.root.update_idletasks() # 确保获取到正确的尺寸
-            width = self.bg_label.winfo_width()
-            height = self.bg_label.winfo_height()
-
-            if width <= 1 or height <= 1: # 窗口尚未完全渲染
-                self.root.after(100, self._update_background_skin)
-                return
-
-            with Image.open(skin_path) as img:
-                # 调整图片大小以适应窗口，保持比例
-                img.thumbnail((width, height), Image.Resampling.LANCZOS)
-                
-                # 创建一个与图片大小相同的白色背景
-                white_bg = Image.new('RGB', img.size, (255, 255, 255))
-                
-                # 混合图片与白色背景
-                blended_img = Image.blend(img.convert('RGB'), white_bg, 1.0 - alpha)
-
-                self.bg_photo = ImageTk.PhotoImage(blended_img)
-                self.bg_label.config(image=self.bg_photo)
-                
-        except Exception as e:
-            self.log(f"设置背景皮肤失败: {e}")
-            self.settings['bg_skin_path'] = "" # 路径无效，清除它
-            self.page_container.config(bg='white')
-            self.bg_label.config(image='')
-            self.bg_photo = None
 
     def _validate_bg_interval(self, event=None):
         try:
@@ -1252,7 +1093,7 @@ class TimedBroadcastApp:
                 if task.get('bg_image_enabled'):
                     task['bg_image_enabled'] = 0
                     count += 1
-            
+
             if count > 0:
                 self.save_tasks()
                 self.log(f"已成功取消 {count} 个节目的背景图片设置。")
@@ -1269,8 +1110,8 @@ class TimedBroadcastApp:
         saved_speed = self.settings.get("time_chime_speed", "0")
         saved_pitch = self.settings.get("time_chime_pitch", "0")
 
-        params_changed = (current_voice != saved_voice or 
-                          current_speed != saved_speed or 
+        params_changed = (current_voice != saved_voice or
+                          current_speed != saved_speed or
                           current_pitch != saved_pitch)
 
         if self.time_chime_enabled_var.get() and params_changed:
@@ -1286,7 +1127,7 @@ class TimedBroadcastApp:
 
     def _handle_time_chime_toggle(self, force_regenerate=False):
         is_enabled = self.time_chime_enabled_var.get()
-        
+
         if is_enabled or force_regenerate:
             selected_voice = self.time_chime_voice_var.get()
             if not selected_voice:
@@ -1296,19 +1137,19 @@ class TimedBroadcastApp:
 
             self.save_settings()
             self.log("准备启用/更新整点报时功能，开始生成语音文件...")
-            
+
             progress_dialog = tk.Toplevel(self.root)
             progress_dialog.title("请稍候")
             progress_dialog.geometry("350x120")
             progress_dialog.resizable(False, False)
             progress_dialog.transient(self.root); progress_dialog.grab_set()
             self.center_window(progress_dialog, 350, 120)
-            
-            tk.Label(progress_dialog, text="正在生成整点报时文件 (0/24)...", font=self.font_11).pack(pady=10)
-            progress_label = tk.Label(progress_dialog, text="", font=self.font_10)
+
+            tk.Label(progress_dialog, text="正在生成整点报时文件 (0/24)...", font=('Microsoft YaHei', 11)).pack(pady=10)
+            progress_label = tk.Label(progress_dialog, text="", font=('Microsoft YaHei', 10))
             progress_label.pack(pady=5)
-            
-            threading.Thread(target=self._generate_chime_files_worker, 
+
+            threading.Thread(target=self._generate_chime_files_worker,
                              args=(selected_voice, progress_dialog, progress_label), daemon=True).start()
 
         elif not is_enabled and not force_regenerate:
@@ -1317,7 +1158,7 @@ class TimedBroadcastApp:
                 threading.Thread(target=self._delete_chime_files_worker, daemon=True).start()
             else:
                 self.time_chime_enabled_var.set(True)
-    
+
     def _get_time_period_string(self, hour):
         if 0 <= hour < 6: return "凌晨"
         elif 6 <= hour < 9: return "早上"
@@ -1329,7 +1170,7 @@ class TimedBroadcastApp:
     def _generate_chime_files_worker(self, voice, progress_dialog, progress_label):
         if not os.path.exists(CHIME_FOLDER):
             os.makedirs(CHIME_FOLDER)
-        
+
         success = True
         try:
             for hour in range(24):
@@ -1340,14 +1181,14 @@ class TimedBroadcastApp:
 
                 text = f"现在时刻,北京时间{period}{display_hour}点整"
                 output_path = os.path.join(CHIME_FOLDER, f"{hour:02d}.wav")
-                
+
                 progress_text = f"正在生成：{hour:02d}.wav ({hour + 1}/24)"
                 self.root.after(0, lambda p=progress_text: progress_label.config(text=p))
-                
+
                 voice_params = {
-                    'voice': voice, 
-                    'speed': self.settings.get("time_chime_speed", "0"), 
-                    'pitch': self.settings.get("time_chime_pitch", "0"), 
+                    'voice': voice,
+                    'speed': self.settings.get("time_chime_speed", "0"),
+                    'pitch': self.settings.get("time_chime_pitch", "0"),
                     'volume': '100'
                 }
                 if not self._synthesize_text_to_wav(text, voice_params, output_path):
@@ -1413,15 +1254,15 @@ class TimedBroadcastApp:
         dialog.geometry("350x250"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
         self.center_window(dialog, 350, 250)
-        
-        tk.Label(dialog, text="请设置一个锁定密码 (最多6位)", font=self.font_11).pack(pady=10)
-        
-        tk.Label(dialog, text="输入密码:", font=self.font_11).pack(pady=(5,0))
-        pass_entry1 = tk.Entry(dialog, show='*', width=25, font=self.font_11)
+
+        tk.Label(dialog, text="请设置一个锁定密码 (最多6位)", font=('Microsoft YaHei', 11)).pack(pady=10)
+
+        tk.Label(dialog, text="输入密码:", font=('Microsoft YaHei', 11)).pack(pady=(5,0))
+        pass_entry1 = tk.Entry(dialog, show='*', width=25, font=('Microsoft YaHei', 11))
         pass_entry1.pack()
 
-        tk.Label(dialog, text="确认密码:", font=self.font_11).pack(pady=(10,0))
-        pass_entry2 = tk.Entry(dialog, show='*', width=25, font=self.font_11)
+        tk.Label(dialog, text="确认密码:", font=('Microsoft YaHei', 11)).pack(pady=(10,0))
+        pass_entry2 = tk.Entry(dialog, show='*', width=25, font=('Microsoft YaHei', 11))
         pass_entry2.pack()
 
         def confirm():
@@ -1430,7 +1271,7 @@ class TimedBroadcastApp:
             if not p1: messagebox.showerror("错误", "密码不能为空。", parent=dialog); return
             if len(p1) > 6: messagebox.showerror("错误", "密码不能超过6位。", parent=dialog); return
             if p1 != p2: messagebox.showerror("错误", "两次输入的密码不一致。", parent=dialog); return
-            
+
             encoded_pass = base64.b64encode(p1.encode('utf-8')).decode('utf-8')
             if self._save_to_registry("LockPasswordB64", encoded_pass):
                 self.lock_password_b64 = encoded_pass
@@ -1443,8 +1284,8 @@ class TimedBroadcastApp:
                 messagebox.showerror("功能受限", "无法保存密码。\n此功能仅在Windows系统上支持且需要pywin32库。", parent=dialog)
 
         btn_frame = tk.Frame(dialog); btn_frame.pack(pady=20)
-        tk.Button(btn_frame, text="确定", command=confirm, font=self.font_11).pack(side=tk.LEFT, padx=10)
-        tk.Button(btn_frame, text="取消", command=dialog.destroy, font=self.font_11).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="确定", command=confirm, font=('Microsoft YaHei', 11)).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="取消", command=dialog.destroy, font=('Microsoft YaHei', 11)).pack(side=tk.LEFT, padx=10)
 
     def _prompt_for_password_unlock(self):
         dialog = tk.Toplevel(self.root)
@@ -1452,10 +1293,10 @@ class TimedBroadcastApp:
         dialog.geometry("400x180"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
         self.center_window(dialog, 400, 180)
-        
-        tk.Label(dialog, text="请输入密码以解锁", font=self.font_11).pack(pady=10)
-        
-        pass_entry = tk.Entry(dialog, show='*', width=25, font=self.font_11)
+
+        tk.Label(dialog, text="请输入密码以解锁", font=('Microsoft YaHei', 11)).pack(pady=10)
+
+        pass_entry = tk.Entry(dialog, show='*', width=25, font=('Microsoft YaHei', 11))
         pass_entry.pack(pady=5)
         pass_entry.focus_set()
 
@@ -1470,12 +1311,12 @@ class TimedBroadcastApp:
                 self._apply_unlock()
             else:
                 messagebox.showerror("错误", "密码不正确！", parent=dialog)
-        
+
         def clear_password_action():
             if not is_password_correct():
                 messagebox.showerror("错误", "密码不正确！无法清除。", parent=dialog)
                 return
-            
+
             if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。", parent=dialog):
                 self._perform_password_clear_logic()
                 dialog.destroy()
@@ -1483,21 +1324,21 @@ class TimedBroadcastApp:
                 self.root.after(100, lambda: messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root))
 
         btn_frame = tk.Frame(dialog); btn_frame.pack(pady=10)
-        tk.Button(btn_frame, text="确定", command=confirm, font=self.font_11).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="清除密码", command=clear_password_action, font=self.font_11).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="取消", command=dialog.destroy, font=self.font_11).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="确定", command=confirm, font=('Microsoft YaHei', 11)).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="清除密码", command=clear_password_action, font=('Microsoft YaHei', 11)).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="取消", command=dialog.destroy, font=('Microsoft YaHei', 11)).pack(side=tk.LEFT, padx=5)
         dialog.bind('<Return>', lambda event: confirm())
 
     def _perform_password_clear_logic(self):
         if self._save_to_registry("LockPasswordB64", ""):
             self.lock_password_b64 = ""
             self.settings["lock_on_start"] = False
-            
+
             if hasattr(self, 'lock_on_start_var'):
                 self.lock_on_start_var.set(False)
-            
+
             self.save_settings()
-            
+
             if hasattr(self, 'clear_password_btn'):
                 self.clear_password_btn.config(state=tk.DISABLED)
             self.log("锁定密码已清除。")
@@ -1518,23 +1359,23 @@ class TimedBroadcastApp:
     def _set_ui_lock_state(self, state):
         for title, btn in self.nav_buttons.items():
             if title in ["超级管理", "注册软件"]:
-                continue 
+                continue
             try:
                 btn.config(state=state)
             except tk.TclError:
                 pass
-        
+
         for page_name, page_frame in self.pages.items():
             if page_frame and page_frame.winfo_exists():
                 if page_name in ["超级管理", "注册软件"]:
                     continue
                 self._set_widget_state_recursively(page_frame, state)
-    
+
     def _set_widget_state_recursively(self, parent_widget, state):
         for child in parent_widget.winfo_children():
             if child == self.lock_button:
                 continue
-            
+
             try:
                 if isinstance(child, (ttk.Widget, ttk.Treeview)):
                     child.state(['disabled'] if state == tk.DISABLED else ['!disabled'])
@@ -1542,10 +1383,10 @@ class TimedBroadcastApp:
                     child.config(state=state)
             except tk.TclError:
                 pass
-            
+
             if child.winfo_children():
                 self._set_widget_state_recursively(child, state)
-    
+
     def clear_log(self):
         if messagebox.askyesno("确认操作", "您确定要清空所有日志记录吗？\n此操作不可恢复。"):
             self.log_text.config(state='normal')
@@ -1561,12 +1402,12 @@ class TimedBroadcastApp:
     def show_context_menu(self, event):
         if self.is_locked: return
         iid = self.task_tree.identify_row(event.y)
-        context_menu = tk.Menu(self.root, tearoff=0, font=self.font_11)
+        context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 11))
 
         if iid:
             if iid not in self.task_tree.selection():
                 self.task_tree.selection_set(iid)
-            
+
             context_menu.add_command(label="立即播放", command=self.play_now)
             context_menu.add_separator()
             context_menu.add_command(label="修改", command=self.edit_task)
@@ -1583,14 +1424,14 @@ class TimedBroadcastApp:
         else:
             self.task_tree.selection_set()
             context_menu.add_command(label="添加节目", command=self.add_task)
-        
+
         context_menu.add_separator()
         context_menu.add_command(label="停止当前播放", command=self.stop_current_playback)
         context_menu.post(event.x_root, event.y_root)
 
     def play_now(self):
         selection = self.task_tree.selection()
-        if not selection: 
+        if not selection:
             messagebox.showwarning("提示", "请先选择一个要立即播放的节目。")
             return
         index = self.task_tree.index(selection[0])
@@ -1612,23 +1453,24 @@ class TimedBroadcastApp:
         main_frame = tk.Frame(choice_dialog, padx=20, pady=20, bg='#F0F0F0')
         main_frame.pack(fill=tk.BOTH, expand=True)
         title_label = tk.Label(main_frame, text="请选择要添加的节目类型",
-                              font=self.font_13_bold, fg='#2C5F7C', bg='#F0F0F0')
+                              font=('Microsoft YaHei', 13, 'bold'), fg='#2C5F7C', bg='#F0F0F0')
         title_label.pack(pady=15)
         btn_frame = tk.Frame(main_frame, bg='#F0F0F0')
         btn_frame.pack(expand=True)
-        
+
         audio_btn = tk.Button(btn_frame, text="🎵 音频节目",
-                             bg='#5DADE2', fg='white', font=self.font_12_bold,
+                             bg='#5DADE2', fg='white', font=('Microsoft YaHei', 12, 'bold'),
                              bd=0, padx=30, pady=12, cursor='hand2', width=15, command=lambda: self.open_audio_dialog(choice_dialog))
         audio_btn.pack(pady=8)
-        
+
         voice_btn = tk.Button(btn_frame, text="🎙️ 语音节目",
-                             bg='#3498DB', fg='white', font=self.font_12_bold,
+                             bg='#3498DB', fg='white', font=('Microsoft YaHei', 12, 'bold'),
                              bd=0, padx=30, pady=12, cursor='hand2', width=15, command=lambda: self.open_voice_dialog(choice_dialog))
         voice_btn.pack(pady=8)
 
+        # --- 新增: 视频节目按钮 ---
         video_btn = tk.Button(btn_frame, text="🎬 视频节目",
-                             bg='#9B59B6', fg='white', font=self.font_12_bold,
+                             bg='#9B59B6', fg='white', font=('Microsoft YaHei', 12, 'bold'),
                              bd=0, padx=30, pady=12, cursor='hand2', width=15, command=lambda: self.open_video_dialog(choice_dialog))
         video_btn.pack(pady=8)
         if not VLC_AVAILABLE:
@@ -1642,15 +1484,15 @@ class TimedBroadcastApp:
         dialog.geometry("950x750")
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#E8E8E8')
-        
+
         main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        content_frame = tk.LabelFrame(main_frame, text="内容", font=self.font_12_bold,
+
+        content_frame = tk.LabelFrame(main_frame, text="内容", font=('Microsoft YaHei', 12, 'bold'),
                                      bg='#E8E8E8', padx=10, pady=5)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
-        font_spec = self.font_11
-        
+        font_spec = ('Microsoft YaHei', 11)
+
         tk.Label(content_frame, text="节目名称:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
         name_entry = tk.Entry(content_frame, font=font_spec, width=55)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -1681,23 +1523,23 @@ class TimedBroadcastApp:
         play_order_var = tk.StringVar(value="sequential")
         tk.Radiobutton(play_order_frame, text="顺序播", variable=play_order_var, value="sequential", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT, padx=10)
         tk.Radiobutton(play_order_frame, text="随机播", variable=play_order_var, value="random", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT, padx=10)
-        
+
         bg_image_var = tk.IntVar(value=0)
         bg_image_path_var = tk.StringVar()
         bg_image_order_var = tk.StringVar(value="sequential")
 
         bg_image_frame = tk.Frame(content_frame, bg='#E8E8E8')
         bg_image_frame.grid(row=4, column=0, columnspan=4, sticky='w', padx=5, pady=5)
-        
+
         bg_image_cb = tk.Checkbutton(bg_image_frame, text="背景图片:", variable=bg_image_var, bg='#E8E8E8', font=font_spec)
         bg_image_cb.pack(side=tk.LEFT)
         if not IMAGE_AVAILABLE: bg_image_cb.config(state=tk.DISABLED, text="背景图片(Pillow未安装):")
 
         bg_image_entry = tk.Entry(bg_image_frame, textvariable=bg_image_path_var, font=font_spec, width=42)
         bg_image_entry.pack(side=tk.LEFT, padx=(0, 5))
-        
+
         tk.Button(bg_image_frame, text="选取...", command=lambda: select_folder(bg_image_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).pack(side=tk.LEFT, padx=5)
-        
+
         tk.Radiobutton(bg_image_frame, text="顺序", variable=bg_image_order_var, value="sequential", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT, padx=(10,0))
         tk.Radiobutton(bg_image_frame, text="随机", variable=bg_image_order_var, value="random", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
 
@@ -1707,13 +1549,14 @@ class TimedBroadcastApp:
         volume_entry = tk.Entry(volume_frame, font=font_spec, width=10)
         volume_entry.pack(side=tk.LEFT, padx=5)
         tk.Label(volume_frame, text="0-100", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
-        
-        time_frame = tk.LabelFrame(main_frame, text="时间", font=self.font_12_bold, bg='#E8E8E8', padx=15, pady=10)
+
+        time_frame = tk.LabelFrame(main_frame, text="时间", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=15, pady=10)
         time_frame.grid(row=1, column=0, sticky='ew', pady=4)
         tk.Label(time_frame, text="开始时间:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
         start_time_entry = tk.Entry(time_frame, font=font_spec, width=50)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
-        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll) # 新增: 绑定滚轮
+        # --- 新增: 绑定滚轮 ---
+        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
         tk.Label(time_frame, text="《可多个,用英文逗号,隔开》", font=font_spec, bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
         tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=0, column=3, padx=5)
         interval_var = tk.StringVar(value="first")
@@ -1739,8 +1582,8 @@ class TimedBroadcastApp:
         date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=3)
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll) # 滚轮
         tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=4, column=3, padx=5)
-        
-        other_frame = tk.LabelFrame(main_frame, text="其它", font=self.font_12_bold, bg='#E8E8E8', padx=10, pady=10)
+
+        other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=10)
         other_frame.grid(row=2, column=0, sticky='ew', pady=5)
         delay_var = tk.StringVar(value="ontime")
         tk.Label(other_frame, text="模式:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='nw', padx=5, pady=2)
@@ -1774,7 +1617,7 @@ class TimedBroadcastApp:
         else:
             volume_entry.insert(0, "80"); interval_first_entry.insert(0, "1"); interval_seconds_entry.insert(0, "600")
             weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
-            
+
         def save_task():
             audio_path = audio_single_entry.get().strip() if audio_type_var.get() == "single" else audio_folder_entry.get().strip()
             if not audio_path: messagebox.showwarning("警告", "请选择音频文件或文件夹", parent=dialog); return
@@ -1782,63 +1625,65 @@ class TimedBroadcastApp:
             if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
             is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
             if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
-            
+
             play_mode = delay_var.get()
             play_this_task_now = (play_mode == 'immediate')
             saved_delay_type = 'ontime' if play_mode == 'immediate' else play_mode
 
             new_task_data = {
-                'name': name_entry.get().strip(), 'time': time_msg, 'content': audio_path, 'type': 'audio', 
-                'audio_type': audio_type_var.get(), 'play_order': play_order_var.get(), 
-                'volume': volume_entry.get().strip() or "80", 'interval_type': interval_var.get(), 
-                'interval_first': interval_first_entry.get().strip(), 'interval_seconds': interval_seconds_entry.get().strip(), 
-                'weekday': weekday_entry.get().strip(), 'date_range': date_msg, 'delay': saved_delay_type, 
-                'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 
+                'name': name_entry.get().strip(), 'time': time_msg, 'content': audio_path, 'type': 'audio',
+                'audio_type': audio_type_var.get(), 'play_order': play_order_var.get(),
+                'volume': volume_entry.get().strip() or "80", 'interval_type': interval_var.get(),
+                'interval_first': interval_first_entry.get().strip(), 'interval_seconds': interval_seconds_entry.get().strip(),
+                'weekday': weekday_entry.get().strip(), 'date_range': date_msg, 'delay': saved_delay_type,
+                'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'),
                 'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {}),
                 'bg_image_enabled': bg_image_var.get(),
                 'bg_image_path': bg_image_path_var.get().strip(),
                 'bg_image_order': bg_image_order_var.get()
             }
             if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
-            
+
             if is_edit_mode: self.tasks[index] = new_task_data; self.log(f"已修改音频节目: {new_task_data['name']}")
             else: self.tasks.append(new_task_data); self.log(f"已添加音频节目: {new_task_data['name']}")
-            
+
             self.update_task_list(); self.save_tasks(); dialog.destroy()
 
             if play_this_task_now:
                 self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
-        
+
         button_text = "保存修改" if is_edit_mode else "添加"
-        tk.Button(dialog_button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=self.font_11_bold, bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
-        tk.Button(dialog_button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=self.font_11, bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
-        
+        tk.Button(dialog_button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(dialog_button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+
         content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
 
+    # --- 新增: 添加和编辑视频节目的对话框 ---
     def open_video_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
         dialog = tk.Toplevel(self.root)
         dialog.title("修改视频节目" if is_edit_mode else "添加视频节目")
-        dialog.geometry("950x750")
+        dialog.geometry("950x750") # 统一尺寸
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
-        dialog.configure(bg='#E8E8E8')
+        dialog.configure(bg='#E8E8E8') # 统一背景色
 
         main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        font_spec = self.font_11
 
-        content_frame = tk.LabelFrame(main_frame, text="内容", font=self.font_12_bold,
+        font_spec = ('Microsoft YaHei', 11)
+
+        # --- 内容设置 ---
+        content_frame = tk.LabelFrame(main_frame, text="内容", font=('Microsoft YaHei', 12, 'bold'),
                                      bg='#E8E8E8', padx=10, pady=5)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
 
         tk.Label(content_frame, text="节目名称:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
         name_entry = tk.Entry(content_frame, font=font_spec, width=55)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        
+
         video_type_var = tk.StringVar(value="single")
 
         tk.Label(content_frame, text="视频文件:", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=2)
@@ -1847,7 +1692,7 @@ class TimedBroadcastApp:
         tk.Radiobutton(video_single_frame, text="", variable=video_type_var, value="single", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
         video_single_entry = tk.Entry(video_single_frame, font=font_spec, width=50)
         video_single_entry.pack(side=tk.LEFT, padx=5)
-        
+
         def select_single_video():
             ftypes = [("视频文件", "*.mp4 *.mkv *.avi *.mov *.wmv *.flv"), ("所有文件", "*.*")]
             filename = filedialog.askopenfilename(title="选择视频文件", filetypes=ftypes)
@@ -1862,14 +1707,14 @@ class TimedBroadcastApp:
         tk.Radiobutton(video_folder_frame, text="", variable=video_type_var, value="folder", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
         video_folder_entry = tk.Entry(video_folder_frame, font=font_spec, width=50)
         video_folder_entry.pack(side=tk.LEFT, padx=5)
-        
+
         def select_folder(entry_widget):
             foldername = filedialog.askdirectory(title="选择文件夹", initialdir=application_path)
             if foldername:
                 entry_widget.delete(0, tk.END)
                 entry_widget.insert(0, foldername)
         tk.Button(video_folder_frame, text="选取...", command=lambda: select_folder(video_folder_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).pack(side=tk.LEFT, padx=5)
-        
+
         play_order_frame = tk.Frame(content_frame, bg='#E8E8E8')
         play_order_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=2)
         play_order_var = tk.StringVar(value="sequential")
@@ -1882,17 +1727,18 @@ class TimedBroadcastApp:
         volume_entry = tk.Entry(volume_frame, font=font_spec, width=10)
         volume_entry.pack(side=tk.LEFT, padx=5)
         tk.Label(volume_frame, text="0-100", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
-        
+
         content_frame.columnconfigure(1, weight=1)
 
-        playback_frame = tk.LabelFrame(main_frame, text="播放选项", font=self.font_12_bold,
+        # --- 播放选项 ---
+        playback_frame = tk.LabelFrame(main_frame, text="播放选项", font=('Microsoft YaHei', 12, 'bold'),
                                      bg='#E8E8E8', padx=10, pady=10)
         playback_frame.grid(row=1, column=0, sticky='ew', pady=4)
-        
+
         playback_mode_var = tk.StringVar(value="fullscreen")
         resolutions = ["640x480", "800x600", "1024x768", "1280x720", "1366x768", "1600x900", "1920x1080"]
         resolution_var = tk.StringVar(value=resolutions[2])
-        
+
         playback_rates = ['0.5x', '0.75x', '1.0x (正常)', '1.25x', '1.5x', '2.0x']
         playback_rate_var = tk.StringVar(value='1.0x (正常)')
 
@@ -1910,26 +1756,28 @@ class TimedBroadcastApp:
         tk.Radiobutton(mode_frame, text="无边框全屏", variable=playback_mode_var, value="fullscreen", bg='#E8E8E8', font=font_spec, command=toggle_resolution_combo).pack(side=tk.LEFT, padx=5)
         tk.Radiobutton(mode_frame, text="非全屏", variable=playback_mode_var, value="windowed", bg='#E8E8E8', font=font_spec, command=toggle_resolution_combo).pack(side=tk.LEFT, padx=5)
         resolution_combo.pack(side=tk.LEFT, padx=10)
-        
+
         rate_frame = tk.Frame(playback_frame, bg='#E8E8E8')
         rate_frame.grid(row=1, column=0, columnspan=3, sticky='w', pady=5)
         tk.Label(rate_frame, text="播放倍速:", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
         rate_combo = ttk.Combobox(rate_frame, textvariable=playback_rate_var, values=playback_rates, font=font_spec, width=15)
         rate_combo.pack(side=tk.LEFT)
-        tk.Label(rate_frame, text="(可手动输入0.25-4.0之间的值)", font=self.font_9, fg='grey', bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
+        tk.Label(rate_frame, text="(可手动输入0.25-4.0之间的值)", font=('Microsoft YaHei', 9), fg='grey', bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
 
-        toggle_resolution_combo()
-        
-        time_frame = tk.LabelFrame(main_frame, text="时间", font=self.font_12_bold, bg='#E8E8E8', padx=15, pady=10)
+        toggle_resolution_combo() # 初始化状态
+
+        # --- 时间设置 (复用) ---
+        time_frame = tk.LabelFrame(main_frame, text="时间", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=15, pady=10)
         time_frame.grid(row=2, column=0, sticky='ew', pady=4)
-        
+
         tk.Label(time_frame, text="开始时间:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
         start_time_entry = tk.Entry(time_frame, font=font_spec, width=50)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
-        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll) # 新增: 绑定滚轮
+        # --- 新增: 绑定滚轮 ---
+        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
         tk.Label(time_frame, text="《可多个,用英文逗号,隔开》", font=font_spec, bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
         tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=0, column=3, padx=5)
-        
+
         interval_var = tk.StringVar(value="first")
         interval_frame1 = tk.Frame(time_frame, bg='#E8E8E8')
         interval_frame1.grid(row=1, column=1, columnspan=2, sticky='w', padx=5, pady=2)
@@ -1938,7 +1786,7 @@ class TimedBroadcastApp:
         interval_first_entry = tk.Entry(interval_frame1, font=font_spec, width=15)
         interval_first_entry.pack(side=tk.LEFT, padx=5)
         tk.Label(interval_frame1, text="(单视频时,指 n 遍)", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
-        
+
         interval_frame2 = tk.Frame(time_frame, bg='#E8E8E8')
         interval_frame2.grid(row=2, column=1, columnspan=2, sticky='w', padx=5, pady=2)
         tk.Radiobutton(interval_frame2, text="播 n 秒", variable=interval_var, value="seconds", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
@@ -1956,12 +1804,13 @@ class TimedBroadcastApp:
         date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=3)
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
         tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=4, column=3, padx=5)
-        
+
         time_frame.columnconfigure(1, weight=1)
 
-        other_frame = tk.LabelFrame(main_frame, text="其它", font=self.font_12_bold, bg='#E8E8E8', padx=10, pady=10)
+        # --- 其他设置 (复用) ---
+        other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=10)
         other_frame.grid(row=3, column=0, sticky='ew', pady=5)
-        
+
         delay_var = tk.StringVar(value="ontime")
         tk.Label(other_frame, text="模式:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='nw', padx=5, pady=2)
         delay_frame = tk.Frame(other_frame, bg='#E8E8E8')
@@ -1969,11 +1818,12 @@ class TimedBroadcastApp:
         tk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们（默认）", variable=delay_var, value="ontime", bg='#E8E8E8', font=font_spec).pack(anchor='w')
         tk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候", variable=delay_var, value="delay", bg='#E8E8E8', font=font_spec).pack(anchor='w')
         tk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate", bg='#E8E8E8', font=font_spec).pack(anchor='w')
-        
+
         dialog_button_frame = tk.Frame(other_frame, bg='#E8E8E8')
         dialog_button_frame.grid(row=0, column=2, sticky='e', padx=20)
         other_frame.grid_columnconfigure(1, weight=1)
 
+        # --- 填充数据 (编辑模式) 或 默认值 (新增模式) ---
         if is_edit_mode:
             task = task_to_edit
             name_entry.insert(0, task.get('name', ''))
@@ -2002,6 +1852,7 @@ class TimedBroadcastApp:
             weekday_entry.insert(0, "每周:1234567")
             date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
 
+        # --- 保存和取消按钮 ---
         def save_task():
             video_path = video_single_entry.get().strip() if video_type_var.get() == "single" else video_folder_entry.get().strip()
             if not video_path:
@@ -2012,9 +1863,16 @@ class TimedBroadcastApp:
             if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
             is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
             if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
-            
-            # 修复: 清理播放倍速字符串，移除括号和中文
-            rate_str = playback_rate_var.get().strip().split(' ')[0].replace('x', '')
+
+            # --- 修复: 清理播放倍速值 ---
+            rate_input = playback_rate_var.get().strip()
+            # 使用正则表达式或简单分割来提取数字部分
+            rate_match = re.match(r"(\d+(\.\d+)?)", rate_input)
+            if not rate_match:
+                messagebox.showwarning("输入错误", "无效的播放倍速值。", parent=dialog)
+                return
+            rate_str = rate_match.group(1)
+
             try:
                 rate_val = float(rate_str)
                 if not (0.25 <= rate_val <= 4.0):
@@ -2041,7 +1899,7 @@ class TimedBroadcastApp:
                 'interval_seconds': interval_seconds_entry.get().strip() or "600",
                 'playback_mode': playback_mode_var.get(),
                 'resolution': resolution_var.get(),
-                'playback_rate': playback_rate_var.get(), # 保存原始值以在UI上显示
+                'playback_rate': rate_input, # 保存用户选择的完整字符串
                 'weekday': weekday_entry.get().strip(),
                 'date_range': date_msg,
                 'delay': saved_delay_type,
@@ -2051,14 +1909,14 @@ class TimedBroadcastApp:
             if not new_task_data['name'] or not new_task_data['time']:
                 messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog)
                 return
-            
+
             if is_edit_mode:
                 self.tasks[index] = new_task_data
                 self.log(f"已修改视频节目: {new_task_data['name']}")
             else:
                 self.tasks.append(new_task_data)
                 self.log(f"已添加视频节目: {new_task_data['name']}")
-            
+
             self.update_task_list()
             self.save_tasks()
             dialog.destroy()
@@ -2067,9 +1925,9 @@ class TimedBroadcastApp:
                 self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
 
         button_text = "保存修改" if is_edit_mode else "添加"
-        tk.Button(dialog_button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=self.font_11_bold, bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
-        tk.Button(dialog_button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=self.font_11, bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
-        
+        tk.Button(dialog_button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(dialog_button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
@@ -2082,10 +1940,10 @@ class TimedBroadcastApp:
         main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        content_frame = tk.LabelFrame(main_frame, text="内容", font=self.font_12_bold, bg='#E8E8E8', padx=10, pady=5)
+        content_frame = tk.LabelFrame(main_frame, text="内容", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=5)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
-        font_spec = self.font_11
-        
+        font_spec = ('Microsoft YaHei', 11)
+
         tk.Label(content_frame, text="节目名称:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='w', padx=5, pady=2)
         name_entry = tk.Entry(content_frame, font=font_spec, width=65)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -2096,8 +1954,8 @@ class TimedBroadcastApp:
         content_text.pack(fill=tk.BOTH, expand=True)
         script_btn_frame = tk.Frame(content_frame, bg='#E8E8E8')
         script_btn_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=(0, 2))
-        tk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text), font=self.font_10).pack(side=tk.LEFT)
-        tk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text, name_entry), font=self.font_10).pack(side=tk.LEFT, padx=10)
+        tk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text), font=('Microsoft YaHei', 10)).pack(side=tk.LEFT)
+        tk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text, name_entry), font=('Microsoft YaHei', 10)).pack(side=tk.LEFT, padx=10)
         tk.Label(content_frame, text="播音员:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='w', padx=5, pady=3)
         voice_frame = tk.Frame(content_frame, bg='#E8E8E8')
         voice_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=3)
@@ -2129,32 +1987,33 @@ class TimedBroadcastApp:
         tk.Button(bgm_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var)).pack(side=tk.LEFT)
         tk.Label(bgm_frame, text="音量(0-100):", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
         tk.Entry(bgm_frame, textvariable=bgm_volume_var, font=font_spec, width=8).pack(side=tk.LEFT, padx=5)
-        
+
         bg_image_var = tk.IntVar(value=0)
         bg_image_path_var = tk.StringVar()
         bg_image_order_var = tk.StringVar(value="sequential")
-        
+
         bg_image_frame = tk.Frame(content_frame, bg='#E8E8E8')
         bg_image_frame.grid(row=7, column=1, columnspan=3, sticky='w', padx=5, pady=5)
-        
+
         bg_image_cb = tk.Checkbutton(bg_image_frame, text="背景图片:", variable=bg_image_var, bg='#E8E8E8', font=font_spec)
         bg_image_cb.pack(side=tk.LEFT)
         if not IMAGE_AVAILABLE: bg_image_cb.config(state=tk.DISABLED, text="背景图片(Pillow未安装):")
 
         bg_image_entry = tk.Entry(bg_image_frame, textvariable=bg_image_path_var, font=font_spec, width=32)
         bg_image_entry.pack(side=tk.LEFT, padx=(0, 5))
-        
+
         tk.Button(bg_image_frame, text="选取...", command=lambda: select_folder(bg_image_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).pack(side=tk.LEFT, padx=5)
-        
+
         tk.Radiobutton(bg_image_frame, text="顺序", variable=bg_image_order_var, value="sequential", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT, padx=(10,0))
         tk.Radiobutton(bg_image_frame, text="随机", variable=bg_image_order_var, value="random", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
 
-        time_frame = tk.LabelFrame(main_frame, text="时间", font=self.font_12_bold, bg='#E8E8E8', padx=10, pady=5)
+        time_frame = tk.LabelFrame(main_frame, text="时间", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=5)
         time_frame.grid(row=1, column=0, sticky='ew', pady=2)
         tk.Label(time_frame, text="开始时间:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
         start_time_entry = tk.Entry(time_frame, font=font_spec, width=50)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
-        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll) # 新增: 绑定滚轮
+        # --- 新增: 绑定滚轮 ---
+        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
         tk.Label(time_frame, text="《可多个,用英文逗号,隔开》", font=font_spec, bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
         tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=0, column=3, padx=5)
         tk.Label(time_frame, text="播 n 遍:", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=2)
@@ -2169,8 +2028,8 @@ class TimedBroadcastApp:
         date_range_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=2)
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll) # 滚轮
         tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=3, column=3, padx=5)
-        
-        other_frame = tk.LabelFrame(main_frame, text="其它", font=self.font_12_bold, bg='#E8E8E8', padx=15, pady=10)
+
+        other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=15, pady=10)
         other_frame.grid(row=2, column=0, sticky='ew', pady=4)
         delay_var = tk.StringVar(value="delay")
         tk.Label(other_frame, text="模式:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='nw', padx=5, pady=2)
@@ -2223,30 +2082,33 @@ class TimedBroadcastApp:
 
             def build_task_data(wav_path, wav_filename_str):
                 play_mode = delay_var.get()
-                saved_delay_type = task_to_edit.get('delay', 'delay') if is_edit_mode else play_mode
+                play_this_task_now = (play_mode == 'immediate')
+                saved_delay_type = 'delay' if play_mode == 'immediate' else play_mode
+
                 return {
-                    'name': name_entry.get().strip(), 'time': time_msg, 'type': 'voice', 'content': wav_path, 
-                    'wav_filename': wav_filename_str, 'source_text': text_content, 'voice': voice_var.get(), 
-                    'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0", 
-                    'volume': volume_entry.get().strip() or "80", 'prompt': prompt_var.get(), 
-                    'prompt_file': prompt_file_var.get(), 'prompt_volume': prompt_volume_var.get(), 
-                    'bgm': bgm_var.get(), 'bgm_file': bgm_file_var.get(), 'bgm_volume': bgm_volume_var.get(), 
-                    'repeat': repeat_entry.get().strip() or "1", 'weekday': weekday_entry.get().strip(), 
-                    'date_range': date_msg, 'delay': saved_delay_type, 
-                    'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'), 
+                    'name': name_entry.get().strip(), 'time': time_msg, 'type': 'voice', 'content': wav_path,
+                    'wav_filename': wav_filename_str, 'source_text': text_content, 'voice': voice_var.get(),
+                    'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0",
+                    'volume': volume_entry.get().strip() or "80", 'prompt': prompt_var.get(),
+                    'prompt_file': prompt_file_var.get(), 'prompt_volume': prompt_volume_var.get(),
+                    'bgm': bgm_var.get(), 'bgm_file': bgm_file_var.get(), 'bgm_volume': bgm_volume_var.get(),
+                    'repeat': repeat_entry.get().strip() or "1", 'weekday': weekday_entry.get().strip(),
+                    'date_range': date_msg, 'delay': saved_delay_type,
+                    'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'),
                     'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {}),
                     'bg_image_enabled': bg_image_var.get(),
                     'bg_image_path': bg_image_path_var.get().strip(),
                     'bg_image_order': bg_image_order_var.get()
-                }
+                }, play_this_task_now
 
             if not regeneration_needed:
-                new_task_data = build_task_data(task_to_edit.get('content'), task_to_edit.get('wav_filename'))
+                new_task_data, play_now_flag = build_task_data(task_to_edit.get('content'), task_to_edit.get('wav_filename'))
                 if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
                 self.tasks[index] = new_task_data; self.log(f"已修改语音节目(未重新生成语音): {new_task_data['name']}")
                 self.update_task_list(); self.save_tasks(); dialog.destroy()
-                if delay_var.get() == 'immediate': self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
+                if play_now_flag: self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
                 return
+
             progress_dialog = tk.Toplevel(dialog); progress_dialog.title("请稍候"); progress_dialog.geometry("300x100")
             progress_dialog.resizable(False, False); progress_dialog.transient(dialog); progress_dialog.grab_set()
             tk.Label(progress_dialog, text="语音文件生成中，请稍后...", font=font_spec).pack(expand=True)
@@ -2262,19 +2124,19 @@ class TimedBroadcastApp:
                     if os.path.exists(old_wav_path):
                         try: os.remove(old_wav_path); self.log(f"已删除旧语音文件: {task_to_edit['wav_filename']}")
                         except Exception as e: self.log(f"删除旧语音文件失败: {e}")
-                new_task_data = build_task_data(output_path, new_wav_filename)
+                new_task_data, play_now_flag = build_task_data(output_path, new_wav_filename)
                 if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
                 if is_edit_mode: self.tasks[index] = new_task_data; self.log(f"已修改语音节目(并重新生成语音): {new_task_data['name']}")
                 else: self.tasks.append(new_task_data); self.log(f"已添加语音节目: {new_task_data['name']}")
                 self.update_task_list(); self.save_tasks(); dialog.destroy()
-                if delay_var.get() == 'immediate': self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
+                if play_now_flag: self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
             synthesis_thread = threading.Thread(target=self._synthesis_worker, args=(text_content, voice_params, output_path, _on_synthesis_complete))
             synthesis_thread.daemon = True; synthesis_thread.start()
-        
+
         button_text = "保存修改" if is_edit_mode else "添加"
-        tk.Button(dialog_button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=self.font_11_bold, bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
-        tk.Button(dialog_button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=self.font_11, bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
-        
+        tk.Button(dialog_button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(dialog_button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+
         content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
 
     def _import_voice_script(self, text_widget):
@@ -2285,7 +2147,7 @@ class TimedBroadcastApp:
         )
         if not filename:
             return
-        
+
         try:
             with open(filename, 'r', encoding='utf-8') as f:
                 content = f.read()
@@ -2319,7 +2181,7 @@ class TimedBroadcastApp:
         )
         if not filename:
             return
-            
+
         try:
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(content)
@@ -2342,14 +2204,14 @@ class TimedBroadcastApp:
     def _synthesize_text_to_wav(self, text, voice_params, output_path):
         if not WIN32_AVAILABLE:
             raise ImportError("pywin32 模块未安装，无法进行语音合成。")
-        
+
         pythoncom.CoInitialize()
         try:
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
             stream = win32com.client.Dispatch("SAPI.SpFileStream")
             stream.Open(output_path, 3, False)
             speaker.AudioOutputStream = stream
-            
+
             all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
             if (selected_voice_desc := voice_params.get('voice')) in all_voices:
                 speaker.Voice = all_voices[selected_voice_desc]
@@ -2357,7 +2219,7 @@ class TimedBroadcastApp:
             speaker.Volume = int(voice_params.get('volume', 80))
             escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("'", "&apos;").replace('"', "&quot;")
             xml_text = f"<rate absspeed='{voice_params.get('speed', '0')}'><pitch middle='{voice_params.get('pitch', '0')}'>{escaped_text}</pitch></rate>"
-            
+
             speaker.Speak(xml_text, 1)
             speaker.WaitUntilDone(-1)
             stream.Close()
@@ -2379,7 +2241,7 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"警告: 使用 win32com 获取语音列表失败 - {e}")
             return []
-    
+
     def select_file_for_entry(self, initial_dir, string_var):
         filename = filedialog.askopenfilename(title="选择文件", initialdir=initial_dir, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")])
         if filename: string_var.set(os.path.basename(filename))
@@ -2396,6 +2258,7 @@ class TimedBroadcastApp:
                     if os.path.exists(wav_path):
                         try: os.remove(wav_path); self.log(f"已删除语音文件: {task_to_delete['wav_filename']}")
                         except Exception as e: self.log(f"删除语音文件失败: {e}")
+                # --- 注意: 这里没有删除视频文件，因为视频文件通常是用户自己管理的，而不是程序生成的 ---
                 self.log(f"已删除节目: {self.tasks.pop(index)['name']}")
             self.update_task_list(); self.save_tasks()
 
@@ -2406,12 +2269,13 @@ class TimedBroadcastApp:
         index = self.task_tree.index(selection[0])
         task = self.tasks[index]
         dummy_parent = tk.Toplevel(self.root); dummy_parent.withdraw()
-        
+
         task_type = task.get('type')
         if task_type == 'audio':
             self.open_audio_dialog(dummy_parent, task_to_edit=task, index=index)
         elif task_type == 'voice':
             self.open_voice_dialog(dummy_parent, task_to_edit=task, index=index)
+        # --- 新增: 处理视频节目的编辑 ---
         elif task_type == 'video':
             self.open_video_dialog(dummy_parent, task_to_edit=task, index=index)
         else:
@@ -2421,7 +2285,7 @@ class TimedBroadcastApp:
             try:
                 if not dummy_parent.winfo_children(): dummy_parent.destroy()
                 else: self.root.after(100, check_dialog_closed)
-            except tk.TclError: pass 
+            except tk.TclError: pass
         self.root.after(100, check_dialog_closed)
 
     def copy_task(self):
@@ -2445,6 +2309,7 @@ class TimedBroadcastApp:
                 except Exception as e:
                     self.log(f"为副本生成语音文件失败: {e}")
                     continue
+            # 视频和音频节目直接复制数据即可，无需特殊处理
             self.tasks.append(copy)
             self.log(f"已复制节目: {original['name']}")
         self.update_task_list(); self.save_tasks()
@@ -2517,20 +2382,20 @@ class TimedBroadcastApp:
         count = sum(1 for i in selection if self.tasks[self.task_tree.index(i)]['status'] != status)
         for i in selection: self.tasks[self.task_tree.index(i)]['status'] = status
         if count > 0: self.update_task_list(); self.save_tasks(); self.log(f"已{status} {count} 个节目")
-    
+
     def _set_tasks_status_by_type(self, task_type, status):
         if not self.tasks: return
-        
+
         type_name_map = {'audio': '音频', 'voice': '语音', 'video': '视频'}
         type_name = type_name_map.get(task_type, '未知')
         status_name = "启用" if status == '启用' else "禁用"
-        
+
         count = 0
         for task in self.tasks:
             if task.get('type') == task_type and task.get('status') != status:
                 task['status'] = status
                 count += 1
-        
+
         if count > 0:
             self.update_task_list()
             self.save_tasks()
@@ -2542,7 +2407,7 @@ class TimedBroadcastApp:
         if not self.tasks: return
         for task in self.tasks: task['status'] = '启用'
         self.update_task_list(); self.save_tasks(); self.log("已启用全部节目。")
-    
+
     def disable_all_tasks(self):
         if not self.tasks: return
         for task in self.tasks: task['status'] = '禁用'
@@ -2560,7 +2425,7 @@ class TimedBroadcastApp:
             for task in self.tasks: task['volume'] = str(volume)
             self.update_task_list(); self.save_tasks()
             self.log(f"已将全部节目音量统一设置为 {volume}。")
-    
+
     def _create_custom_input_dialog(self, title, prompt, minvalue=None, maxvalue=None):
         dialog = tk.Toplevel(self.root)
         dialog.title(title)
@@ -2571,9 +2436,9 @@ class TimedBroadcastApp:
         self.center_window(dialog, 350, 150)
 
         result = [None]
-        
-        tk.Label(dialog, text=prompt, font=self.font_11).pack(pady=10)
-        entry = tk.Entry(dialog, font=self.font_11, width=15, justify='center')
+
+        tk.Label(dialog, text=prompt, font=('Microsoft YaHei', 11)).pack(pady=10)
+        entry = tk.Entry(dialog, font=('Microsoft YaHei', 11), width=15, justify='center')
         entry.pack(pady=5)
         entry.focus_set()
 
@@ -2594,34 +2459,34 @@ class TimedBroadcastApp:
 
         btn_frame = tk.Frame(dialog)
         btn_frame.pack(pady=15)
-        
+
         tk.Button(btn_frame, text="确定", command=on_confirm, width=8).pack(side=tk.LEFT, padx=10)
         tk.Button(btn_frame, text="取消", command=on_cancel, width=8).pack(side=tk.LEFT, padx=10)
-        
+
         dialog.bind('<Return>', lambda event: on_confirm())
-        
+
         self.root.wait_window(dialog)
         return result[0]
 
     def clear_all_tasks(self, delete_associated_files=True):
         if not self.tasks: return
-        
+
         if delete_associated_files:
             msg = "您确定要清空所有节目吗？\n此操作将同时删除关联的语音文件，且不可恢复！"
         else:
             msg = "您确定要清空所有节目列表吗？\n（此操作不会删除音频文件）"
-            
+
         if messagebox.askyesno("严重警告", msg):
             files_to_delete = []
             if delete_associated_files:
                 for task in self.tasks:
                     if task.get('type') == 'voice' and 'wav_filename' in task:
                         wav_filename = task.get('wav_filename')
-                        if wav_filename: 
+                        if wav_filename:
                             wav_path = os.path.join(AUDIO_FOLDER, wav_filename)
                             if os.path.exists(wav_path):
                                 files_to_delete.append(wav_path)
-            
+
             self.tasks.clear()
             self.update_task_list()
             self.save_tasks()
@@ -2629,10 +2494,10 @@ class TimedBroadcastApp:
 
             if delete_associated_files and files_to_delete:
                 for f in files_to_delete:
-                    try: 
+                    try:
                         os.remove(f)
                         self.log(f"已删除语音文件: {os.path.basename(f)}")
-                    except Exception as e: 
+                    except Exception as e:
                         self.log(f"删除语音文件失败: {e}")
 
     def show_time_settings_dialog(self, time_entry):
@@ -2642,8 +2507,8 @@ class TimedBroadcastApp:
         self.center_window(dialog, 480, 450)
         main_frame = tk.Frame(dialog, bg='#D7F3F5', padx=15, pady=15)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        font_spec = self.font_11
-        tk.Label(main_frame, text="24小时制 HH:MM:SS", font=self.font_11_bold, bg='#D7F3F5').pack(anchor='w', pady=5)
+        font_spec = ('Microsoft YaHei', 11)
+        tk.Label(main_frame, text="24小时制 HH:MM:SS", font=(font_spec[0], 11, 'bold'), bg='#D7F3F5').pack(anchor='w', pady=5)
         list_frame = tk.LabelFrame(main_frame, text="时间列表", bg='#D7F3F5', padx=5, pady=5, font=font_spec)
         list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
         box_frame = tk.Frame(list_frame); box_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -2651,12 +2516,12 @@ class TimedBroadcastApp:
         listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar = tk.Scrollbar(box_frame, orient=tk.VERTICAL, command=listbox.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y); listbox.configure(yscrollcommand=scrollbar.set)
-        
+
         current_times_str = ""
         if isinstance(time_entry, tk.Entry):
             current_times_str = time_entry.get()
-        
-        for t in [t.strip() for t in current_times_str.split(',') if t.strip()]: 
+
+        for t in [t.strip() for t in current_times_str.split(',') if t.strip()]:
             listbox.insert(tk.END, t)
 
         btn_frame = tk.Frame(list_frame, bg='#D7F3F5')
@@ -2668,11 +2533,11 @@ class TimedBroadcastApp:
             val = new_entry.get().strip()
             normalized_time = self._normalize_time_string(val)
             if normalized_time:
-                if normalized_time not in listbox.get(0, tk.END): 
+                if normalized_time not in listbox.get(0, tk.END):
                     listbox.insert(tk.END, normalized_time)
                     new_entry.delete(0, tk.END)
                     new_entry.insert(0, datetime.now().strftime("%H:%M:%S"))
-            else: 
+            else:
                 messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog)
         def del_time():
             if listbox.curselection(): listbox.delete(listbox.curselection()[0])
@@ -2682,11 +2547,11 @@ class TimedBroadcastApp:
         bottom_frame = tk.Frame(main_frame, bg='#D7F3F5'); bottom_frame.pack(pady=10)
         def confirm():
             result = ", ".join(list(listbox.get(0, tk.END)))
-            if isinstance(time_entry, tk.Entry): 
+            if isinstance(time_entry, tk.Entry):
                 time_entry.delete(0, tk.END)
                 time_entry.insert(0, result)
             dialog.destroy()
-        tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=self.font_11_bold, bd=1, padx=25, pady=5).pack(side=tk.LEFT, padx=5)
+        tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=(font_spec[0], 11, 'bold'), bd=1, padx=25, pady=5).pack(side=tk.LEFT, padx=5)
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=font_spec, bd=1, padx=25, pady=5).pack(side=tk.LEFT, padx=5)
 
     def show_weekday_settings_dialog(self, weekday_entry):
@@ -2697,14 +2562,14 @@ class TimedBroadcastApp:
         main_frame = tk.Frame(dialog, bg='#D7F3F5', padx=20, pady=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
         week_type_var = tk.StringVar(value="week")
-        font_spec = self.font_11
-        week_frame = tk.LabelFrame(main_frame, text="按周", font=self.font_11_bold, bg='#D7F3F5', padx=10, pady=10)
+        font_spec = ('Microsoft YaHei', 11)
+        week_frame = tk.LabelFrame(main_frame, text="按周", font=(font_spec[0], 11, 'bold'), bg='#D7F3F5', padx=10, pady=10)
         week_frame.pack(fill=tk.X, pady=5)
         tk.Radiobutton(week_frame, text="每周", variable=week_type_var, value="week", bg='#D7F3F5', font=font_spec).grid(row=0, column=0, sticky='w')
         weekdays = [("周一", 1), ("周二", 2), ("周三", 3), ("周四", 4), ("周五", 5), ("周六", 6), ("周日", 7)]
         week_vars = {num: tk.IntVar(value=1) for day, num in weekdays}
         for i, (day, num) in enumerate(weekdays): tk.Checkbutton(week_frame, text=day, variable=week_vars[num], bg='#D7F3F5', font=font_spec).grid(row=(i // 4) + 1, column=i % 4, sticky='w', padx=10, pady=3)
-        day_frame = tk.LabelFrame(main_frame, text="按月", font=self.font_11_bold, bg='#D7F3F5', padx=10, pady=10)
+        day_frame = tk.LabelFrame(main_frame, text="按月", font=(font_spec[0], 11, 'bold'), bg='#D7F3F5', padx=10, pady=10)
         day_frame.pack(fill=tk.BOTH, expand=True, pady=5)
         tk.Radiobutton(day_frame, text="每月", variable=week_type_var, value="day", bg='#D7F3F5', font=font_spec).grid(row=0, column=0, sticky='w')
         day_vars = {i: tk.IntVar(value=0) for i in range(1, 32)}
@@ -2724,7 +2589,7 @@ class TimedBroadcastApp:
             else: result = "每月:" + ",".join(sorted([f"{n:02d}" for n, v in day_vars.items() if v.get()]))
             if isinstance(weekday_entry, tk.Entry): weekday_entry.delete(0, tk.END); weekday_entry.insert(0, result)
             dialog.destroy()
-        tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=self.font_11_bold, bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
+        tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=(font_spec[0], 11, 'bold'), bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=font_spec, bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
 
     def show_daterange_settings_dialog(self, date_range_entry):
@@ -2734,16 +2599,16 @@ class TimedBroadcastApp:
         self.center_window(dialog, 450, 250)
         main_frame = tk.Frame(dialog, bg='#D7F3F5', padx=20, pady=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        font_spec = self.font_11
+        font_spec = ('Microsoft YaHei', 11)
         from_frame = tk.Frame(main_frame, bg='#D7F3F5')
         from_frame.pack(pady=10, anchor='w')
-        tk.Label(from_frame, text="从", font=self.font_11_bold, bg='#D7F3F5').pack(side=tk.LEFT, padx=5)
+        tk.Label(from_frame, text="从", font=(font_spec[0], 11, 'bold'), bg='#D7F3F5').pack(side=tk.LEFT, padx=5)
         from_date_entry = tk.Entry(from_frame, font=font_spec, width=18)
         from_date_entry.pack(side=tk.LEFT, padx=5)
         self._bind_mousewheel_to_entry(from_date_entry, self._handle_date_scroll) # 滚轮
         to_frame = tk.Frame(main_frame, bg='#D7F3F5')
         to_frame.pack(pady=10, anchor='w')
-        tk.Label(to_frame, text="到", font=self.font_11_bold, bg='#D7F3F5').pack(side=tk.LEFT, padx=5)
+        tk.Label(to_frame, text="到", font=(font_spec[0], 11, 'bold'), bg='#D7F3F5').pack(side=tk.LEFT, padx=5)
         to_date_entry = tk.Entry(to_frame, font=font_spec, width=18)
         to_date_entry.pack(side=tk.LEFT, padx=5)
         self._bind_mousewheel_to_entry(to_date_entry, self._handle_date_scroll) # 滚轮
@@ -2754,12 +2619,12 @@ class TimedBroadcastApp:
         def confirm():
             start, end = from_date_entry.get().strip(), to_date_entry.get().strip()
             norm_start, norm_end = self._normalize_date_string(start), self._normalize_date_string(end)
-            if norm_start and norm_end: 
+            if norm_start and norm_end:
                 date_range_entry.delete(0, tk.END)
                 date_range_entry.insert(0, f"{norm_start} ~ {norm_end}")
                 dialog.destroy()
             else: messagebox.showerror("格式错误", "日期格式不正确, 应为 YYYY-MM-DD", parent=dialog)
-        tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=self.font_11_bold, bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
+        tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=(font_spec[0], 11, 'bold'), bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
         tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=font_spec, bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
 
     def show_single_time_dialog(self, time_var):
@@ -2769,15 +2634,15 @@ class TimedBroadcastApp:
         self.center_window(dialog, 320, 200)
         main_frame = tk.Frame(dialog, bg='#D7F3F5', padx=15, pady=15)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        font_spec = self.font_11
-        tk.Label(main_frame, text="24小时制 HH:MM:SS", font=self.font_11_bold, bg='#D7F3F5').pack(pady=5)
-        time_entry = tk.Entry(main_frame, font=self.font_12, width=15, justify='center')
+        font_spec = ('Microsoft YaHei', 11)
+        tk.Label(main_frame, text="24小时制 HH:MM:SS", font=(font_spec[0], 11, 'bold'), bg='#D7F3F5').pack(pady=5)
+        time_entry = tk.Entry(main_frame, font=('Microsoft YaHei', 12), width=15, justify='center')
         time_entry.insert(0, time_var.get()); time_entry.pack(pady=10)
         self._bind_mousewheel_to_entry(time_entry, self._handle_time_scroll) # 滚轮
         def confirm():
             val = time_entry.get().strip()
             normalized_time = self._normalize_time_string(val)
-            if normalized_time: 
+            if normalized_time:
                 time_var.set(normalized_time)
                 self.save_settings()
                 dialog.destroy()
@@ -2791,15 +2656,15 @@ class TimedBroadcastApp:
         dialog.geometry("580x330"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
         self.center_window(dialog, 580, 330)
-        font_spec = self.font_11
-        week_frame = tk.LabelFrame(dialog, text="选择周几", font=self.font_11_bold, bg='#D7F3F5', padx=10, pady=10)
+        font_spec = ('Microsoft YaHei', 11)
+        week_frame = tk.LabelFrame(dialog, text="选择周几", font=(font_spec[0], 11, 'bold'), bg='#D7F3F5', padx=10, pady=10)
         week_frame.pack(fill=tk.X, pady=10, padx=10)
         weekdays = [("周一", 1), ("周二", 2), ("周三", 3), ("周四", 4), ("周五", 5), ("周六", 6), ("周日", 7)]
         week_vars = {num: tk.IntVar() for day, num in weekdays}
         current_days = days_var.get().replace("每周:", "")
         for day_num_str in current_days: week_vars[int(day_num_str)].set(1)
         for i, (day, num) in enumerate(weekdays): tk.Checkbutton(week_frame, text=day, variable=week_vars[num], bg='#D7F3F5', font=font_spec).grid(row=0, column=i, sticky='w', padx=10, pady=3)
-        time_frame = tk.LabelFrame(dialog, text="设置时间", font=self.font_11_bold, bg='#D7F3F5', padx=10, pady=10)
+        time_frame = tk.LabelFrame(dialog, text="设置时间", font=(font_spec[0], 11, 'bold'), bg='#D7F3F5', padx=10, pady=10)
         time_frame.pack(fill=tk.X, pady=10, padx=10)
         tk.Label(time_frame, text="时间 (HH:MM:SS):", font=font_spec, bg='#D7F3F5').pack(side=tk.LEFT)
         time_entry = tk.Entry(time_frame, font=font_spec, width=15)
@@ -2830,24 +2695,25 @@ class TimedBroadcastApp:
                 source_text = task.get('source_text', '')
                 clean_content = source_text.replace('\n', ' ').replace('\r', '')
                 content_preview = (clean_content[:30] + '...') if len(clean_content) > 30 else clean_content
+            # --- 新增: 处理视频和音频节目的显示 ---
             elif task_type in ['audio', 'video']:
                 content_preview = os.path.basename(content)
-            else:
+            else: # 兼容旧数据
                 content_preview = os.path.basename(content)
-                
+
             display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
             self.task_tree.insert('', tk.END, values=(
-                task.get('name', ''), 
-                task.get('status', ''), 
-                task.get('time', ''), 
-                display_mode, 
-                content_preview, 
-                task.get('volume', ''), 
-                task.get('weekday', ''), 
+                task.get('name', ''),
+                task.get('status', ''),
+                task.get('time', ''),
+                display_mode,
+                content_preview,
+                task.get('volume', ''),
+                task.get('weekday', ''),
                 task.get('date_range', '')
             ))
         if selection:
-            try: 
+            try:
                 valid_selection = [s for s in selection if self.task_tree.exists(s)]
                 if valid_selection: self.task_tree.selection_set(valid_selection)
             except tk.TclError: pass
@@ -2860,11 +2726,12 @@ class TimedBroadcastApp:
         week_map = {"1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "日"}
         day_of_week = week_map.get(str(now.isoweekday()), '')
         time_str = now.strftime(f'%Y-%m-%d 星期{day_of_week} %H:%M:%S')
-        
+
         self.status_labels[0].config(text=f"当前时间: {time_str}")
         self.status_labels[1].config(text="系统状态: 运行中")
         self.root.after(1000, self.update_status_bar)
 
+#分割线
     def start_background_threads(self):
         threading.Thread(target=self._scheduler_worker, daemon=True).start()
         threading.Thread(target=self._playback_worker, daemon=True).start()
@@ -2877,10 +2744,10 @@ class TimedBroadcastApp:
                 self._check_broadcast_tasks(now)
                 self._check_time_chime(now)
                 self._check_todo_tasks(now)
-            
+
             self._check_power_tasks(now)
             time.sleep(1)
-    
+
     def _is_in_holiday(self, check_time):
         for holiday in self.holidays:
             if holiday.get('status') != '启用':
@@ -2901,7 +2768,7 @@ class TimedBroadcastApp:
 
         if now.minute == 0 and now.second == 0 and now.hour != self.last_chime_hour:
             self.last_chime_hour = now.hour
-            
+
             if self._is_in_holiday(now):
                 self.log("当前处于节假日，跳过整点报时。")
                 return
@@ -2918,7 +2785,7 @@ class TimedBroadcastApp:
         current_time_str = now.strftime("%H:%M:%S")
 
         is_holiday_now = self._is_in_holiday(now)
-        
+
         tasks_to_play = []
 
         for task in self.tasks:
@@ -2930,14 +2797,14 @@ class TimedBroadcastApp:
             schedule = task.get('weekday', '每周:1234567')
             run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
             if not run_today: continue
-            
+
             for trigger_time in [t.strip() for t in task.get('time', '').split(',')]:
                 if trigger_time == current_time_str and task.get('last_run', {}).get(trigger_time) != current_date_str:
-                    
+
                     if is_holiday_now:
                         self.log(f"任务 '{task['name']}' 因处于节假日期间而被跳过。")
-                        continue 
-                    
+                        continue
+
                     tasks_to_play.append((task, trigger_time))
 
         if not tasks_to_play:
@@ -2950,7 +2817,7 @@ class TimedBroadcastApp:
             task, trigger_time = ontime_tasks[0]
             self.log(f"准时任务 '{task['name']}' 已到时间，执行高优先级中断。")
             self.playback_command_queue.put(('PLAY_INTERRUPT', (task, trigger_time)))
-        
+
         for task, trigger_time in delay_tasks:
             self.log(f"延时任务 '{task['name']}' 已到时间，加入播放队列。")
             self.playback_command_queue.put(('PLAY', (task, trigger_time)))
@@ -3002,11 +2869,11 @@ class TimedBroadcastApp:
                 if was_playing:
                     pygame.mixer.music.pause()
                     self.log("整点报时，暂停当前播放...")
-                
+
                 try:
                     chime_sound = pygame.mixer.Sound(chime_path)
                     chime_sound.set_volume(1.0)
-                    chime_channel = pygame.mixer.find_channel(True)
+                    chime_channel = pygame.mixer.find_channel(True) # 找一个空闲通道
                     chime_channel.play(chime_sound)
                     while chime_channel and chime_channel.get_busy():
                         time.sleep(0.1)
@@ -3022,9 +2889,12 @@ class TimedBroadcastApp:
                 if AUDIO_AVAILABLE:
                     pygame.mixer.music.stop()
                     pygame.mixer.stop()
-                
+
+                # --- 修改: 确保STOP命令也能停止VLC播放并触发事件 ---
                 if VLC_AVAILABLE and self.vlc_player:
                     self.vlc_player.stop()
+                if self.video_stop_event:
+                    self.video_stop_event.set() # 确保任务循环也停止
 
                 self.log("STOP 命令已处理，所有播放已停止。")
                 self.update_playing_text("等待播放...")
@@ -3032,18 +2902,23 @@ class TimedBroadcastApp:
                 while not self.playback_command_queue.empty():
                     try: self.playback_command_queue.get_nowait()
                     except queue.Empty: break
-    
+
     def _execute_broadcast(self, task, trigger_time):
         self.update_playing_text(f"[{task['name']}] 正在准备播放...")
         self.status_labels[2].config(text="播放状态: 播放中")
-        
+
         if trigger_time != "manual_play":
             task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
             self.save_tasks()
-        
+
         visual_thread = None
         stop_visual_event = None
-        
+        task_type = task.get('type')
+
+        # --- 新增: 为视频任务创建停止事件 ---
+        if task_type == 'video':
+            self.video_stop_event = threading.Event()
+
         if task.get('bg_image_enabled') and task.get('bg_image_path') and os.path.isdir(task.get('bg_image_path')):
             if not IMAGE_AVAILABLE:
                 self.log("警告：背景图片功能已启用，但 Pillow 库未安装，无法显示图片。")
@@ -3056,18 +2931,18 @@ class TimedBroadcastApp:
                     self.current_stop_visual_event = stop_visual_event
                     visual_thread = threading.Thread(target=self._visual_worker, args=(task, stop_visual_event), daemon=True)
                     visual_thread.start()
-        
+
         try:
-            task_type = task.get('type')
             if task_type == 'audio':
                 self.log(f"开始音频任务: {task['name']}")
                 self._play_audio_task_internal(task)
             elif task_type == 'voice':
                 self.log(f"开始语音任务: {task['name']} (共 {task.get('repeat', 1)} 遍)")
                 self._play_voice_task_internal(task)
+            # --- 修改: 处理视频任务的播放, 传入停止事件 ---
             elif task_type == 'video':
                 self.log(f"开始视频任务: {task['name']}")
-                self._play_video_task_internal(task)
+                self._play_video_task_internal(task, self.video_stop_event)
 
         except Exception as e:
             self.log(f"播放任务 '{task['name']}' 时发生严重错误: {e}")
@@ -3081,10 +2956,14 @@ class TimedBroadcastApp:
             if AUDIO_AVAILABLE:
                 pygame.mixer.music.stop()
                 pygame.mixer.stop()
-            
+
             if VLC_AVAILABLE and self.vlc_player:
                 self.vlc_player.stop()
                 self.vlc_player = None
+            
+            # --- 新增: 清理视频停止事件 ---
+            if self.video_stop_event:
+                self.video_stop_event = None
 
             self.update_playing_text("等待播放...")
             self.status_labels[2].config(text="播放状态: 待机")
@@ -3095,7 +2974,7 @@ class TimedBroadcastApp:
             command_tuple = self.playback_command_queue.get_nowait()
             command = command_tuple[0]
             if command in ['STOP', 'PLAY_INTERRUPT']:
-                self.playback_command_queue.put(command_tuple) 
+                self.playback_command_queue.put(command_tuple)
                 return True
             else:
                 self.playback_command_queue.put(command_tuple)
@@ -3111,7 +2990,7 @@ class TimedBroadcastApp:
         interval_type = task.get('interval_type', 'first')
         duration_seconds = int(task.get('interval_seconds', 0))
         repeat_count = int(task.get('interval_first', 1))
-        
+
         playlist = []
         if task.get('audio_type') == 'single':
             if os.path.exists(task['content']): playlist = [task['content']] * repeat_count
@@ -3121,29 +3000,29 @@ class TimedBroadcastApp:
                 all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
                 if task.get('play_order') == 'random': random.shuffle(all_files)
                 playlist = all_files[:repeat_count]
-        
+
         if not playlist:
             self.log(f"错误: 音频列表为空，任务 '{task['name']}' 无法播放。")
             return
-            
+
         start_time = time.time()
         for i, audio_path in enumerate(playlist):
             if self._is_interrupted():
                 self.log(f"任务 '{task['name']}' 被新指令中断。")
                 return
-            
+
             if interval_type == 'first':
                 status_msg = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)} ({i+1}/{len(playlist)})"
                 self.update_playing_text(status_msg)
-            
+
             self.log(f"正在播放: {os.path.basename(audio_path)} ({i+1}/{len(playlist)})")
-            
+
             try:
                 pygame.mixer.music.load(audio_path)
                 pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
                 pygame.mixer.music.play()
 
-                last_text_update_time = 0 
+                last_text_update_time = 0
 
                 while pygame.mixer.music.get_busy():
                     if self._is_interrupted():
@@ -3162,9 +3041,9 @@ class TimedBroadcastApp:
                             status_msg = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)} (剩余 {remaining_seconds} 秒)"
                             self.update_playing_text(status_msg)
                             last_text_update_time = now
-                    
+
                     time.sleep(0.1)
-                
+
                 if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
                     return
             except Exception as e:
@@ -3219,41 +3098,43 @@ class TimedBroadcastApp:
             speech_sound = pygame.mixer.Sound(speech_path)
             speech_sound.set_volume(float(task.get('volume', 80)) / 100.0)
             repeat_count = int(task.get('repeat', 1))
-            
+
             speech_channel = pygame.mixer.find_channel(True)
 
             for i in range(repeat_count):
                 if self._is_interrupted(): return
-                
+
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
                 self.update_playing_text(f"[{task['name']}] 正在播报第 {i+1}/{repeat_count} 遍...")
-                
+
                 speech_channel.play(speech_sound)
                 while speech_channel and speech_channel.get_busy():
                     if self._is_interrupted():
                         speech_channel.stop()
                         return
                     time.sleep(0.1)
-                
+
                 if i < repeat_count - 1:
                     time.sleep(0.5)
         except Exception as e:
             self.log(f"播放语音内容失败: {e}")
 
-    def _play_video_task_internal(self, task):
+    # --- 修改: 视频播放的核心逻辑 ---
+    def _play_video_task_internal(self, task, stop_event):
         if not VLC_AVAILABLE:
             self.log("错误: python-vlc 库未安装或VLC播放器未找到，无法播放视频。")
             return
-        
+
+        # --- 构造播放列表 ---
         interval_type = task.get('interval_type', 'first')
         duration_seconds = int(task.get('interval_seconds', 0))
         repeat_count = int(task.get('interval_first', 1))
-        
+
         playlist = []
         if task.get('video_type') == 'single':
             if os.path.exists(task['content']):
                 playlist = [task['content']] * repeat_count
-        else:
+        else: # folder
             folder_path = task['content']
             if os.path.isdir(folder_path):
                 video_extensions = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv')
@@ -3267,48 +3148,54 @@ class TimedBroadcastApp:
             return
 
         try:
+            # 确保 pygame 的音频输出不会与 VLC 冲突
             if AUDIO_AVAILABLE:
                 pygame.mixer.music.stop()
                 pygame.mixer.stop()
 
+            # --- 创建VLC实例和播放器 ---
             instance = vlc.Instance()
             self.vlc_player = instance.media_player_new()
-            
+
+            # 在主线程中创建窗口
             self.root.after(0, self._create_video_window, task)
-            time.sleep(0.5)
+            time.sleep(0.5) # 等待窗口创建
 
             if not (self.video_window and self.video_window.winfo_exists()):
                 self.log("错误: 视频窗口创建失败，无法播放。")
                 return
-                
+
             self.vlc_player.set_hwnd(self.video_window.winfo_id())
 
             start_time = time.time()
             for i, video_path in enumerate(playlist):
-                if self._is_interrupted():
-                    self.log(f"任务 '{task['name']}' 在开始播放前被中断。")
+                # --- 修改: 检查任务停止事件 ---
+                if self._is_interrupted() or stop_event.is_set():
+                    self.log(f"任务 '{task['name']}' 在播放列表循环中被中断。")
                     break
 
                 media = instance.media_new(video_path)
                 self.vlc_player.set_media(media)
                 self.vlc_player.play()
-                
-                self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
-                # 修复: 清理播放倍速字符串
-                rate_str = task.get('playback_rate', '1.0').strip().split(' ')[0].replace('x', '')
-                rate_val = float(rate_str)
+
+                # --- 修复: 清理并解析播放速率 ---
+                rate_input = task.get('playback_rate', '1.0').strip()
+                rate_match = re.match(r"(\d+(\.\d+)?)", rate_input)
+                rate_val = float(rate_match.group(1)) if rate_match else 1.0
                 self.vlc_player.set_rate(rate_val)
+                self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
                 self.log(f"设置播放速率为: {rate_val}")
-                
-                time.sleep(0.5)
-                
+
+                time.sleep(0.5) # 等待媒体开始播放
+
                 last_text_update_time = 0
                 while self.vlc_player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
-                    if self._is_interrupted():
-                        self.log(f"视频任务 '{task['name']}' 被中断。")
+                    # --- 修改: 检查任务停止事件 ---
+                    if self._is_interrupted() or stop_event.is_set():
+                        self.log(f"视频任务 '{task['name']}' 在播放期间被中断。")
                         self.vlc_player.stop()
                         break
-                    
+
                     now = time.time()
                     if interval_type == 'seconds':
                         elapsed = now - start_time
@@ -3316,22 +3203,22 @@ class TimedBroadcastApp:
                             self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
                             self.vlc_player.stop()
                             break
-                        
+
                         if now - last_text_update_time >= 1.0:
                             remaining_seconds = int(duration_seconds - elapsed)
                             status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
                             self.update_playing_text(f"[{task['name']}] {os.path.basename(video_path)} ({status_text} - 剩余 {remaining_seconds} 秒)")
                             last_text_update_time = now
-                    else:
+                    else: # first (播n首)
                          if now - last_text_update_time >= 1.0:
                             status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
                             self.update_playing_text(f"[{task['name']}] {os.path.basename(video_path)} ({i+1}/{len(playlist)} - {status_text})")
                             last_text_update_time = now
 
                     time.sleep(0.2)
-                
-                if self._is_interrupted(): break # 修复: 如果内层循环被中断，外层也应中断
-                if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
+
+                # 如果是因为时长结束或手动停止，需要跳出外层循环
+                if (interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds) or stop_event.is_set():
                     break
 
         except Exception as e:
@@ -3340,14 +3227,14 @@ class TimedBroadcastApp:
             if self.vlc_player:
                 self.vlc_player.stop()
                 self.vlc_player = None
-            
+
             self.root.after(0, self._destroy_video_window)
-            self.log(f"视频 '{task['name']}' 播放结束。")
+            self.log(f"视频任务 '{task['name']}' 的播放逻辑结束。")
 
     def _create_video_window(self, task):
         if self.video_window and self.video_window.winfo_exists():
             self.video_window.destroy()
-        
+
         self.video_window = tk.Toplevel(self.root)
         self.video_window.title(f"正在播放: {task['name']}")
         self.video_window.configure(bg='black')
@@ -3355,7 +3242,7 @@ class TimedBroadcastApp:
         mode = task.get('playback_mode', 'fullscreen')
         if mode == 'fullscreen':
             self.video_window.attributes('-fullscreen', True)
-        else:
+        else: # windowed
             try:
                 w, h = map(int, task.get('resolution', '1024x768').split('x'))
                 x = (self.video_window.winfo_screenwidth() - w) // 2
@@ -3364,10 +3251,11 @@ class TimedBroadcastApp:
             except Exception as e:
                 self.log(f"设置视频分辨率失败: {e}, 使用默认尺寸。")
                 self.video_window.geometry('1024x768')
-        
-        self.video_window.bind('<Escape>', self._handle_video_esc)
+
+        # --- 修改: 绑定事件以触发任务停止 ---
+        self.video_window.bind('<Escape>', self._handle_video_manual_stop)
         self.video_window.bind('<space>', self._handle_video_space)
-        self.video_window.protocol("WM_DELETE_WINDOW", self._handle_video_esc)
+        self.video_window.protocol("WM_DELETE_WINDOW", self._handle_video_manual_stop)
         self.video_window.focus_force()
 
     def _destroy_video_window(self):
@@ -3375,20 +3263,23 @@ class TimedBroadcastApp:
             self.video_window.destroy()
         self.video_window = None
 
-    def _handle_video_esc(self, event=None):
-        self.log("ESC或关闭窗口，停止整个视频任务。")
-        # 修复: 发送STOP命令以终止整个任务循环
-        self.playback_command_queue.put(('STOP', None))
+    # --- 修改: ESC 或关闭按钮触发整个任务停止 ---
+    def _handle_video_manual_stop(self, event=None):
+        self.log("用户手动关闭视频窗口，将停止整个视频任务。")
+        if self.video_stop_event:
+            self.video_stop_event.set()
+        if self.vlc_player:
+            self.vlc_player.stop()
 
     def _handle_video_space(self, event=None):
         if self.vlc_player:
-            self.vlc_player.pause()
+            self.vlc_player.pause() # VLC的pause()方法是状态切换
             status = "暂停" if self.vlc_player.get_state() == vlc.State.Paused else "播放"
             self.log(f"空格键按下，视频已{status}。")
 
     def _get_task_total_duration(self, task):
         if not AUDIO_AVAILABLE: return 0.0
-        
+
         total_duration = 0.0
         try:
             if task.get('type') == 'audio':
@@ -3409,7 +3300,7 @@ class TimedBroadcastApp:
                             if os.path.exists(audio_path):
                                 sound = pygame.mixer.Sound(audio_path)
                                 total_duration += sound.get_length()
-            
+
             elif task.get('type') == 'voice':
                 speech_path = task.get('content', '')
                 if os.path.exists(speech_path):
@@ -3419,7 +3310,7 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"计算任务 '{task['name']}' 时长失败: {e}")
             return 0.0
-            
+
         return total_duration
 
     def _visual_worker(self, task, stop_event):
@@ -3429,10 +3320,10 @@ class TimedBroadcastApp:
             image_path = task.get('bg_image_path')
             image_order = task.get('bg_image_order', 'sequential')
             interval = float(self.settings.get("bg_image_interval", 6))
-            
+
             valid_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff')
             image_files = [os.path.join(image_path, f) for f in os.listdir(image_path) if f.lower().endswith(valid_extensions)]
-            
+
             if not image_files:
                 self.log(f"背景图片文件夹 '{os.path.basename(image_path)}' 中没有找到有效的图片。")
                 return
@@ -3448,19 +3339,19 @@ class TimedBroadcastApp:
             while not stop_event.is_set():
                 if not self.fullscreen_window:
                     break
-                
+
                 current_image_path = image_files[img_index]
                 self.root.after(0, self._crossfade_to_image, previous_image_path, current_image_path)
-                
+
                 previous_image_path = current_image_path
                 img_index = (img_index + 1) % len(image_files)
-                
+
                 if stop_event.wait(timeout=interval):
                     break
-        
+
         except Exception as e:
             self.log(f"背景图片线程出错: {e}")
-        
+
         finally:
             self.root.after(0, self._destroy_fullscreen_display)
             self.log("背景图片显示已结束。")
@@ -3508,7 +3399,7 @@ class TimedBroadcastApp:
             with Image.open(from_path) as img_from_pil:
                 img_from_pil.thumbnail((screen_width, screen_height), Image.Resampling.LANCZOS)
                 img_from_rgba = img_from_pil.convert('RGBA')
-            
+
             if img_from_rgba.size != img_to_rgba.size:
                  img_from_rgba = img_from_rgba.resize(img_to_rgba.size, Image.Resampling.LANCZOS)
 
@@ -3521,7 +3412,7 @@ class TimedBroadcastApp:
 
             alpha = step / STEPS
             blended_img = Image.blend(img_from_rgba, img_to_rgba, alpha)
-            
+
             self.image_tk_ref = ImageTk.PhotoImage(blended_img)
             self.fullscreen_label.config(image=self.image_tk_ref)
 
@@ -3546,7 +3437,7 @@ class TimedBroadcastApp:
             self.log_text.see(tk.END); self.log_text.config(state='disabled')
 
     def update_playing_text(self, message): self.root.after(0, lambda: self._update_playing_text_threadsafe(message))
-    
+
     def _update_playing_text_threadsafe(self, message):
         if hasattr(self, 'playing_label') and self.playing_label.winfo_exists():
             self.playing_label.config(text=message)
@@ -3573,29 +3464,22 @@ class TimedBroadcastApp:
             self.update_task_list(); self.log(f"已加载 {len(self.tasks)} 个节目")
         except Exception as e: self.log(f"加载任务失败: {e}")
 
-    def _get_default_settings(self):
-        """返回一份默认设置字典，用于加载和重置"""
-        return {
-            "font_name": "Microsoft YaHei",
-            "bg_skin_path": "",
-            "bg_skin_alpha": 1.0,
-            "autostart": False, "start_minimized": False, "lock_on_start": False, 
-            "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00", 
-            "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00", 
-            "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00", 
+    def load_settings(self):
+        defaults = {
+            "autostart": False, "start_minimized": False, "lock_on_start": False,
+            "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00",
+            "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00",
+            "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00",
             "last_power_action_date": "",
             "time_chime_enabled": False, "time_chime_voice": "",
             "time_chime_speed": "0", "time_chime_pitch": "0",
             "bg_image_interval": 6
         }
-
-    def load_settings(self):
-        defaults = self._get_default_settings()
         if os.path.exists(SETTINGS_FILE):
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as f: self.settings = json.load(f)
                 for key, value in defaults.items(): self.settings.setdefault(key, value)
-            except Exception as e: 
+            except Exception as e:
                 self.log(f"加载设置失败: {e}, 将使用默认设置。")
                 self.settings = defaults
         else:
@@ -3612,24 +3496,22 @@ class TimedBroadcastApp:
                 interval = self.settings.get("bg_image_interval", 6)
 
             self.settings.update({
-                "autostart": self.autostart_var.get(), 
-                "start_minimized": self.start_minimized_var.get(), 
-                "lock_on_start": self.lock_on_start_var.get(), 
-                "daily_shutdown_enabled": self.daily_shutdown_enabled_var.get(), 
-                "daily_shutdown_time": self.daily_shutdown_time_var.get(), 
-                "weekly_shutdown_enabled": self.weekly_shutdown_enabled_var.get(), 
-                "weekly_shutdown_days": self.weekly_shutdown_days_var.get(), 
-                "weekly_shutdown_time": self.weekly_shutdown_time_var.get(), 
-                "weekly_reboot_enabled": self.weekly_reboot_enabled_var.get(), 
-                "weekly_reboot_days": self.weekly_reboot_days_var.get(), 
+                "autostart": self.autostart_var.get(),
+                "start_minimized": self.start_minimized_var.get(),
+                "lock_on_start": self.lock_on_start_var.get(),
+                "daily_shutdown_enabled": self.daily_shutdown_enabled_var.get(),
+                "daily_shutdown_time": self.daily_shutdown_time_var.get(),
+                "weekly_shutdown_enabled": self.weekly_shutdown_enabled_var.get(),
+                "weekly_shutdown_days": self.weekly_shutdown_days_var.get(),
+                "weekly_shutdown_time": self.weekly_shutdown_time_var.get(),
+                "weekly_reboot_enabled": self.weekly_reboot_enabled_var.get(),
+                "weekly_reboot_days": self.weekly_reboot_days_var.get(),
                 "weekly_reboot_time": self.weekly_reboot_time_var.get(),
                 "time_chime_enabled": self.time_chime_enabled_var.get(),
                 "time_chime_voice": self.time_chime_voice_var.get(),
                 "time_chime_speed": self.time_chime_speed_var.get(),
                 "time_chime_pitch": self.time_chime_pitch_var.get(),
-                "bg_image_interval": interval,
-                "font_name": self.font_selection_var.get(),
-                "bg_skin_alpha": self.bg_skin_alpha_var.get(),
+                "bg_image_interval": interval
             })
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(self.settings, f, ensure_ascii=False, indent=2)
@@ -3692,7 +3574,7 @@ class TimedBroadcastApp:
     def _normalize_date_string(self, date_str):
         try: return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d")
         except ValueError: return None
-            
+
     def _normalize_date_range_string(self, date_range_input_str):
         if not date_range_input_str.strip(): return True, ""
         try:
@@ -3709,8 +3591,8 @@ class TimedBroadcastApp:
         dialog.geometry("380x170")
         dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
         self.center_window(dialog, 380, 170)
-        font_spec = self.font_11
-        tk.Label(dialog, text="您想要如何操作？", font=self.font_12, pady=20).pack()
+        font_spec = ('Microsoft YaHei', 11)
+        tk.Label(dialog, text="您想要如何操作？", font=(font_spec[0], 12), pady=20).pack()
         btn_frame = tk.Frame(dialog); btn_frame.pack(pady=10)
         tk.Button(btn_frame, text="退出程序", command=lambda: [dialog.destroy(), self.quit_app()], font=font_spec).pack(side=tk.LEFT, padx=10)
         if TRAY_AVAILABLE: tk.Button(btn_frame, text="最小化到托盘", command=lambda: [dialog.destroy(), self.hide_to_tray()], font=font_spec).pack(side=tk.LEFT, padx=10)
@@ -3729,12 +3611,12 @@ class TimedBroadcastApp:
         if self.tray_icon: self.tray_icon.stop()
         self.running = False
         self.playback_command_queue.put(('STOP', None))
-        
+
         self.save_tasks()
         self.save_settings()
         self.save_holidays()
         self.save_todos()
-        
+
         if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
         self.root.destroy()
         sys.exit()
@@ -3742,12 +3624,12 @@ class TimedBroadcastApp:
     def setup_tray_icon(self):
         try: image = Image.open(ICON_FILE)
         except Exception as e: image = Image.new('RGB', (64, 64), 'white'); print(f"警告: 未找到或无法加载图标文件 '{ICON_FILE}': {e}")
-        
+
         menu = (
             item('显示', self.show_from_tray, default=True),
             item('退出', self.quit_app)
         )
-        
+
         self.tray_icon = Icon("boyin", image, " 创翔多功能定时播音旗舰版", menu)
 
     def start_tray_icon_thread(self):
@@ -3755,9 +3637,9 @@ class TimedBroadcastApp:
             self.setup_tray_icon()
             threading.Thread(target=self.tray_icon.run, daemon=True).start()
             self.log("系统托盘图标已启动。")
-    
+
     def _enable_drag_selection(self, tree):
-        
+
         def on_press(event):
             self.drag_start_item = tree.identify_row(event.y)
 
@@ -3777,7 +3659,7 @@ class TimedBroadcastApp:
 
             all_items = tree.get_children('')
             items_to_select = all_items[min_idx : max_idx + 1]
-            
+
             tree.selection_set(items_to_select)
 
         def on_release(event):
@@ -3792,11 +3674,11 @@ class TimedBroadcastApp:
 
         top_frame = tk.Frame(page_frame, bg='white')
         top_frame.pack(fill=tk.X, padx=10, pady=10)
-        title_label = tk.Label(top_frame, text="节假日管理", font=self.font_14_bold, bg='white', fg='#2C5F7C')
+        title_label = tk.Label(top_frame, text="节假日管理", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#2C5F7C')
         title_label.pack(side=tk.LEFT)
-        
-        desc_label = tk.Label(page_frame, text="在节假日期间，所有“定时广播”、“整点报时”和“待办事项”都将自动暂停，节假日结束后自动恢复。", 
-                              font=self.font_11, bg='white', fg='#555')
+
+        desc_label = tk.Label(page_frame, text="在节假日期间，所有“定时广播”、“整点报时”和“待办事项”都将自动暂停，节假日结束后自动恢复。",
+                              font=('Microsoft YaHei', 11), bg='white', fg='#555')
         desc_label.pack(anchor='w', padx=10, pady=(0, 10))
 
         content_frame = tk.Frame(page_frame, bg='white')
@@ -3825,11 +3707,11 @@ class TimedBroadcastApp:
         self.holiday_tree.bind("<Double-1>", lambda e: self.edit_holiday())
         self.holiday_tree.bind("<Button-3>", self.show_holiday_context_menu)
         self._enable_drag_selection(self.holiday_tree)
-        
+
         action_frame = tk.Frame(content_frame, bg='white', padx=10)
         action_frame.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        btn_font = self.font_11
+
+        btn_font = ('Microsoft YaHei', 11)
         btn_width = 10
         buttons_config = [
             ("添加", self.add_holiday), ("修改", self.edit_holiday), ("删除", self.delete_holiday),
@@ -3844,10 +3726,10 @@ class TimedBroadcastApp:
                 tk.Frame(action_frame, height=20, bg='white').pack() # Spacer
                 continue
             tk.Button(action_frame, text=text, command=cmd, font=btn_font, width=btn_width, pady=5).pack(pady=5)
-        
+
         self.update_holiday_list()
         return page_frame
-        
+
     def save_holidays(self):
         try:
             with open(HOLIDAY_FILE, 'w', encoding='utf-8') as f:
@@ -3862,7 +3744,7 @@ class TimedBroadcastApp:
             with open(HOLIDAY_FILE, 'r', encoding='utf-8') as f:
                 self.holidays = json.load(f)
             self.log(f"已加载 {len(self.holidays)} 个节假日设置")
-            if hasattr(self, 'holiday_tree'): 
+            if hasattr(self, 'holiday_tree'):
                 self.update_holiday_list()
         except Exception as e:
             self.log(f"加载节假日失败: {e}")
@@ -3928,7 +3810,7 @@ class TimedBroadcastApp:
         dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#F0F8FF')
         self.center_window(dialog, 500, 300)
 
-        font_spec = self.font_11
+        font_spec = ('Microsoft YaHei', 11)
         main_frame = tk.Frame(dialog, bg='#F0F8FF', padx=20, pady=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -3951,9 +3833,9 @@ class TimedBroadcastApp:
         end_time_entry = tk.Entry(main_frame, font=font_spec, width=15)
         end_time_entry.grid(row=2, column=2, sticky='w', pady=5, padx=5)
         self._bind_mousewheel_to_entry(end_time_entry, self._handle_time_scroll) # 滚轮
-        
-        tk.Label(main_frame, text="格式: YYYY-MM-DD", font=self.font_9, bg='#F0F8FF', fg='grey').grid(row=3, column=1, sticky='n')
-        tk.Label(main_frame, text="格式: HH:MM:SS", font=self.font_9, bg='#F0F8FF', fg='grey').grid(row=3, column=2, sticky='n')
+
+        tk.Label(main_frame, text="格式: YYYY-MM-DD", font=('Microsoft YaHei', 9), bg='#F0F8FF', fg='grey').grid(row=3, column=1, sticky='n')
+        tk.Label(main_frame, text="格式: HH:MM:SS", font=('Microsoft YaHei', 9), bg='#F0F8FF', fg='grey').grid(row=3, column=2, sticky='n')
 
         if holiday_to_edit:
             name_entry.insert(0, holiday_to_edit.get('name', ''))
@@ -3977,7 +3859,7 @@ class TimedBroadcastApp:
             if not name:
                 messagebox.showerror("错误", "节假日名称不能为空", parent=dialog)
                 return
-            
+
             start_date = self._normalize_date_string(start_date_entry.get().strip())
             start_time = self._normalize_time_string(start_time_entry.get().strip())
             end_date = self._normalize_date_string(end_date_entry.get().strip())
@@ -4008,7 +3890,7 @@ class TimedBroadcastApp:
                 self.holidays[index] = new_holiday_data
             else:
                 self.holidays.append(new_holiday_data)
-            
+
             self.update_holiday_list()
             self.save_holidays()
             dialog.destroy()
@@ -4023,10 +3905,10 @@ class TimedBroadcastApp:
         iid = self.holiday_tree.identify_row(event.y)
         if not iid: return
 
-        context_menu = tk.Menu(self.root, tearoff=0, font=self.font_11)
-        
+        context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 11))
+
         self.holiday_tree.selection_set(iid)
-        
+
         context_menu.add_command(label="修改", command=self.edit_holiday)
         context_menu.add_command(label="删除", command=self.delete_holiday)
         context_menu.add_separator()
@@ -4037,7 +3919,7 @@ class TimedBroadcastApp:
         context_menu.add_separator()
         context_menu.add_command(label="启用", command=lambda: self._set_holiday_status('启用'))
         context_menu.add_command(label="禁用", command=lambda: self._set_holiday_status('禁用'))
-        
+
         context_menu.post(event.x_root, event.y_root)
 
     def move_holiday(self, direction):
@@ -4086,7 +3968,7 @@ class TimedBroadcastApp:
         if not self.holidays: return
         for holiday in self.holidays: holiday['status'] = '禁用'
         self.update_holiday_list(); self.save_holidays(); self.log("已禁用全部节假日。")
-    
+
     def import_holidays(self):
         filename = filedialog.askopenfilename(title="选择导入节假日文件", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
         if filename:
@@ -4118,7 +4000,7 @@ class TimedBroadcastApp:
                 self.log(f"已导出 {len(self.holidays)} 个节假日到 {os.path.basename(filename)}")
             except Exception as e:
                 messagebox.showerror("错误", f"导出失败: {e}")
-    
+
     def clear_all_holidays(self):
         if not self.holidays:
             return
@@ -4128,15 +4010,17 @@ class TimedBroadcastApp:
             self.save_holidays()
             self.log("已清空所有节假日。")
 
+# --- 待办事项所有相关函数 (已根据反馈修复) ---
+
     def create_todo_page(self):
         page_frame = tk.Frame(self.page_container, bg='white')
 
         top_frame = tk.Frame(page_frame, bg='white')
         top_frame.pack(fill=tk.X, padx=10, pady=10)
-        title_label = tk.Label(top_frame, text="待办事项", font=self.font_14_bold, bg='white', fg='#2C5F7C')
+        title_label = tk.Label(top_frame, text="待办事项", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#2C5F7C')
         title_label.pack(side=tk.LEFT)
 
-        desc_label = tk.Label(page_frame, text="到达提醒时间时会弹出窗口并播放提示音。提醒功能受节假日约束。", font=self.font_11, bg='white', fg='#555')
+        desc_label = tk.Label(page_frame, text="到达提醒时间时会弹出窗口并播放提示音。提醒功能受节假日约束。", font=('Microsoft YaHei', 11), bg='white', fg='#555')
         desc_label.pack(anchor='w', padx=10, pady=(0, 10))
 
         content_frame = tk.Frame(page_frame, bg='white')
@@ -4171,7 +4055,7 @@ class TimedBroadcastApp:
         action_frame = tk.Frame(content_frame, bg='white', padx=10)
         action_frame.pack(side=tk.RIGHT, fill=tk.Y)
 
-        btn_font = self.font_11
+        btn_font = ('Microsoft YaHei', 11)
         btn_width = 10
         buttons_config = [
             ("添加", self.add_todo), ("修改", self.edit_todo), ("删除", self.delete_todo),
@@ -4203,7 +4087,7 @@ class TimedBroadcastApp:
         try:
             with open(TODO_FILE, 'r', encoding='utf-8') as f:
                 self.todos = json.load(f)
-            
+
             migrated = False
             for todo in self.todos:
                 if 'type' not in todo:
@@ -4236,20 +4120,20 @@ class TimedBroadcastApp:
 
             content = todo.get('content', '').replace('\n', ' ').replace('\r', '')
             content_preview = (content[:30] + '...') if len(content) > 30 else content
-            
+
             task_type = "一次性" if todo.get('type') == 'onetime' else "循环"
-            
+
             remind_info = ""
             if task_type == '一次性':
                 remind_info = todo.get('remind_datetime', '')
-            else: 
+            else:
                 times = todo.get('start_times') or "无固定时间"
                 interval = todo.get('interval_minutes', 0)
                 if interval > 0:
                     remind_info = f"{times} (每{interval}分钟)"
                 else:
                     remind_info = times
-            
+
             self.todo_tree.insert('', tk.END, values=(
                 todo.get('name', ''),
                 todo.get('status', '启用'),
@@ -4264,6 +4148,7 @@ class TimedBroadcastApp:
             except tk.TclError:
                 pass
 
+        # 更新状态栏的待办事项计数
         if hasattr(self, 'status_labels') and len(self.status_labels) > 4:
             self.status_labels[4].config(text=f"待办事项: {active_todos_count}")
 
@@ -4315,7 +4200,7 @@ class TimedBroadcastApp:
         dialog.configure(bg='#F0F8FF')
         self.center_window(dialog, 750, 600)
 
-        font_spec = self.font_11
+        font_spec = ('Microsoft YaHei', 11)
         main_frame = tk.Frame(dialog, bg='#F0F8FF', padx=20, pady=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -4326,19 +4211,19 @@ class TimedBroadcastApp:
         tk.Label(main_frame, text="内容:", font=font_spec, bg='#F0F8FF').grid(row=1, column=0, sticky='ne', pady=5, padx=5)
         content_text = scrolledtext.ScrolledText(main_frame, height=5, font=font_spec, width=60, wrap=tk.WORD)
         content_text.grid(row=1, column=1, columnspan=3, sticky='w', pady=5)
-        
+
         type_var = tk.StringVar(value="onetime")
         type_frame = tk.Frame(main_frame, bg='#F0F8FF')
         type_frame.grid(row=2, column=1, columnspan=3, sticky='w', pady=10)
-        
+
         onetime_rb = tk.Radiobutton(type_frame, text="一次性任务", variable=type_var, value="onetime", bg='#F0F8FF', font=font_spec)
         onetime_rb.pack(side=tk.LEFT, padx=10)
         recurring_rb = tk.Radiobutton(type_frame, text="循环任务", variable=type_var, value="recurring", bg='#F0F8FF', font=font_spec)
         recurring_rb.pack(side=tk.LEFT, padx=10)
-        
+
         onetime_lf = tk.LabelFrame(main_frame, text="一次性任务设置", font=font_spec, bg='#F0F8FF', padx=10, pady=10)
         recurring_lf = tk.LabelFrame(main_frame, text="循环任务设置", font=font_spec, bg='#F0F8FF', padx=10, pady=10)
-        
+
         tk.Label(onetime_lf, text="执行日期:", font=font_spec, bg='#F0F8FF').grid(row=0, column=0, sticky='e', pady=5, padx=5)
         onetime_date_entry = tk.Entry(onetime_lf, font=font_spec, width=20)
         onetime_date_entry.grid(row=0, column=1, sticky='w', pady=5)
@@ -4351,8 +4236,9 @@ class TimedBroadcastApp:
         tk.Label(recurring_lf, text="开始时间:", font=font_spec, bg='#F0F8FF').grid(row=0, column=0, sticky='e', padx=5, pady=5)
         recurring_time_entry = tk.Entry(recurring_lf, font=font_spec, width=40)
         recurring_time_entry.grid(row=0, column=1, sticky='w', padx=5, pady=5)
+        self._bind_mousewheel_to_entry(recurring_time_entry, self._handle_time_scroll) # 滚轮
         tk.Button(recurring_lf, text="设置...", command=lambda: self.show_time_settings_dialog(recurring_time_entry), bg='#D0D0D0', font=font_spec).grid(row=0, column=2, padx=5)
-        
+
         tk.Label(recurring_lf, text="周几/几号:", font=font_spec, bg='#F0F8FF').grid(row=1, column=0, sticky='e', padx=5, pady=5)
         recurring_weekday_entry = tk.Entry(recurring_lf, font=font_spec, width=40)
         recurring_weekday_entry.grid(row=1, column=1, sticky='w', padx=5, pady=5)
@@ -4369,8 +4255,8 @@ class TimedBroadcastApp:
         interval_frame.grid(row=3, column=1, sticky='w', padx=5, pady=5)
         recurring_interval_entry = tk.Entry(interval_frame, font=font_spec, width=8)
         recurring_interval_entry.pack(side=tk.LEFT)
-        tk.Label(interval_frame, text="分钟 (0表示仅在'开始时间'提醒)", font=self.font_10, bg='#F0F8FF').pack(side=tk.LEFT, padx=5)
-        
+        tk.Label(interval_frame, text="分钟 (0表示仅在'开始时间'提醒)", font=('Microsoft YaHei', 10), bg='#F0F8FF').pack(side=tk.LEFT, padx=5)
+
         def toggle_frames(*args):
             if type_var.get() == 'onetime':
                 recurring_lf.grid_forget()
@@ -4378,15 +4264,15 @@ class TimedBroadcastApp:
             else:
                 onetime_lf.grid_forget()
                 recurring_lf.grid(row=3, column=0, columnspan=4, sticky='ew', padx=5, pady=5)
-        
+
         type_var.trace_add("write", toggle_frames)
-        
+
         now = datetime.now()
         if todo_to_edit:
             name_entry.insert(0, todo_to_edit.get('name', ''))
             content_text.insert('1.0', todo_to_edit.get('content', ''))
             type_var.set(todo_to_edit.get('type', 'onetime'))
-            
+
             dt_str = todo_to_edit.get('remind_datetime', now.strftime('%Y-%m-%d %H:%M:%S'))
             d, t = dt_str.split(' ') if ' ' in dt_str else ('', '')
             onetime_date_entry.insert(0, d)
@@ -4411,7 +4297,7 @@ class TimedBroadcastApp:
             if not name:
                 messagebox.showerror("错误", "待办事项名称不能为空", parent=dialog)
                 return
-            
+
             new_todo_data = {
                 "name": name,
                 "content": content_text.get('1.0', tk.END).strip(),
@@ -4441,7 +4327,7 @@ class TimedBroadcastApp:
                 is_valid_date, date_msg = self._normalize_date_range_string(recurring_daterange_entry.get().strip())
                 if not is_valid_date:
                     messagebox.showerror("格式错误", date_msg, parent=dialog); return
-                
+
                 new_todo_data['start_times'] = time_msg
                 new_todo_data['weekday'] = recurring_weekday_entry.get().strip()
                 new_todo_data['date_range'] = date_msg
@@ -4452,7 +4338,7 @@ class TimedBroadcastApp:
                 self.todos[index] = new_todo_data
             else:
                 self.todos.append(new_todo_data)
-            
+
             self.update_todo_list()
             self.save_todos()
             dialog.destroy()
@@ -4461,15 +4347,15 @@ class TimedBroadcastApp:
         button_frame.grid(row=4, column=0, columnspan=4, pady=20)
         tk.Button(button_frame, text="保存", command=save, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
         tk.Button(button_frame, text="取消", command=dialog.destroy, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
-    
+
     def show_todo_context_menu(self, event):
         if self.is_locked: return
         iid = self.todo_tree.identify_row(event.y)
         if not iid: return
 
-        context_menu = tk.Menu(self.root, tearoff=0, font=self.font_11)
+        context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 11))
         self.todo_tree.selection_set(iid)
-        
+
         context_menu.add_command(label="修改", command=self.edit_todo)
         context_menu.add_command(label="删除", command=self.delete_todo)
         context_menu.add_separator()
@@ -4480,7 +4366,7 @@ class TimedBroadcastApp:
         context_menu.add_separator()
         context_menu.add_command(label="启用", command=lambda: self._set_todo_status('启用'))
         context_menu.add_command(label="禁用", command=lambda: self._set_todo_status('禁用'))
-        
+
         context_menu.post(event.x_root, event.y_root)
 
     def move_todo(self, direction):
@@ -4560,7 +4446,7 @@ class TimedBroadcastApp:
                 self.log(f"已导出 {len(self.todos)} 个待办事项到 {os.path.basename(filename)}")
             except Exception as e:
                 messagebox.showerror("错误", f"导出失败: {e}")
-    
+
     def clear_all_todos(self):
         if not self.todos: return
         if messagebox.askyesno("严重警告", "您确定要清空所有待办事项吗？\n此操作不可恢复！"):
@@ -4585,26 +4471,26 @@ class TimedBroadcastApp:
                     todo_with_index = todo.copy()
                     todo_with_index['original_index'] = index
                     self.reminder_queue.put(todo_with_index)
-            
+
             elif todo.get('type') == 'recurring':
                 try:
                     start, end = [d.strip() for d in todo.get('date_range', '').split('~')]
-                    if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()): 
+                    if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()):
                         continue
                 except (ValueError, IndexError): pass
-                
+
                 schedule = todo.get('weekday', '每周:1234567')
                 run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or \
                             (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
                 if not run_today: continue
-                
+
                 triggered = False
                 for trigger_time in [t.strip() for t in todo.get('start_times', '').split(',')]:
                     if trigger_time == now_str_time and todo.get('last_run', {}).get(trigger_time) != now_str_date:
                         triggered = True
                         todo.setdefault('last_run', {})[trigger_time] = now_str_date
                         break
-                
+
                 interval = todo.get('interval_minutes', 0)
                 if not triggered and interval > 0 and todo.get('start_times'):
                     last_run_str = todo.get('last_interval_run')
@@ -4631,14 +4517,14 @@ class TimedBroadcastApp:
                 self.show_todo_reminder(todo_task)
             except queue.Empty:
                 pass
-        
+
         self.root.after(1000, self._process_reminder_queue)
 
     def _play_reminder_sound(self):
         if not AUDIO_AVAILABLE:
             self.log("警告：pygame未安装，无法播放提示音。")
             return
-        
+
         if os.path.exists(REMINDER_SOUND_FILE):
             try:
                 sound = pygame.mixer.Sound(REMINDER_SOUND_FILE)
@@ -4649,7 +4535,7 @@ class TimedBroadcastApp:
                 return
             except Exception as e:
                 self.log(f"播放自定义提示音 {REMINDER_SOUND_FILE} 失败: {e}")
-        
+
         if WIN32_AVAILABLE:
             try:
                 ctypes.windll.user32.MessageBeep(win32con.MB_OK)
@@ -4681,21 +4567,21 @@ class TimedBroadcastApp:
                 task_in_list['status'] = '待处理'
                 self.root.after(0, self.update_todo_list)
 
-        title_label = tk.Label(reminder_win, text=todo.get('name', '无标题'), font=self.font_14_bold, bg='#FFFFE0', wraplength=460)
+        title_label = tk.Label(reminder_win, text=todo.get('name', '无标题'), font=('Microsoft YaHei', 14, 'bold'), bg='#FFFFE0', wraplength=460)
         title_label.pack(pady=(15, 10))
-        
+
         btn_frame = tk.Frame(reminder_win, bg='#FFFFE0')
         btn_frame.pack(side=tk.BOTTOM, pady=15)
 
         content_frame = tk.Frame(reminder_win, bg='white', bd=1, relief='solid')
         content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
-        
-        content_text = scrolledtext.ScrolledText(content_frame, font=self.font_11, wrap=tk.WORD, bd=0, bg='white')
+
+        content_text = scrolledtext.ScrolledText(content_frame, font=('Microsoft YaHei', 11), wrap=tk.WORD, bd=0, bg='white')
         content_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         content_text.insert('1.0', todo.get('content', ''))
         content_text.config(state='disabled')
-        
-        font_spec = self.font_11
+
+        font_spec = ('Microsoft YaHei', 11)
 
         def close_and_release():
             self.is_reminder_active = False
@@ -4715,7 +4601,7 @@ class TimedBroadcastApp:
                 new_remind_time = datetime.now() + timedelta(minutes=minutes)
                 if original_index is not None and original_index < len(self.todos):
                     self.todos[original_index]['remind_datetime'] = new_remind_time.strftime('%Y-%m-%d %H:%M:%S')
-                    self.todos[original_index]['status'] = '启用' 
+                    self.todos[original_index]['status'] = '启用'
                     self.save_todos()
                     self.update_todo_list()
                     self.log(f"待办事项 '{todo['name']}' 已推迟 {minutes} 分钟。")
@@ -4730,13 +4616,13 @@ class TimedBroadcastApp:
                         self.update_todo_list()
                         self.log(f"已删除待办事项: {todo['name']}")
                 close_and_release()
-        
+
         def on_closing_protocol():
             if task_type == 'onetime':
                 handle_complete()
             else:
                 close_and_release()
-        
+
         reminder_win.protocol("WM_DELETE_WINDOW", on_closing_protocol)
 
         if task_type == 'onetime':
@@ -4747,33 +4633,62 @@ class TimedBroadcastApp:
             tk.Button(btn_frame, text="本次完成", font=font_spec, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=handle_delete).pack(side=tk.LEFT, padx=10)
 
+    # --- 新增: 鼠标滚轮功能的核心函数 ---
     def _bind_mousewheel_to_entry(self, entry, handler):
         entry.bind("<MouseWheel>", handler)
-        entry.bind("<Button-4>", handler)
-        entry.bind("<Button-5>", handler)
+        entry.bind("<Button-4>", handler) # For Linux
+        entry.bind("<Button-5>", handler) # For Linux
 
     def _handle_time_scroll(self, event):
         entry = event.widget
         current_val = entry.get()
         cursor_pos = entry.index(tk.INSERT)
-        
+
         try:
             dt = datetime.strptime(current_val, "%H:%M:%S")
         except ValueError:
-            return "break"
+            # 尝试处理多时间格式
+            parts = [p.strip() for p in current_val.split(',') if p.strip()]
+            if not parts: return "break"
+            
+            # 找到光标所在的时间段
+            char_count = 0
+            target_part_index = -1
+            for i, part in enumerate(parts):
+                if char_count <= cursor_pos <= char_count + len(part):
+                    target_part_index = i
+                    break
+                char_count += len(part) + 2 # +2 for ", "
+            
+            if target_part_index == -1: return "break"
+
+            try:
+                dt = datetime.strptime(parts[target_part_index], "%H:%M:%S")
+                cursor_pos_in_part = cursor_pos - char_count
+            except ValueError:
+                return "break"
+        else:
+            cursor_pos_in_part = cursor_pos
 
         delta = 1 if event.num == 4 or event.delta > 0 else -1
-        
-        if 0 <= cursor_pos <= 2:
+
+        if 0 <= cursor_pos_in_part <= 2:
             dt += timedelta(hours=delta)
-        elif 3 <= cursor_pos <= 5:
+        elif 3 <= cursor_pos_in_part <= 5:
             dt += timedelta(minutes=delta)
         else: # 6 and beyond
             dt += timedelta(seconds=delta)
 
-        new_val = dt.strftime("%H:%M:%S")
+        new_val_part = dt.strftime("%H:%M:%S")
+        
+        if 'parts' in locals():
+            parts[target_part_index] = new_val_part
+            new_full_val = ", ".join(parts)
+        else:
+            new_full_val = new_val_part
+
         entry.delete(0, tk.END)
-        entry.insert(0, new_val)
+        entry.insert(0, new_full_val)
         entry.icursor(cursor_pos)
         return "break"
 
@@ -4781,7 +4696,7 @@ class TimedBroadcastApp:
         entry = event.widget
         current_val = entry.get().strip()
         cursor_pos = entry.index(tk.INSERT)
-        
+
         parts = [p.strip() for p in current_val.split("~")]
         is_range_start = "~" not in current_val or cursor_pos <= len(parts[0])
         target_val = parts[0] if is_range_start else parts[1]
@@ -4792,7 +4707,7 @@ class TimedBroadcastApp:
             return "break"
 
         delta = 1 if event.num == 4 or event.delta > 0 else -1
-        
+
         effective_cursor_pos = cursor_pos if is_range_start else cursor_pos - (len(parts[0]) + 3)
 
         if 0 <= effective_cursor_pos <= 4: # Year
@@ -4804,7 +4719,7 @@ class TimedBroadcastApp:
                 new_month = 1; new_year += 1
             elif new_month < 1:
                 new_month = 12; new_year -= 1
-            
+
             try:
                 dt = dt.replace(year=new_year, month=new_month)
             except ValueError: # Handle cases like Feb 29
@@ -4813,7 +4728,7 @@ class TimedBroadcastApp:
             dt += timedelta(days=delta)
 
         new_date_part = dt.strftime("%Y-%m-%d")
-        
+
         if "~" in current_val:
             new_full_val = f"{new_date_part} ~ {parts[1]}" if is_range_start else f"{parts[0]} ~ {new_date_part}"
         else:
