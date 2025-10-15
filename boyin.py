@@ -1,3 +1,25 @@
+好的，收到您的改进需求！这些都是非常棒的建议，能极大地提升软件的专业性和易用性。
+
+我们来逐一实现。根据您的要求，我将再次把代码分为两部分。
+
+这是**第一部分**。它包含了您要求的所有**界面和数据结构的修改**：
+
+1.  **按钮颜色**：顶部的“禁视频节目”按钮已更换为一个新的、独特的颜色。
+2.  **界面风格统一**：`添加视频节目` 的对话框已经**完全重制**，现在它的布局、颜色 (`#E8E8E8`) 和整体风格与 `添加音频节目` 的对话框保持了高度一致，显得更加和谐专业。
+3.  **功能对齐**：
+    *   视频节目现在支持**选择单个文件**或**选择文件夹**。
+    *   添加了**顺序播放**和**随机播放**选项。
+    *   添加了与音频节目完全相同的播放时长控制：**“播 n 首”**（对于单个视频文件，这意味着重复播放n遍）和 **“播 n 秒”**。
+    *   模式选项中增加了 **“立即播”**。
+4.  **新增播放倍速**：在“播放选项”中，增加了一个“播放倍速”的下拉选项，提供了从 0.5x 到 2.0x 的常用速度，并且允许您输入自定义的倍率。
+
+您可以直接用下面的代码**完整替换**您现有的全部代码。替换后，程序可以正常运行，您将看到所有新的界面和选项，并可以完整地配置视频任务。视频的实际播放逻辑将在第二部分中实现。
+
+---
+
+### **第一部分代码**
+
+```python
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog, simpledialog
 import json
@@ -863,8 +885,8 @@ class TimedBroadcastApp:
             ("全部禁用", self.disable_all_tasks, '#F39C12'),
             ("禁音频节目", lambda: self._set_tasks_status_by_type('audio', '禁用'), '#E67E22'),
             ("禁语音节目", lambda: self._set_tasks_status_by_type('voice', '禁用'), '#D35400'),
-            # --- 新增: 批量禁用视频节目 ---
-            ("禁视频节目", lambda: self._set_tasks_status_by_type('video', '禁用'), '#8E44AD'),
+            # --- 修改: “禁视频节目”按钮颜色 ---
+            ("禁视频节目", lambda: self._set_tasks_status_by_type('video', '禁用'), '#2980B9'), 
             ("统一音量", self.set_uniform_volume, '#8E44AD'),
             ("清空节目", self.clear_all_tasks, '#C0392B')
         ]
@@ -893,7 +915,7 @@ class TimedBroadcastApp:
 
         table_frame = tk.Frame(page_frame, bg='white')
         table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        columns = ('节目名称', '状态', '开始时间', '模式', '音频或文字', '音量', '周几/几号', '日期范围')
+        columns = ('节目名称', '状态', '开始时间', '模式', '文件或内容', '音量', '周几/几号', '日期范围')
         self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12, selectmode='extended')
         
         style = ttk.Style()
@@ -908,8 +930,8 @@ class TimedBroadcastApp:
         self.task_tree.column('开始时间', width=100, anchor='center', stretch=tk.NO)
         self.task_tree.heading('模式', text='模式')
         self.task_tree.column('模式', width=70, anchor='center', stretch=tk.NO)
-        self.task_tree.heading('音频或文字', text='音频或文字')
-        self.task_tree.column('音频或文字', width=300, anchor='w')
+        self.task_tree.heading('文件或内容', text='文件或内容')
+        self.task_tree.column('文件或内容', width=300, anchor='w')
         self.task_tree.heading('音量', text='音量')
         self.task_tree.column('音量', width=70, anchor='center', stretch=tk.NO)
         self.task_tree.heading('周几/几号', text='周几/几号')
@@ -1656,56 +1678,88 @@ class TimedBroadcastApp:
         is_edit_mode = task_to_edit is not None
         dialog = tk.Toplevel(self.root)
         dialog.title("修改视频节目" if is_edit_mode else "添加视频节目")
-        dialog.geometry("800x600")
+        dialog.geometry("950x750") # 统一尺寸
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
-        dialog.configure(bg='#F2EBF5') #淡紫色背景
+        dialog.configure(bg='#E8E8E8') # 统一背景色
 
-        main_frame = tk.Frame(dialog, bg='#F2EBF5', padx=15, pady=10)
+        main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         font_spec = ('Microsoft YaHei', 11)
 
         # --- 内容设置 ---
-        content_frame = tk.LabelFrame(main_frame, text="内容设置", font=('Microsoft YaHei', 12, 'bold'),
-                                     bg='#F2EBF5', padx=10, pady=10)
-        content_frame.pack(fill=tk.X, pady=5)
+        content_frame = tk.LabelFrame(main_frame, text="内容", font=('Microsoft YaHei', 12, 'bold'),
+                                     bg='#E8E8E8', padx=10, pady=5)
+        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
 
-        tk.Label(content_frame, text="节目名称:", font=font_spec, bg='#F2EBF5').grid(row=0, column=0, sticky='e', padx=5, pady=5)
-        name_entry = tk.Entry(content_frame, font=font_spec, width=60)
-        name_entry.grid(row=0, column=1, columnspan=2, sticky='ew', padx=5, pady=5)
-
-        tk.Label(content_frame, text="视频文件:", font=font_spec, bg='#F2EBF5').grid(row=1, column=0, sticky='e', padx=5, pady=5)
-        video_file_entry = tk.Entry(content_frame, font=font_spec, width=60)
-        video_file_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
+        tk.Label(content_frame, text="节目名称:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        name_entry = tk.Entry(content_frame, font=font_spec, width=55)
+        name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         
-        def select_video_file():
+        video_type_var = tk.StringVar(value="single")
+
+        tk.Label(content_frame, text="视频文件:", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=2)
+        video_single_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        video_single_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
+        tk.Radiobutton(video_single_frame, text="", variable=video_type_var, value="single", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
+        video_single_entry = tk.Entry(video_single_frame, font=font_spec, width=50)
+        video_single_entry.pack(side=tk.LEFT, padx=5)
+        
+        def select_single_video():
             ftypes = [("视频文件", "*.mp4 *.mkv *.avi *.mov *.wmv *.flv"), ("所有文件", "*.*")]
             filename = filedialog.askopenfilename(title="选择视频文件", filetypes=ftypes)
             if filename:
-                video_file_entry.delete(0, tk.END)
-                video_file_entry.insert(0, filename)
+                video_single_entry.delete(0, tk.END)
+                video_single_entry.insert(0, filename)
+        tk.Button(video_single_frame, text="选取...", command=select_single_video, bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).pack(side=tk.LEFT, padx=5)
+
+        tk.Label(content_frame, text="视频文件夹:", font=font_spec, bg='#E8E8E8').grid(row=2, column=0, sticky='e', padx=5, pady=2)
+        video_folder_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        video_folder_frame.grid(row=2, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
+        tk.Radiobutton(video_folder_frame, text="", variable=video_type_var, value="folder", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
+        video_folder_entry = tk.Entry(video_folder_frame, font=font_spec, width=50)
+        video_folder_entry.pack(side=tk.LEFT, padx=5)
         
-        tk.Button(content_frame, text="选取...", command=select_video_file, bg='#D0D0D0', font=font_spec, bd=1).grid(row=1, column=2, padx=5, pady=5)
+        def select_folder(entry_widget):
+            foldername = filedialog.askdirectory(title="选择文件夹", initialdir=application_path)
+            if foldername:
+                entry_widget.delete(0, tk.END)
+                entry_widget.insert(0, foldername)
+        tk.Button(video_folder_frame, text="选取...", command=lambda: select_folder(video_folder_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).pack(side=tk.LEFT, padx=5)
         
-        tk.Label(content_frame, text="音量:", font=font_spec, bg='#F2EBF5').grid(row=2, column=0, sticky='e', padx=5, pady=5)
-        volume_entry = tk.Entry(content_frame, font=font_spec, width=10)
-        volume_entry.grid(row=2, column=1, sticky='w', padx=5, pady=5)
-        tk.Label(content_frame, text="(0-100)", font=font_spec, bg='#F2EBF5').grid(row=2, column=1, sticky='w', padx=(80, 5), pady=5)
+        play_order_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        play_order_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=2)
+        play_order_var = tk.StringVar(value="sequential")
+        tk.Radiobutton(play_order_frame, text="顺序播", variable=play_order_var, value="sequential", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT, padx=10)
+        tk.Radiobutton(play_order_frame, text="随机播", variable=play_order_var, value="random", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT, padx=10)
+
+        volume_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        volume_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=3)
+        tk.Label(volume_frame, text="音量:", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT)
+        volume_entry = tk.Entry(volume_frame, font=font_spec, width=10)
+        volume_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(volume_frame, text="0-100", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
         
         content_frame.columnconfigure(1, weight=1)
 
         # --- 播放选项 ---
         playback_frame = tk.LabelFrame(main_frame, text="播放选项", font=('Microsoft YaHei', 12, 'bold'),
-                                     bg='#F2EBF5', padx=10, pady=10)
-        playback_frame.pack(fill=tk.X, pady=5)
+                                     bg='#E8E8E8', padx=10, pady=10)
+        playback_frame.grid(row=1, column=0, sticky='ew', pady=4)
         
         playback_mode_var = tk.StringVar(value="fullscreen")
         resolutions = ["640x480", "800x600", "1024x768", "1280x720", "1366x768", "1600x900", "1920x1080"]
         resolution_var = tk.StringVar(value=resolutions[2])
+        
+        playback_rates = ['0.5x', '0.75x', '1.0x (正常)', '1.25x', '1.5x', '2.0x']
+        playback_rate_var = tk.StringVar(value='1.0x (正常)')
 
-        resolution_combo = ttk.Combobox(playback_frame, textvariable=resolution_var, values=resolutions, font=font_spec, width=15, state='readonly')
+        mode_frame = tk.Frame(playback_frame, bg='#E8E8E8')
+        mode_frame.grid(row=0, column=0, columnspan=3, sticky='w')
+
+        resolution_combo = ttk.Combobox(mode_frame, textvariable=resolution_var, values=resolutions, font=font_spec, width=15, state='readonly')
 
         def toggle_resolution_combo():
             if playback_mode_var.get() == "windowed":
@@ -1713,90 +1767,146 @@ class TimedBroadcastApp:
             else:
                 resolution_combo.config(state='disabled')
 
-        rb_fullscreen = tk.Radiobutton(playback_frame, text="无边框全屏", variable=playback_mode_var, value="fullscreen", bg='#F2EBF5', font=font_spec, command=toggle_resolution_combo)
-        rb_fullscreen.grid(row=0, column=0, padx=5, pady=5)
+        tk.Radiobutton(mode_frame, text="无边框全屏", variable=playback_mode_var, value="fullscreen", bg='#E8E8E8', font=font_spec, command=toggle_resolution_combo).pack(side=tk.LEFT, padx=5)
+        tk.Radiobutton(mode_frame, text="非全屏", variable=playback_mode_var, value="windowed", bg='#E8E8E8', font=font_spec, command=toggle_resolution_combo).pack(side=tk.LEFT, padx=5)
+        resolution_combo.pack(side=tk.LEFT, padx=10)
         
-        rb_windowed = tk.Radiobutton(playback_frame, text="非全屏 (窗口)", variable=playback_mode_var, value="windowed", bg='#F2EBF5', font=font_spec, command=toggle_resolution_combo)
-        rb_windowed.grid(row=0, column=1, padx=5, pady=5)
-        
-        resolution_combo.grid(row=0, column=2, padx=10, pady=5)
-        toggle_resolution_combo() # 初始化状态
+        rate_frame = tk.Frame(playback_frame, bg='#E8E8E8')
+        rate_frame.grid(row=1, column=0, columnspan=3, sticky='w', pady=5)
+        tk.Label(rate_frame, text="播放倍速:", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
+        rate_combo = ttk.Combobox(rate_frame, textvariable=playback_rate_var, values=playback_rates, font=font_spec, width=15)
+        rate_combo.pack(side=tk.LEFT)
+        tk.Label(rate_frame, text="(可手动输入0.25-4.0之间的值)", font=('Microsoft YaHei', 9), fg='grey', bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
 
-        # --- 时间设置 (复用) ---
-        time_frame = tk.LabelFrame(main_frame, text="时间", font=('Microsoft YaHei', 12, 'bold'), bg='#F2EBF5', padx=15, pady=10)
-        time_frame.pack(fill=tk.X, pady=5)
+        toggle_resolution_combo() # 初始化状态
         
-        tk.Label(time_frame, text="开始时间:", font=font_spec, bg='#F2EBF5').grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        # --- 时间设置 (复用) ---
+        time_frame = tk.LabelFrame(main_frame, text="时间", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=15, pady=10)
+        time_frame.grid(row=2, column=0, sticky='ew', pady=4)
+        
+        tk.Label(time_frame, text="开始时间:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
         start_time_entry = tk.Entry(time_frame, font=font_spec, width=50)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
-        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1).grid(row=0, column=2, padx=5)
+        tk.Label(time_frame, text="《可多个,用英文逗号,隔开》", font=font_spec, bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=0, column=3, padx=5)
+        
+        interval_var = tk.StringVar(value="first")
+        interval_frame1 = tk.Frame(time_frame, bg='#E8E8E8')
+        interval_frame1.grid(row=1, column=1, columnspan=2, sticky='w', padx=5, pady=2)
+        tk.Label(time_frame, text="间隔播报:", font=font_spec, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=2)
+        tk.Radiobutton(interval_frame1, text="播 n 首", variable=interval_var, value="first", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
+        interval_first_entry = tk.Entry(interval_frame1, font=font_spec, width=15)
+        interval_first_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(interval_frame1, text="(单视频时,指 n 遍)", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
+        
+        interval_frame2 = tk.Frame(time_frame, bg='#E8E8E8')
+        interval_frame2.grid(row=2, column=1, columnspan=2, sticky='w', padx=5, pady=2)
+        tk.Radiobutton(interval_frame2, text="播 n 秒", variable=interval_var, value="seconds", bg='#E8E8E8', font=font_spec).pack(side=tk.LEFT)
+        interval_seconds_entry = tk.Entry(interval_frame2, font=font_spec, width=15)
+        interval_seconds_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(interval_frame2, text="(3600秒 = 1小时)", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
 
-        tk.Label(time_frame, text="周几/几号:", font=font_spec, bg='#F2EBF5').grid(row=1, column=0, sticky='e', padx=5, pady=3)
+        tk.Label(time_frame, text="周几/几号:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='e', padx=5, pady=3)
         weekday_entry = tk.Entry(time_frame, font=font_spec, width=50)
-        weekday_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=3)
-        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1).grid(row=1, column=2, padx=5)
+        weekday_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=3)
+        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=3, column=3, padx=5)
 
-        tk.Label(time_frame, text="日期范围:", font=font_spec, bg='#F2EBF5').grid(row=2, column=0, sticky='e', padx=5, pady=3)
+        tk.Label(time_frame, text="日期范围:", font=font_spec, bg='#E8E8E8').grid(row=4, column=0, sticky='e', padx=5, pady=3)
         date_range_entry = tk.Entry(time_frame, font=font_spec, width=50)
-        date_range_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=3)
+        date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=3)
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
-        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1).grid(row=2, column=2, padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=4, column=3, padx=5)
         
         time_frame.columnconfigure(1, weight=1)
 
         # --- 其他设置 (复用) ---
-        other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#F2EBF5', padx=10, pady=10)
-        other_frame.pack(fill=tk.X, pady=5)
+        other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=10)
+        other_frame.grid(row=3, column=0, sticky='ew', pady=5)
         
         delay_var = tk.StringVar(value="ontime")
-        tk.Label(other_frame, text="模式:", font=font_spec, bg='#F2EBF5').pack(side=tk.LEFT, padx=5)
-        tk.Radiobutton(other_frame, text="准时播", variable=delay_var, value="ontime", bg='#F2EBF5', font=font_spec).pack(side=tk.LEFT, padx=5)
-        tk.Radiobutton(other_frame, text="可延后", variable=delay_var, value="delay", bg='#F2EBF5', font=font_spec).pack(side=tk.LEFT, padx=5)
+        tk.Label(other_frame, text="模式:", font=font_spec, bg='#E8E8E8').grid(row=0, column=0, sticky='nw', padx=5, pady=2)
+        delay_frame = tk.Frame(other_frame, bg='#E8E8E8')
+        delay_frame.grid(row=0, column=1, sticky='w', padx=5, pady=2)
+        tk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们（默认）", variable=delay_var, value="ontime", bg='#E8E8E8', font=font_spec).pack(anchor='w')
+        tk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候", variable=delay_var, value="delay", bg='#E8E8E8', font=font_spec).pack(anchor='w')
+        tk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate", bg='#E8E8E8', font=font_spec).pack(anchor='w')
         
+        dialog_button_frame = tk.Frame(other_frame, bg='#E8E8E8')
+        dialog_button_frame.grid(row=0, column=2, sticky='e', padx=20)
+        other_frame.grid_columnconfigure(1, weight=1)
+
         # --- 填充数据 (编辑模式) 或 默认值 (新增模式) ---
         if is_edit_mode:
             task = task_to_edit
             name_entry.insert(0, task.get('name', ''))
-            video_file_entry.insert(0, task.get('content', ''))
+            video_type_var.set(task.get('video_type', 'single'))
+            if task.get('video_type') == 'single':
+                video_single_entry.insert(0, task.get('content', ''))
+            else:
+                video_folder_entry.insert(0, task.get('content', ''))
+            play_order_var.set(task.get('play_order', 'sequential'))
             volume_entry.insert(0, task.get('volume', '80'))
             playback_mode_var.set(task.get('playback_mode', 'fullscreen'))
             resolution_var.set(task.get('resolution', '1024x768'))
+            playback_rate_var.set(task.get('playback_rate', '1.0x (正常)'))
             start_time_entry.insert(0, task.get('time', ''))
+            interval_var.set(task.get('interval_type', 'first'))
+            interval_first_entry.insert(0, task.get('interval_first', '1'))
+            interval_seconds_entry.insert(0, task.get('interval_seconds', '600'))
             weekday_entry.insert(0, task.get('weekday', '每周:1234567'))
             date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31'))
             delay_var.set(task.get('delay', 'ontime'))
             toggle_resolution_combo()
         else:
             volume_entry.insert(0, "80")
+            interval_first_entry.insert(0, "1")
+            interval_seconds_entry.insert(0, "600")
             weekday_entry.insert(0, "每周:1234567")
             date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
 
         # --- 保存和取消按钮 ---
         def save_task():
-            video_path = video_file_entry.get().strip()
+            video_path = video_single_entry.get().strip() if video_type_var.get() == "single" else video_folder_entry.get().strip()
             if not video_path:
-                messagebox.showwarning("警告", "请选择一个视频文件", parent=dialog)
-                return
-            if not os.path.exists(video_path):
-                messagebox.showwarning("警告", "选择的视频文件不存在", parent=dialog)
+                messagebox.showwarning("警告", "请选择一个视频文件或文件夹", parent=dialog)
                 return
 
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
             if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
             is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
             if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
+            
+            rate_str = playback_rate_var.get().lower().replace('x', '').strip()
+            try:
+                rate_val = float(rate_str)
+                if not (0.25 <= rate_val <= 4.0):
+                    messagebox.showwarning("输入错误", "播放倍速必须在 0.25 和 4.0 之间。", parent=dialog)
+                    return
+            except ValueError:
+                messagebox.showwarning("输入错误", "无效的播放倍速值。", parent=dialog)
+                return
+
+            play_mode = delay_var.get()
+            play_this_task_now = (play_mode == 'immediate')
+            saved_delay_type = 'ontime' if play_mode == 'immediate' else play_mode
 
             new_task_data = {
                 'name': name_entry.get().strip() or os.path.basename(video_path),
                 'time': time_msg,
                 'content': video_path,
-                'type': 'video', # 关键类型
+                'type': 'video',
+                'video_type': video_type_var.get(),
+                'play_order': play_order_var.get(),
                 'volume': volume_entry.get().strip() or "80",
+                'interval_type': interval_var.get(),
+                'interval_first': interval_first_entry.get().strip() or "1",
+                'interval_seconds': interval_seconds_entry.get().strip() or "600",
                 'playback_mode': playback_mode_var.get(),
                 'resolution': resolution_var.get(),
+                'playback_rate': playback_rate_var.get(),
                 'weekday': weekday_entry.get().strip(),
                 'date_range': date_msg,
-                'delay': delay_var.get(),
+                'delay': saved_delay_type,
                 'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'),
                 'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {}),
             }
@@ -1815,13 +1925,13 @@ class TimedBroadcastApp:
             self.save_tasks()
             dialog.destroy()
 
-        button_frame = tk.Frame(main_frame, bg='#F2EBF5')
-        button_frame.pack(pady=20)
-        
-        button_text = "保存修改" if is_edit_mode else "添加"
-        tk.Button(button_frame, text=button_text, command=save_task, bg='#8E44AD', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=25, pady=5, cursor='hand2').pack(side=tk.LEFT, padx=10)
-        tk.Button(button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=25, pady=5, cursor='hand2').pack(side=tk.LEFT, padx=10)
+            if play_this_task_now:
+                self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
 
+        button_text = "保存修改" if is_edit_mode else "添加"
+        tk.Button(dialog_button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(dialog_button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
@@ -1882,10 +1992,6 @@ class TimedBroadcastApp:
         tk.Label(bgm_frame, text="音量(0-100):", font=font_spec, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
         tk.Entry(bgm_frame, textvariable=bgm_volume_var, font=font_spec, width=8).pack(side=tk.LEFT, padx=5)
         
-        def select_folder(entry_widget):
-            foldername = filedialog.askdirectory(title="选择文件夹", initialdir=application_path)
-            if foldername: entry_widget.delete(0, tk.END); entry_widget.insert(0, foldername)
-            
         bg_image_var = tk.IntVar(value=0)
         bg_image_path_var = tk.StringVar()
         bg_image_order_var = tk.StringVar(value="sequential")
@@ -2624,6 +2730,7 @@ class TimedBroadcastApp:
         self.status_labels[1].config(text="系统状态: 运行中")
         self.root.after(1000, self.update_status_bar)
 
+#分割线
     def start_background_threads(self):
         threading.Thread(target=self._scheduler_worker, daemon=True).start()
         threading.Thread(target=self._playback_worker, daemon=True).start()
@@ -3002,15 +3109,32 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"播放语音内容失败: {e}")
 
-    # --- 新增: 视频播放的核心逻辑 ---
+    # --- 修改: 视频播放的核心逻辑 ---
     def _play_video_task_internal(self, task):
         if not VLC_AVAILABLE:
             self.log("错误: python-vlc 库未安装或VLC播放器未找到，无法播放视频。")
             return
         
-        video_path = task.get('content')
-        if not os.path.exists(video_path):
-            self.log(f"错误: 视频文件不存在 - {video_path}")
+        # --- 构造播放列表 ---
+        interval_type = task.get('interval_type', 'first')
+        duration_seconds = int(task.get('interval_seconds', 0))
+        repeat_count = int(task.get('interval_first', 1))
+        
+        playlist = []
+        if task.get('video_type') == 'single':
+            if os.path.exists(task['content']):
+                playlist = [task['content']] * repeat_count
+        else: # folder
+            folder_path = task['content']
+            if os.path.isdir(folder_path):
+                video_extensions = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv')
+                all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(video_extensions)]
+                if task.get('play_order') == 'random':
+                    random.shuffle(all_files)
+                playlist = all_files[:repeat_count]
+
+        if not playlist:
+            self.log(f"错误: 视频列表为空，任务 '{task['name']}' 无法播放。")
             return
 
         try:
@@ -3019,41 +3143,71 @@ class TimedBroadcastApp:
                 pygame.mixer.music.stop()
                 pygame.mixer.stop()
 
+            # --- 创建VLC实例和播放器 ---
             instance = vlc.Instance()
             self.vlc_player = instance.media_player_new()
-            media = instance.media_new(video_path)
-            self.vlc_player.set_media(media)
-
-            # 必须在主线程中创建 Tkinter 组件，所以我们使用 after
-            self.root.after(0, self._create_video_window, task)
             
-            # 等待视频窗口创建完毕
-            time.sleep(0.5) 
+            # 在主线程中创建窗口
+            self.root.after(0, self._create_video_window, task)
+            time.sleep(0.5)
 
-            # 将播放器附加到窗口句柄
-            if self.video_window and self.video_window.winfo_exists():
-                self.vlc_player.set_hwnd(self.video_window.winfo_id())
-            else:
+            if not (self.video_window and self.video_window.winfo_exists()):
                 self.log("错误: 视频窗口创建失败，无法播放。")
                 return
+                
+            self.vlc_player.set_hwnd(self.video_window.winfo_id())
 
-            self.vlc_player.play()
-            
-            # 设置音量
-            self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
-            
-            # 循环检查播放状态，直到视频播放结束或被中断
-            time.sleep(0.5) # 等待视频开始播放
-            while self.vlc_player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
+            start_time = time.time()
+            for i, video_path in enumerate(playlist):
                 if self._is_interrupted():
-                    self.log(f"视频任务 '{task['name']}' 被中断。")
-                    self.vlc_player.stop()
+                    self.log(f"任务 '{task['name']}' 在开始播放前被中断。")
                     break
+
+                media = instance.media_new(video_path)
+                self.vlc_player.set_media(media)
+                self.vlc_player.play()
                 
-                status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
-                self.update_playing_text(f"[{task['name']}] 正在播放: {os.path.basename(video_path)} ({status_text})")
+                # 设置音量和播放速率
+                self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
+                rate_str = task.get('playback_rate', '1.0').lower().replace('x', '').replace('(正常)','').strip()
+                rate_val = float(rate_str)
+                self.vlc_player.set_rate(rate_val)
+                self.log(f"设置播放速率为: {rate_val}")
                 
-                time.sleep(0.2)
+                # 等待媒体开始播放
+                time.sleep(0.5)
+                
+                last_text_update_time = 0
+                while self.vlc_player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
+                    if self._is_interrupted():
+                        self.log(f"视频任务 '{task['name']}' 被中断。")
+                        self.vlc_player.stop()
+                        break
+                    
+                    now = time.time()
+                    if interval_type == 'seconds':
+                        elapsed = now - start_time
+                        if elapsed >= duration_seconds:
+                            self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
+                            self.vlc_player.stop()
+                            break
+                        
+                        if now - last_text_update_time >= 1.0:
+                            remaining_seconds = int(duration_seconds - elapsed)
+                            status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
+                            self.update_playing_text(f"[{task['name']}] {os.path.basename(video_path)} ({status_text} - 剩余 {remaining_seconds} 秒)")
+                            last_text_update_time = now
+                    else: # first (播n首)
+                         if now - last_text_update_time >= 1.0:
+                            status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
+                            self.update_playing_text(f"[{task['name']}] {os.path.basename(video_path)} ({i+1}/{len(playlist)} - {status_text})")
+                            last_text_update_time = now
+
+                    time.sleep(0.2)
+
+                # 如果是因为时长结束，需要跳出外层循环
+                if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
+                    break
 
         except Exception as e:
             self.log(f"播放视频任务 '{task['name']}' 时发生错误: {e}")
@@ -3063,7 +3217,7 @@ class TimedBroadcastApp:
                 self.vlc_player = None
             
             self.root.after(0, self._destroy_video_window)
-            self.log(f"视频 '{os.path.basename(video_path)}' 播放结束。")
+            self.log(f"视频 '{task['name']}' 播放结束。")
 
     def _create_video_window(self, task):
         if self.video_window and self.video_window.winfo_exists():
