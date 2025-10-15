@@ -10,25 +10,22 @@ jobs:
     strategy:
       matrix:
         include:
-          # 配置 1: 用于 Windows 7 (32位)
           - python-version: '3.8.10'
             architecture: 'x86'
-            artifact-name: 'boyin-Windows-x86-for-Win7'         # <-- 修改这里
-            exe-name-suffix: 'x86_for_Win7'                     # <-- 新增这里
+            artifact-name: 'boyin-Windows-x86-for-Win7'
+            exe-name-suffix: 'x86_for_Win7'
             vlc-folder: 'vlc_lib_x86'
 
-          # 配置 2: 用于 Windows 7+ (64位)
           - python-version: '3.8.10'
             architecture: 'x64'
-            artifact-name: 'boyin-Windows-x64-for-Win7'         # <-- 修改这里
-            exe-name-suffix: 'x64_for_Win7'                     # <-- 新增这里
+            artifact-name: 'boyin-Windows-x64-for-Win7'
+            exe-name-suffix: 'x64_for_Win7'
             vlc-folder: 'vlc_lib_x64'
 
-          # 配置 3: 用于 Windows 8.1 - 11 (64位)
           - python-version: '3.11'
             architecture: 'x64'
-            artifact-name: 'boyin-Windows-x64-for-Win8.1+'      # <-- 修改这里
-            exe-name-suffix: 'x64_for_Win8.1+'                  # <-- 新增这里
+            artifact-name: 'boyin-Windows-x64-for-Win8.1+'
+            exe-name-suffix: 'x64_for_Win8.1+'
             vlc-folder: 'vlc_lib_x64'
 
     runs-on: windows-latest
@@ -56,14 +53,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
-          python -m pywin32_postinstall -install
+          # --- 这是关键的修正 ---
+          # 使用 PowerShell 的 Get-Command 来找到并执行脚本，这是最可靠的方式
+          python (Get-Command pywin32_postinstall.py).Source -install
         shell: pwsh
 
       - name: Build application with PyInstaller
         run: |
           pyinstaller --noconfirm --onefile --windowed `
-            # --- 这是关键的修改 ---
-            # 使用新的 exe-name-suffix 变量来命名最终的 exe 文件
             --name "创翔多功能定时播音旗舰版_${{ matrix.exe-name-suffix }}" `
             --icon="icon.ico" `
             --add-data="icon.ico;." `
