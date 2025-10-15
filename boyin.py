@@ -3147,7 +3147,7 @@ class TimedBroadcastApp:
         tree.bind("<ButtonRelease-1>", on_release, True)
 
 # --- 代码第一部分结束 ---
-def save_holidays(self):
+    def save_holidays(self):
         try:
             with open(HOLIDAY_FILE, 'w', encoding='utf-8') as f:
                 json.dump(self.holidays, f, ensure_ascii=False, indent=2)
