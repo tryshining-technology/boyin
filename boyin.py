@@ -3782,9 +3782,9 @@ class TimedBroadcastApp:
             else: # recurring
                 try:
                     interval = int(recurring_interval_entry.get().strip() or '0')
-                    if not (0 <= interval <= 60): raise ValueError
+                    if not (0 <= interval <= 1440): raise ValueError # 0 to 24 hours
                 except ValueError:
-                    messagebox.showerror("格式错误", "循环间隔必须是 0-60 之间的整数。", parent=dialog)
+                    messagebox.showerror("格式错误", "循环间隔必须是 0-1440 之间的整数。", parent=dialog)
                     return
 
                 is_valid_time, time_msg = self._normalize_multiple_times_string(recurring_time_entry.get().strip())
@@ -3986,12 +3986,13 @@ class TimedBroadcastApp:
         
         self.root.after(1000, self._process_reminder_queue)
 
+    ### 修复点 3/3: 修复闪烁功能 ###
     def _start_flashing(self):
         """开始任务栏图标的闪烁循环。"""
-        if self.is_flashing: # 如果已经在闪烁，则不再创建新的循环
+        if self.is_flashing:
             return
         self.is_flashing = True
-        self._flashing_worker() # 启动工作循环
+        self._flashing_worker()
 
     def _stop_flashing(self):
         """停止任务栏图标的闪烁循环。"""
@@ -3999,11 +4000,10 @@ class TimedBroadcastApp:
         if self.flash_job_id:
             self.root.after_cancel(self.flash_job_id)
             self.flash_job_id = None
-        # 发送一个最终的停止闪烁指令
         try:
-            hwnd = win32gui.FindWindow(None, self.root.title())
+            hwnd = self.root.winfo_id() # 使用更可靠的 winfo_id()
             if hwnd:
-                win32gui.FlashWindow(hwnd, False) # False 参数用于停止闪烁
+                win32gui.FlashWindow(hwnd, False) 
         except Exception as e:
             self.log(f"停止任务栏闪烁时出错: {e}")
             
@@ -4013,20 +4013,18 @@ class TimedBroadcastApp:
             return
 
         try:
-            hwnd = win32gui.FindWindow(None, self.root.title())
+            hwnd = self.root.winfo_id() # 使用更可靠的 winfo_id()
             if hwnd:
-                # 使用 FlashWindowEx 获得更可靠的闪烁效果
                 info = win32gui.FLASHWINFO()
                 info.cbSize = ctypes.sizeof(info)
                 info.hwnd = hwnd
                 info.dwFlags = win32con.FLASHW_ALL | win32con.FLASHW_TIMERNOFG
-                info.uCount = 0 # 持续闪烁
+                info.uCount = 0 
                 info.dwTimeout = 0
                 ctypes.windll.user32.FlashWindowEx(ctypes.byref(info))
         except Exception as e:
             self.log(f"任务栏闪烁工作函数出错: {e}")
         
-        # 安排下一次闪烁
         self.flash_job_id = self.root.after(1000, self._flashing_worker)
 
     def _play_reminder_sound(self):
@@ -4064,16 +4062,14 @@ class TimedBroadcastApp:
         self.center_window(reminder_win, 480, 320)
         reminder_win.configure(bg='#FFFFE0')
 
-        # 温和地提升窗口，而不是强制抓取焦点
         reminder_win.attributes('-topmost', True)
         reminder_win.lift()
         reminder_win.focus_force()
-        # 短暂置顶后取消，避免窗口始终遮挡其他应用
         reminder_win.after(1000, lambda: reminder_win.attributes('-topmost', False))
 
         original_index = todo.get('original_index')
+        task_type = todo.get('type')
 
-        # 更新任务状态为“待处理”（如果是一次性任务）
         if original_index is not None and original_index < len(self.todos):
             task_in_list = self.todos[original_index]
             if task_in_list.get('status') != '禁用' and task_in_list.get('type') == 'onetime':
@@ -4082,20 +4078,23 @@ class TimedBroadcastApp:
 
         title_label = tk.Label(reminder_win, text=todo.get('name', '无标题'), font=('Microsoft YaHei', 14, 'bold'), bg='#FFFFE0', wraplength=460)
         title_label.pack(pady=(15, 10))
+        
+        ### 修复点 1/3: 调整布局，确保按钮可见 ###
+        btn_frame = tk.Frame(reminder_win, bg='#FFFFE0')
+        btn_frame.pack(side=tk.BOTTOM, pady=15)
 
         content_frame = tk.Frame(reminder_win, bg='white', bd=1, relief='solid')
         content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+        
         content_text = scrolledtext.ScrolledText(content_frame, font=('Microsoft YaHei', 11), wrap=tk.WORD, bd=0, bg='white')
         content_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         content_text.insert('1.0', todo.get('content', ''))
         content_text.config(state='disabled')
-
-        btn_frame = tk.Frame(reminder_win, bg='#FFFFE0')
-        btn_frame.pack(pady=15)
+        
         font_spec = ('Microsoft YaHei', 11)
 
         def close_and_release():
-            self._stop_flashing() # 停止闪烁
+            self._stop_flashing()
             self.is_reminder_active = False
             reminder_win.destroy()
 
@@ -4129,9 +4128,15 @@ class TimedBroadcastApp:
                         self.log(f"已删除待办事项: {todo['name']}")
                 close_and_release()
         
-        reminder_win.protocol("WM_DELETE_WINDOW", close_and_release)
+        ### 修复点 2/3: 处理 'X' 按钮点击事件 ###
+        def on_closing_protocol():
+            if task_type == 'onetime':
+                handle_complete()
+            else:
+                close_and_release()
+        
+        reminder_win.protocol("WM_DELETE_WINDOW", on_closing_protocol)
 
-        task_type = todo.get('type')
         if task_type == 'onetime':
             tk.Button(btn_frame, text="已完成", font=font_spec, bg='#27AE60', fg='white', width=10, command=handle_complete).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="稍后提醒", font=font_spec, width=10, command=handle_snooze).pack(side=tk.LEFT, padx=10)
