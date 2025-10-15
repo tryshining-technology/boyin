@@ -13,17 +13,23 @@ jobs:
           # 配置 1: 用于 Windows 7 (32位)
           - python-version: '3.8.10'
             architecture: 'x86'
-            artifact-name: 'boyin-Windows-x86'
+            artifact-name: 'boyin-Windows-x86-for-Win7'         # <-- 修改这里
+            exe-name-suffix: 'x86_for_Win7'                     # <-- 新增这里
+            vlc-folder: 'vlc_lib_x86'
 
-          # 配置 2: 用于 Windows 7 (64位) - 同样适用于更高版本
+          # 配置 2: 用于 Windows 7+ (64位)
           - python-version: '3.8.10'
             architecture: 'x64'
-            artifact-name: 'boyin-Windows-x64'
+            artifact-name: 'boyin-Windows-x64-for-Win7'         # <-- 修改这里
+            exe-name-suffix: 'x64_for_Win7'                     # <-- 新增这里
+            vlc-folder: 'vlc_lib_x64'
 
-          # 配置 3: 用于 Windows 8.1 - 11 (64位) 的较新Python版本
+          # 配置 3: 用于 Windows 8.1 - 11 (64位)
           - python-version: '3.11'
             architecture: 'x64'
-            artifact-name: 'boyin-Windows-x64-py311'
+            artifact-name: 'boyin-Windows-x64-for-Win8.1+'      # <-- 修改这里
+            exe-name-suffix: 'x64_for_Win8.1+'                  # <-- 新增这里
+            vlc-folder: 'vlc_lib_x64'
 
     runs-on: windows-latest
 
@@ -50,21 +56,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
-          python (Get-Command pywin32_postinstall.py).Source -install
+          python -m pywin32_postinstall -install
+        shell: pwsh
 
       - name: Build application with PyInstaller
-        # 使用 PowerShell 多行命令语法
         run: |
           pyinstaller --noconfirm --onefile --windowed `
-            --name "创翔多功能定时播音旗舰版_${{ matrix.architecture }}" `
+            # --- 这是关键的修改 ---
+            # 使用新的 exe-name-suffix 变量来命名最终的 exe 文件
+            --name "创翔多功能定时播音旗舰版_${{ matrix.exe-name-suffix }}" `
             --icon="icon.ico" `
             --add-data="icon.ico;." `
-            --add-data="vlc_lib_x86;vlc_lib_x86" `
-            --add-data="vlc_lib_x64;vlc_lib_x64" `
-            boyin.py # 确保这里是你的主脚本文件名
+            --add-data="${{ matrix.vlc-folder }};." `
+            boyin.py
+        shell: pwsh
 
       - name: Upload artifact (${{ matrix.artifact-name }})
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact-name }}
-          path: dist/ # PyInstaller 默认会把所有东西都放在 dist 文件夹里
+          path: dist/*.exe
