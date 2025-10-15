@@ -56,6 +56,16 @@ try:
 except ImportError:
     print("警告: psutil 未安装，无法获取机器码，注册功能不可用。")
 
+# --- 新增: 导入 VLC 库 ---
+VLC_AVAILABLE = False
+try:
+    import vlc
+    VLC_AVAILABLE = True
+except ImportError:
+    print("警告: python-vlc 未安装，视频播放功能不可用。")
+except Exception as e:
+    print(f"警告: vlc 初始化失败 - {e}，视频播放功能不可用。")
+
 
 def resource_path(relative_path):
     """ 获取资源的绝对路径，无论是开发环境还是打包后 """
@@ -131,6 +141,10 @@ class TimedBroadcastApp:
         self.fullscreen_label = None
         self.image_tk_ref = None 
         self.current_stop_visual_event = None
+
+        # --- 新增: 用于管理视频播放窗口和播放器实例 ---
+        self.video_window = None
+        self.vlc_player = None
 
         self.create_folder_structure()
         self.load_settings()
@@ -849,6 +863,8 @@ class TimedBroadcastApp:
             ("全部禁用", self.disable_all_tasks, '#F39C12'),
             ("禁音频节目", lambda: self._set_tasks_status_by_type('audio', '禁用'), '#E67E22'),
             ("禁语音节目", lambda: self._set_tasks_status_by_type('voice', '禁用'), '#D35400'),
+            # --- 新增: 批量禁用视频节目 ---
+            ("禁视频节目", lambda: self._set_tasks_status_by_type('video', '禁用'), '#8E44AD'),
             ("统一音量", self.set_uniform_volume, '#8E44AD'),
             ("清空节目", self.clear_all_tasks, '#C0392B')
         ]
@@ -1424,10 +1440,10 @@ class TimedBroadcastApp:
     def add_task(self):
         choice_dialog = tk.Toplevel(self.root)
         choice_dialog.title("选择节目类型")
-        choice_dialog.geometry("350x280")
+        choice_dialog.geometry("350x350") # 增加高度以容纳新按钮
         choice_dialog.resizable(False, False)
         choice_dialog.transient(self.root); choice_dialog.grab_set()
-        self.center_window(choice_dialog, 350, 280)
+        self.center_window(choice_dialog, 350, 350)
         main_frame = tk.Frame(choice_dialog, padx=20, pady=20, bg='#F0F0F0')
         main_frame.pack(fill=tk.BOTH, expand=True)
         title_label = tk.Label(main_frame, text="请选择要添加的节目类型",
@@ -1435,14 +1451,24 @@ class TimedBroadcastApp:
         title_label.pack(pady=15)
         btn_frame = tk.Frame(main_frame, bg='#F0F0F0')
         btn_frame.pack(expand=True)
+        
         audio_btn = tk.Button(btn_frame, text="🎵 音频节目",
                              bg='#5DADE2', fg='white', font=('Microsoft YaHei', 12, 'bold'),
                              bd=0, padx=30, pady=12, cursor='hand2', width=15, command=lambda: self.open_audio_dialog(choice_dialog))
         audio_btn.pack(pady=8)
+        
         voice_btn = tk.Button(btn_frame, text="🎙️ 语音节目",
                              bg='#3498DB', fg='white', font=('Microsoft YaHei', 12, 'bold'),
                              bd=0, padx=30, pady=12, cursor='hand2', width=15, command=lambda: self.open_voice_dialog(choice_dialog))
         voice_btn.pack(pady=8)
+
+        # --- 新增: 视频节目按钮 ---
+        video_btn = tk.Button(btn_frame, text="🎬 视频节目",
+                             bg='#9B59B6', fg='white', font=('Microsoft YaHei', 12, 'bold'),
+                             bd=0, padx=30, pady=12, cursor='hand2', width=15, command=lambda: self.open_video_dialog(choice_dialog))
+        video_btn.pack(pady=8)
+        if not VLC_AVAILABLE:
+            video_btn.config(state=tk.DISABLED, text="🎬 视频节目 (VLC未安装)")
 
     def open_audio_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
@@ -1623,6 +1649,178 @@ class TimedBroadcastApp:
         tk.Button(dialog_button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
         
         content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
+
+    # --- 新增: 添加和编辑视频节目的对话框 ---
+    def open_video_dialog(self, parent_dialog, task_to_edit=None, index=None):
+        parent_dialog.destroy()
+        is_edit_mode = task_to_edit is not None
+        dialog = tk.Toplevel(self.root)
+        dialog.title("修改视频节目" if is_edit_mode else "添加视频节目")
+        dialog.geometry("800x600")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.configure(bg='#F2EBF5') #淡紫色背景
+
+        main_frame = tk.Frame(dialog, bg='#F2EBF5', padx=15, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        font_spec = ('Microsoft YaHei', 11)
+
+        # --- 内容设置 ---
+        content_frame = tk.LabelFrame(main_frame, text="内容设置", font=('Microsoft YaHei', 12, 'bold'),
+                                     bg='#F2EBF5', padx=10, pady=10)
+        content_frame.pack(fill=tk.X, pady=5)
+
+        tk.Label(content_frame, text="节目名称:", font=font_spec, bg='#F2EBF5').grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        name_entry = tk.Entry(content_frame, font=font_spec, width=60)
+        name_entry.grid(row=0, column=1, columnspan=2, sticky='ew', padx=5, pady=5)
+
+        tk.Label(content_frame, text="视频文件:", font=font_spec, bg='#F2EBF5').grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        video_file_entry = tk.Entry(content_frame, font=font_spec, width=60)
+        video_file_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
+        
+        def select_video_file():
+            ftypes = [("视频文件", "*.mp4 *.mkv *.avi *.mov *.wmv *.flv"), ("所有文件", "*.*")]
+            filename = filedialog.askopenfilename(title="选择视频文件", filetypes=ftypes)
+            if filename:
+                video_file_entry.delete(0, tk.END)
+                video_file_entry.insert(0, filename)
+        
+        tk.Button(content_frame, text="选取...", command=select_video_file, bg='#D0D0D0', font=font_spec, bd=1).grid(row=1, column=2, padx=5, pady=5)
+        
+        tk.Label(content_frame, text="音量:", font=font_spec, bg='#F2EBF5').grid(row=2, column=0, sticky='e', padx=5, pady=5)
+        volume_entry = tk.Entry(content_frame, font=font_spec, width=10)
+        volume_entry.grid(row=2, column=1, sticky='w', padx=5, pady=5)
+        tk.Label(content_frame, text="(0-100)", font=font_spec, bg='#F2EBF5').grid(row=2, column=1, sticky='w', padx=(80, 5), pady=5)
+        
+        content_frame.columnconfigure(1, weight=1)
+
+        # --- 播放选项 ---
+        playback_frame = tk.LabelFrame(main_frame, text="播放选项", font=('Microsoft YaHei', 12, 'bold'),
+                                     bg='#F2EBF5', padx=10, pady=10)
+        playback_frame.pack(fill=tk.X, pady=5)
+        
+        playback_mode_var = tk.StringVar(value="fullscreen")
+        resolutions = ["640x480", "800x600", "1024x768", "1280x720", "1366x768", "1600x900", "1920x1080"]
+        resolution_var = tk.StringVar(value=resolutions[2])
+
+        resolution_combo = ttk.Combobox(playback_frame, textvariable=resolution_var, values=resolutions, font=font_spec, width=15, state='readonly')
+
+        def toggle_resolution_combo():
+            if playback_mode_var.get() == "windowed":
+                resolution_combo.config(state='readonly')
+            else:
+                resolution_combo.config(state='disabled')
+
+        rb_fullscreen = tk.Radiobutton(playback_frame, text="无边框全屏", variable=playback_mode_var, value="fullscreen", bg='#F2EBF5', font=font_spec, command=toggle_resolution_combo)
+        rb_fullscreen.grid(row=0, column=0, padx=5, pady=5)
+        
+        rb_windowed = tk.Radiobutton(playback_frame, text="非全屏 (窗口)", variable=playback_mode_var, value="windowed", bg='#F2EBF5', font=font_spec, command=toggle_resolution_combo)
+        rb_windowed.grid(row=0, column=1, padx=5, pady=5)
+        
+        resolution_combo.grid(row=0, column=2, padx=10, pady=5)
+        toggle_resolution_combo() # 初始化状态
+
+        # --- 时间设置 (复用) ---
+        time_frame = tk.LabelFrame(main_frame, text="时间", font=('Microsoft YaHei', 12, 'bold'), bg='#F2EBF5', padx=15, pady=10)
+        time_frame.pack(fill=tk.X, pady=5)
+        
+        tk.Label(time_frame, text="开始时间:", font=font_spec, bg='#F2EBF5').grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        start_time_entry = tk.Entry(time_frame, font=font_spec, width=50)
+        start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=font_spec, bd=1).grid(row=0, column=2, padx=5)
+
+        tk.Label(time_frame, text="周几/几号:", font=font_spec, bg='#F2EBF5').grid(row=1, column=0, sticky='e', padx=5, pady=3)
+        weekday_entry = tk.Entry(time_frame, font=font_spec, width=50)
+        weekday_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=3)
+        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=font_spec, bd=1).grid(row=1, column=2, padx=5)
+
+        tk.Label(time_frame, text="日期范围:", font=font_spec, bg='#F2EBF5').grid(row=2, column=0, sticky='e', padx=5, pady=3)
+        date_range_entry = tk.Entry(time_frame, font=font_spec, width=50)
+        date_range_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=3)
+        self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1).grid(row=2, column=2, padx=5)
+        
+        time_frame.columnconfigure(1, weight=1)
+
+        # --- 其他设置 (复用) ---
+        other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#F2EBF5', padx=10, pady=10)
+        other_frame.pack(fill=tk.X, pady=5)
+        
+        delay_var = tk.StringVar(value="ontime")
+        tk.Label(other_frame, text="模式:", font=font_spec, bg='#F2EBF5').pack(side=tk.LEFT, padx=5)
+        tk.Radiobutton(other_frame, text="准时播", variable=delay_var, value="ontime", bg='#F2EBF5', font=font_spec).pack(side=tk.LEFT, padx=5)
+        tk.Radiobutton(other_frame, text="可延后", variable=delay_var, value="delay", bg='#F2EBF5', font=font_spec).pack(side=tk.LEFT, padx=5)
+        
+        # --- 填充数据 (编辑模式) 或 默认值 (新增模式) ---
+        if is_edit_mode:
+            task = task_to_edit
+            name_entry.insert(0, task.get('name', ''))
+            video_file_entry.insert(0, task.get('content', ''))
+            volume_entry.insert(0, task.get('volume', '80'))
+            playback_mode_var.set(task.get('playback_mode', 'fullscreen'))
+            resolution_var.set(task.get('resolution', '1024x768'))
+            start_time_entry.insert(0, task.get('time', ''))
+            weekday_entry.insert(0, task.get('weekday', '每周:1234567'))
+            date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            delay_var.set(task.get('delay', 'ontime'))
+            toggle_resolution_combo()
+        else:
+            volume_entry.insert(0, "80")
+            weekday_entry.insert(0, "每周:1234567")
+            date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
+
+        # --- 保存和取消按钮 ---
+        def save_task():
+            video_path = video_file_entry.get().strip()
+            if not video_path:
+                messagebox.showwarning("警告", "请选择一个视频文件", parent=dialog)
+                return
+            if not os.path.exists(video_path):
+                messagebox.showwarning("警告", "选择的视频文件不存在", parent=dialog)
+                return
+
+            is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
+            if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
+            is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
+            if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
+
+            new_task_data = {
+                'name': name_entry.get().strip() or os.path.basename(video_path),
+                'time': time_msg,
+                'content': video_path,
+                'type': 'video', # 关键类型
+                'volume': volume_entry.get().strip() or "80",
+                'playback_mode': playback_mode_var.get(),
+                'resolution': resolution_var.get(),
+                'weekday': weekday_entry.get().strip(),
+                'date_range': date_msg,
+                'delay': delay_var.get(),
+                'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'),
+                'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {}),
+            }
+            if not new_task_data['name'] or not new_task_data['time']:
+                messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog)
+                return
+            
+            if is_edit_mode:
+                self.tasks[index] = new_task_data
+                self.log(f"已修改视频节目: {new_task_data['name']}")
+            else:
+                self.tasks.append(new_task_data)
+                self.log(f"已添加视频节目: {new_task_data['name']}")
+            
+            self.update_task_list()
+            self.save_tasks()
+            dialog.destroy()
+
+        button_frame = tk.Frame(main_frame, bg='#F2EBF5')
+        button_frame.pack(pady=20)
+        
+        button_text = "保存修改" if is_edit_mode else "添加"
+        tk.Button(button_frame, text=button_text, command=save_task, bg='#8E44AD', fg='white', font=('Microsoft YaHei', 11, 'bold'), bd=1, padx=25, pady=5, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=('Microsoft YaHei', 11), bd=1, padx=25, pady=5, cursor='hand2').pack(side=tk.LEFT, padx=10)
 
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
@@ -1953,6 +2151,7 @@ class TimedBroadcastApp:
                     if os.path.exists(wav_path):
                         try: os.remove(wav_path); self.log(f"已删除语音文件: {task_to_delete['wav_filename']}")
                         except Exception as e: self.log(f"删除语音文件失败: {e}")
+                # --- 注意: 这里没有删除视频文件，因为视频文件通常是用户自己管理的，而不是程序生成的 ---
                 self.log(f"已删除节目: {self.tasks.pop(index)['name']}")
             self.update_task_list(); self.save_tasks()
 
@@ -1963,8 +2162,18 @@ class TimedBroadcastApp:
         index = self.task_tree.index(selection[0])
         task = self.tasks[index]
         dummy_parent = tk.Toplevel(self.root); dummy_parent.withdraw()
-        if task.get('type') == 'audio': self.open_audio_dialog(dummy_parent, task_to_edit=task, index=index)
-        else: self.open_voice_dialog(dummy_parent, task_to_edit=task, index=index)
+        
+        task_type = task.get('type')
+        if task_type == 'audio':
+            self.open_audio_dialog(dummy_parent, task_to_edit=task, index=index)
+        elif task_type == 'voice':
+            self.open_voice_dialog(dummy_parent, task_to_edit=task, index=index)
+        # --- 新增: 处理视频节目的编辑 ---
+        elif task_type == 'video':
+            self.open_video_dialog(dummy_parent, task_to_edit=task, index=index)
+        else:
+             self.open_audio_dialog(dummy_parent, task_to_edit=task, index=index)
+
         def check_dialog_closed():
             try:
                 if not dummy_parent.winfo_children(): dummy_parent.destroy()
@@ -1993,7 +2202,7 @@ class TimedBroadcastApp:
                 except Exception as e:
                     self.log(f"为副本生成语音文件失败: {e}")
                     continue
-
+            # 视频和音频节目直接复制数据即可，无需特殊处理
             self.tasks.append(copy)
             self.log(f"已复制节目: {original['name']}")
         self.update_task_list(); self.save_tasks()
@@ -2070,7 +2279,8 @@ class TimedBroadcastApp:
     def _set_tasks_status_by_type(self, task_type, status):
         if not self.tasks: return
         
-        type_name = "音频" if task_type == 'audio' else "语音"
+        type_name_map = {'audio': '音频', 'voice': '语音', 'video': '视频'}
+        type_name = type_name_map.get(task_type, '未知')
         status_name = "启用" if status == '启用' else "禁用"
         
         count = 0
@@ -2372,15 +2582,29 @@ class TimedBroadcastApp:
         self.task_tree.delete(*self.task_tree.get_children())
         for task in self.tasks:
             content = task.get('content', '')
-            if task.get('type') == 'voice':
+            task_type = task.get('type')
+
+            if task_type == 'voice':
                 source_text = task.get('source_text', '')
                 clean_content = source_text.replace('\n', ' ').replace('\r', '')
                 content_preview = (clean_content[:30] + '...') if len(clean_content) > 30 else clean_content
-            else:
+            # --- 新增: 处理视频和音频节目的显示 ---
+            elif task_type in ['audio', 'video']:
+                content_preview = os.path.basename(content)
+            else: # 兼容旧数据
                 content_preview = os.path.basename(content)
                 
             display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
-            self.task_tree.insert('', tk.END, values=(task.get('name', ''), task.get('status', ''), task.get('time', ''), display_mode, content_preview, task.get('volume', ''), task.get('weekday', ''), task.get('date_range', '')))
+            self.task_tree.insert('', tk.END, values=(
+                task.get('name', ''), 
+                task.get('status', ''), 
+                task.get('time', ''), 
+                display_mode, 
+                content_preview, 
+                task.get('volume', ''), 
+                task.get('weekday', ''), 
+                task.get('date_range', '')
+            ))
         if selection:
             try: 
                 valid_selection = [s for s in selection if self.task_tree.exists(s)]
@@ -2557,6 +2781,11 @@ class TimedBroadcastApp:
                 if AUDIO_AVAILABLE:
                     pygame.mixer.music.stop()
                     pygame.mixer.stop()
+                
+                # --- 新增: 确保STOP命令也能停止VLC播放 ---
+                if VLC_AVAILABLE and self.vlc_player:
+                    self.vlc_player.stop()
+
                 self.log("STOP 命令已处理，所有播放已停止。")
                 self.update_playing_text("等待播放...")
                 self.status_labels[2].config(text="播放状态: 待机")
@@ -2589,12 +2818,18 @@ class TimedBroadcastApp:
                     visual_thread.start()
         
         try:
-            if task.get('type') == 'audio':
+            task_type = task.get('type')
+            if task_type == 'audio':
                 self.log(f"开始音频任务: {task['name']}")
                 self._play_audio_task_internal(task)
-            elif task.get('type') == 'voice':
+            elif task_type == 'voice':
                 self.log(f"开始语音任务: {task['name']} (共 {task.get('repeat', 1)} 遍)")
                 self._play_voice_task_internal(task)
+            # --- 新增: 处理视频任务的播放 ---
+            elif task_type == 'video':
+                self.log(f"开始视频任务: {task['name']}")
+                self._play_video_task_internal(task)
+
         except Exception as e:
             self.log(f"播放任务 '{task['name']}' 时发生严重错误: {e}")
         finally:
@@ -2607,6 +2842,12 @@ class TimedBroadcastApp:
             if AUDIO_AVAILABLE:
                 pygame.mixer.music.stop()
                 pygame.mixer.stop()
+            
+            # --- 新增: 确保VLC播放器在任务结束后停止 ---
+            if VLC_AVAILABLE and self.vlc_player:
+                self.vlc_player.stop()
+                self.vlc_player = None
+
             self.update_playing_text("等待播放...")
             self.status_labels[2].config(text="播放状态: 待机")
             self.log(f"任务 '{task['name']}' 播放结束。")
@@ -2760,6 +3001,112 @@ class TimedBroadcastApp:
                     time.sleep(0.5)
         except Exception as e:
             self.log(f"播放语音内容失败: {e}")
+
+    # --- 新增: 视频播放的核心逻辑 ---
+    def _play_video_task_internal(self, task):
+        if not VLC_AVAILABLE:
+            self.log("错误: python-vlc 库未安装或VLC播放器未找到，无法播放视频。")
+            return
+        
+        video_path = task.get('content')
+        if not os.path.exists(video_path):
+            self.log(f"错误: 视频文件不存在 - {video_path}")
+            return
+
+        try:
+            # 确保 pygame 的音频输出不会与 VLC 冲突
+            if AUDIO_AVAILABLE:
+                pygame.mixer.music.stop()
+                pygame.mixer.stop()
+
+            instance = vlc.Instance()
+            self.vlc_player = instance.media_player_new()
+            media = instance.media_new(video_path)
+            self.vlc_player.set_media(media)
+
+            # 必须在主线程中创建 Tkinter 组件，所以我们使用 after
+            self.root.after(0, self._create_video_window, task)
+            
+            # 等待视频窗口创建完毕
+            time.sleep(0.5) 
+
+            # 将播放器附加到窗口句柄
+            if self.video_window and self.video_window.winfo_exists():
+                self.vlc_player.set_hwnd(self.video_window.winfo_id())
+            else:
+                self.log("错误: 视频窗口创建失败，无法播放。")
+                return
+
+            self.vlc_player.play()
+            
+            # 设置音量
+            self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
+            
+            # 循环检查播放状态，直到视频播放结束或被中断
+            time.sleep(0.5) # 等待视频开始播放
+            while self.vlc_player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
+                if self._is_interrupted():
+                    self.log(f"视频任务 '{task['name']}' 被中断。")
+                    self.vlc_player.stop()
+                    break
+                
+                status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
+                self.update_playing_text(f"[{task['name']}] 正在播放: {os.path.basename(video_path)} ({status_text})")
+                
+                time.sleep(0.2)
+
+        except Exception as e:
+            self.log(f"播放视频任务 '{task['name']}' 时发生错误: {e}")
+        finally:
+            if self.vlc_player:
+                self.vlc_player.stop()
+                self.vlc_player = None
+            
+            self.root.after(0, self._destroy_video_window)
+            self.log(f"视频 '{os.path.basename(video_path)}' 播放结束。")
+
+    def _create_video_window(self, task):
+        if self.video_window and self.video_window.winfo_exists():
+            self.video_window.destroy()
+        
+        self.video_window = tk.Toplevel(self.root)
+        self.video_window.title(f"正在播放: {task['name']}")
+        self.video_window.configure(bg='black')
+
+        mode = task.get('playback_mode', 'fullscreen')
+        if mode == 'fullscreen':
+            self.video_window.attributes('-fullscreen', True)
+        else: # windowed
+            try:
+                w, h = map(int, task.get('resolution', '1024x768').split('x'))
+                x = (self.video_window.winfo_screenwidth() - w) // 2
+                y = (self.video_window.winfo_screenheight() - h) // 2
+                self.video_window.geometry(f'{w}x{h}+{x}+{y}')
+            except Exception as e:
+                self.log(f"设置视频分辨率失败: {e}, 使用默认尺寸。")
+                self.video_window.geometry('1024x768')
+        
+        # 绑定事件
+        self.video_window.bind('<Escape>', self._handle_video_esc)
+        self.video_window.bind('<space>', self._handle_video_space)
+        self.video_window.protocol("WM_DELETE_WINDOW", self._handle_video_esc)
+        self.video_window.focus_force()
+
+    def _destroy_video_window(self):
+        if self.video_window and self.video_window.winfo_exists():
+            self.video_window.destroy()
+        self.video_window = None
+
+    def _handle_video_esc(self, event=None):
+        self.log("ESC按下，停止视频播放。")
+        if self.vlc_player:
+            self.vlc_player.stop()
+
+    def _handle_video_space(self, event=None):
+        if self.vlc_player:
+            self.vlc_player.pause() # VLC的pause()方法是状态切换
+            status = "暂停" if self.vlc_player.get_state() == vlc.State.Paused else "播放"
+            self.log(f"空格键按下，视频已{status}。")
 
     def _get_task_total_duration(self, task):
         if not AUDIO_AVAILABLE: return 0.0
@@ -3153,7 +3500,6 @@ class TimedBroadcastApp:
         tree.bind("<B1-Motion>", on_drag, True)
         tree.bind("<ButtonRelease-1>", on_release, True)
 
-# --- 代码第一部分结束 ---
     def create_holiday_page(self):
         page_frame = tk.Frame(self.page_container, bg='white')
 
