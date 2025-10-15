@@ -132,10 +132,6 @@ class TimedBroadcastApp:
         self.image_tk_ref = None 
         self.current_stop_visual_event = None
 
-        # 闪烁功能相关的属性
-        self.is_flashing = False
-        self.flash_job_id = None
-
         self.create_folder_structure()
         self.load_settings()
         self.load_lock_password()
@@ -235,7 +231,8 @@ class TimedBroadcastApp:
 
     def create_status_bar_content(self):
         self.status_labels = []
-        status_texts = ["当前时间", "系统状态", "播放状态", "任务数量"]
+        # 新增“待办事项”到状态栏文本列表
+        status_texts = ["当前时间", "系统状态", "播放状态", "任务数量", "待办事项"]
         font_11 = ('Microsoft YaHei', 11)
 
         copyright_label = tk.Label(self.status_frame, text="© 创翔科技", font=font_11,
@@ -307,13 +304,11 @@ class TimedBroadcastApp:
         selected_btn.master.config(bg='#5DADE2')
 
     def _prompt_for_super_admin_password(self):
-        # 第一重验证：授权状态
         if self.auth_info['status'] != 'Permanent':
             messagebox.showerror("权限不足", "此功能仅对“永久授权”用户开放。\n\n请注册软件并获取永久授权后重试。")
             self.log("非永久授权用户尝试进入超级管理模块被阻止。")
             return
             
-        # 第二重验证：动态密码
         dialog = tk.Toplevel(self.root)
         dialog.title("身份验证")
         dialog.geometry("350x180")
@@ -1028,21 +1023,27 @@ class TimedBroadcastApp:
         daily_frame = tk.Frame(power_frame, bg='white')
         daily_frame.pack(fill=tk.X, pady=4)
         tk.Checkbutton(daily_frame, text="每天关机", variable=self.daily_shutdown_enabled_var, font=('Microsoft YaHei', 11), bg='white', command=self.save_settings).pack(side=tk.LEFT)
-        tk.Entry(daily_frame, textvariable=self.daily_shutdown_time_var, font=('Microsoft YaHei', 11), width=15).pack(side=tk.LEFT, padx=10)
+        daily_time_entry = tk.Entry(daily_frame, textvariable=self.daily_shutdown_time_var, font=('Microsoft YaHei', 11), width=15)
+        daily_time_entry.pack(side=tk.LEFT, padx=10)
+        self._bind_mousewheel_to_entry(daily_time_entry, self._handle_time_scroll) # 滚轮
         tk.Button(daily_frame, text="设置", font=('Microsoft YaHei', 11), command=lambda: self.show_single_time_dialog(self.daily_shutdown_time_var)).pack(side=tk.LEFT)
 
         weekly_frame = tk.Frame(power_frame, bg='white')
         weekly_frame.pack(fill=tk.X, pady=4)
         tk.Checkbutton(weekly_frame, text="每周关机", variable=self.weekly_shutdown_enabled_var, font=('Microsoft YaHei', 11), bg='white', command=self.save_settings).pack(side=tk.LEFT)
         tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_days_var, font=('Microsoft YaHei', 11), width=20).pack(side=tk.LEFT, padx=(10,5))
-        tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_time_var, font=('Microsoft YaHei', 11), width=15).pack(side=tk.LEFT, padx=5)
+        weekly_shutdown_time_entry = tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_time_var, font=('Microsoft YaHei', 11), width=15)
+        weekly_shutdown_time_entry.pack(side=tk.LEFT, padx=5)
+        self._bind_mousewheel_to_entry(weekly_shutdown_time_entry, self._handle_time_scroll) # 滚轮
         tk.Button(weekly_frame, text="设置", font=('Microsoft YaHei', 11), command=lambda: self.show_power_week_time_dialog("设置每周关机", self.weekly_shutdown_days_var, self.weekly_shutdown_time_var)).pack(side=tk.LEFT)
 
         reboot_frame = tk.Frame(power_frame, bg='white')
         reboot_frame.pack(fill=tk.X, pady=4)
         tk.Checkbutton(reboot_frame, text="每周重启", variable=self.weekly_reboot_enabled_var, font=('Microsoft YaHei', 11), bg='white', command=self.save_settings).pack(side=tk.LEFT)
         tk.Entry(reboot_frame, textvariable=self.weekly_reboot_days_var, font=('Microsoft YaHei', 11), width=20).pack(side=tk.LEFT, padx=(10,5))
-        tk.Entry(reboot_frame, textvariable=self.weekly_reboot_time_var, font=('Microsoft YaHei', 11), width=15).pack(side=tk.LEFT, padx=5)
+        weekly_reboot_time_entry = tk.Entry(reboot_frame, textvariable=self.weekly_reboot_time_var, font=('Microsoft YaHei', 11), width=15)
+        weekly_reboot_time_entry.pack(side=tk.LEFT, padx=5)
+        self._bind_mousewheel_to_entry(weekly_reboot_time_entry, self._handle_time_scroll) # 滚轮
         tk.Button(reboot_frame, text="设置", font=('Microsoft YaHei', 11), command=lambda: self.show_power_week_time_dialog("设置每周重启", self.weekly_reboot_days_var, self.weekly_reboot_time_var)).pack(side=tk.LEFT)
 
         return settings_frame
@@ -1052,11 +1053,9 @@ class TimedBroadcastApp:
             value = int(self.bg_image_interval_var.get())
             if not (5 <= value <= 60):
                 raise ValueError("超出范围")
-            # 如果值有效，则保存设置
             self.save_settings()
             self.log(f"背景图片切换间隔已更新为 {value} 秒。")
         except (ValueError, TypeError):
-            # 如果无效，则恢复为上次保存的值
             last_saved_value = str(self.settings.get("bg_image_interval", 6))
             messagebox.showerror("输入无效", "请输入一个介于 5 和 60 之间的整数。", parent=self.root)
             self.bg_image_interval_var.set(last_saved_value)
@@ -1547,6 +1546,7 @@ class TimedBroadcastApp:
         tk.Label(time_frame, text="日期范围:", font=font_spec, bg='#E8E8E8').grid(row=4, column=0, sticky='e', padx=5, pady=3)
         date_range_entry = tk.Entry(time_frame, font=font_spec, width=50)
         date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=3)
+        self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll) # 滚轮
         tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=4, column=3, padx=5)
         
         other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=10, pady=10)
@@ -1724,6 +1724,7 @@ class TimedBroadcastApp:
         tk.Label(time_frame, text="日期范围:", font=font_spec, bg='#E8E8E8').grid(row=3, column=0, sticky='e', padx=5, pady=2)
         date_range_entry = tk.Entry(time_frame, font=font_spec, width=50)
         date_range_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=2)
+        self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll) # 滚轮
         tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=font_spec, bd=1, padx=22, pady=1).grid(row=3, column=3, padx=5)
         
         other_frame = tk.LabelFrame(main_frame, text="其它", font=('Microsoft YaHei', 12, 'bold'), bg='#E8E8E8', padx=15, pady=10)
@@ -2210,6 +2211,7 @@ class TimedBroadcastApp:
         btn_frame.pack(side=tk.RIGHT, padx=10, fill=tk.Y)
         new_entry = tk.Entry(btn_frame, font=font_spec, width=12)
         new_entry.insert(0, datetime.now().strftime("%H:%M:%S")); new_entry.pack(pady=3)
+        self._bind_mousewheel_to_entry(new_entry, self._handle_time_scroll) # 滚轮
         def add_time():
             val = new_entry.get().strip()
             normalized_time = self._normalize_time_string(val)
@@ -2286,11 +2288,13 @@ class TimedBroadcastApp:
         tk.Label(from_frame, text="从", font=(font_spec[0], 11, 'bold'), bg='#D7F3F5').pack(side=tk.LEFT, padx=5)
         from_date_entry = tk.Entry(from_frame, font=font_spec, width=18)
         from_date_entry.pack(side=tk.LEFT, padx=5)
+        self._bind_mousewheel_to_entry(from_date_entry, self._handle_date_scroll) # 滚轮
         to_frame = tk.Frame(main_frame, bg='#D7F3F5')
         to_frame.pack(pady=10, anchor='w')
         tk.Label(to_frame, text="到", font=(font_spec[0], 11, 'bold'), bg='#D7F3F5').pack(side=tk.LEFT, padx=5)
         to_date_entry = tk.Entry(to_frame, font=font_spec, width=18)
         to_date_entry.pack(side=tk.LEFT, padx=5)
+        self._bind_mousewheel_to_entry(to_date_entry, self._handle_date_scroll) # 滚轮
         try: start, end = date_range_entry.get().split('~'); from_date_entry.insert(0, start.strip()); to_date_entry.insert(0, end.strip())
         except (ValueError, IndexError): from_date_entry.insert(0, "2000-01-01"); to_date_entry.insert(0, "2099-12-31")
         tk.Label(main_frame, text="格式: YYYY-MM-DD", font=font_spec, bg='#D7F3F5', fg='#666').pack(pady=10)
@@ -2317,6 +2321,7 @@ class TimedBroadcastApp:
         tk.Label(main_frame, text="24小时制 HH:MM:SS", font=(font_spec[0], 11, 'bold'), bg='#D7F3F5').pack(pady=5)
         time_entry = tk.Entry(main_frame, font=('Microsoft YaHei', 12), width=15, justify='center')
         time_entry.insert(0, time_var.get()); time_entry.pack(pady=10)
+        self._bind_mousewheel_to_entry(time_entry, self._handle_time_scroll) # 滚轮
         def confirm():
             val = time_entry.get().strip()
             normalized_time = self._normalize_time_string(val)
@@ -2347,6 +2352,7 @@ class TimedBroadcastApp:
         tk.Label(time_frame, text="时间 (HH:MM:SS):", font=font_spec, bg='#D7F3F5').pack(side=tk.LEFT)
         time_entry = tk.Entry(time_frame, font=font_spec, width=15)
         time_entry.insert(0, time_var.get()); time_entry.pack(side=tk.LEFT, padx=10)
+        self._bind_mousewheel_to_entry(time_entry, self._handle_time_scroll) # 滚轮
         def confirm():
             selected_days = sorted([str(n) for n, v in week_vars.items() if v.get()])
             if not selected_days: messagebox.showwarning("提示", "请至少选择一天", parent=dialog); return
@@ -2793,12 +2799,11 @@ class TimedBroadcastApp:
 
     def _visual_worker(self, task, stop_event):
         try:
-            # 给予主播放线程一点时间来准备
             if stop_event.wait(timeout=3.0): return
 
             image_path = task.get('bg_image_path')
             image_order = task.get('bg_image_order', 'sequential')
-            interval = float(self.settings.get("bg_image_interval", 6)) # 使用设置
+            interval = float(self.settings.get("bg_image_interval", 6))
             
             valid_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff')
             image_files = [os.path.join(image_path, f) for f in os.listdir(image_path) if f.lower().endswith(valid_extensions)]
@@ -2820,13 +2825,11 @@ class TimedBroadcastApp:
                     break
                 
                 current_image_path = image_files[img_index]
-                # 使用淡入淡出效果
                 self.root.after(0, self._crossfade_to_image, previous_image_path, current_image_path)
                 
                 previous_image_path = current_image_path
                 img_index = (img_index + 1) % len(image_files)
                 
-                # 等待用户设置的间隔时间
                 if stop_event.wait(timeout=interval):
                     break
         
@@ -2912,9 +2915,10 @@ class TimedBroadcastApp:
 
     def log(self, message): self.root.after(0, lambda: self._log_threadsafe(message))
     def _log_threadsafe(self, message):
-        self.log_text.config(state='normal')
-        self.log_text.insert(tk.END, f"{datetime.now().strftime('%H:%M:%S')} -> {message}\n")
-        self.log_text.see(tk.END); self.log_text.config(state='disabled')
+        if hasattr(self, 'log_text') and self.log_text.winfo_exists():
+            self.log_text.config(state='normal')
+            self.log_text.insert(tk.END, f"{datetime.now().strftime('%H:%M:%S')} -> {message}\n")
+            self.log_text.see(tk.END); self.log_text.config(state='disabled')
 
     def update_playing_text(self, message): self.root.after(0, lambda: self._update_playing_text_threadsafe(message))
     
@@ -2969,12 +2973,11 @@ class TimedBroadcastApp:
     def save_settings(self):
         if hasattr(self, 'autostart_var'):
             try:
-                # 再次验证图片间隔的合法性
                 interval = int(self.bg_image_interval_var.get())
                 if not (5 <= interval <= 60):
-                    interval = self.settings.get("bg_image_interval", 6) # 非法值则使用上次保存的值
+                    interval = self.settings.get("bg_image_interval", 6)
             except:
-                interval = self.settings.get("bg_image_interval", 6) # 非法值则使用上次保存的值
+                interval = self.settings.get("bg_image_interval", 6)
 
             self.settings.update({
                 "autostart": self.autostart_var.get(), 
@@ -3303,14 +3306,18 @@ class TimedBroadcastApp:
         tk.Label(main_frame, text="开始时间:", font=font_spec, bg='#F0F8FF').grid(row=1, column=0, sticky='w', pady=5)
         start_date_entry = tk.Entry(main_frame, font=font_spec, width=15)
         start_date_entry.grid(row=1, column=1, sticky='w', pady=5)
+        self._bind_mousewheel_to_entry(start_date_entry, self._handle_date_scroll) # 滚轮
         start_time_entry = tk.Entry(main_frame, font=font_spec, width=15)
         start_time_entry.grid(row=1, column=2, sticky='w', pady=5, padx=5)
+        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll) # 滚轮
 
         tk.Label(main_frame, text="结束时间:", font=font_spec, bg='#F0F8FF').grid(row=2, column=0, sticky='w', pady=5)
         end_date_entry = tk.Entry(main_frame, font=font_spec, width=15)
         end_date_entry.grid(row=2, column=1, sticky='w', pady=5)
+        self._bind_mousewheel_to_entry(end_date_entry, self._handle_date_scroll) # 滚轮
         end_time_entry = tk.Entry(main_frame, font=font_spec, width=15)
         end_time_entry.grid(row=2, column=2, sticky='w', pady=5, padx=5)
+        self._bind_mousewheel_to_entry(end_time_entry, self._handle_time_scroll) # 滚轮
         
         tk.Label(main_frame, text="格式: YYYY-MM-DD", font=('Microsoft YaHei', 9), bg='#F0F8FF', fg='grey').grid(row=3, column=1, sticky='n')
         tk.Label(main_frame, text="格式: HH:MM:SS", font=('Microsoft YaHei', 9), bg='#F0F8FF', fg='grey').grid(row=3, column=2, sticky='n')
@@ -3498,7 +3505,7 @@ class TimedBroadcastApp:
         title_label = tk.Label(top_frame, text="待办事项", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#2C5F7C')
         title_label.pack(side=tk.LEFT)
 
-        desc_label = tk.Label(page_frame, text="到达提醒时间时会弹出窗口提醒，同时任务栏图标会闪烁。提醒功能受节假日约束。", font=('Microsoft YaHei', 11), bg='white', fg='#555')
+        desc_label = tk.Label(page_frame, text="到达提醒时间时会弹出窗口并播放提示音。提醒功能受节假日约束。", font=('Microsoft YaHei', 11), bg='white', fg='#555')
         desc_label.pack(anchor='w', padx=10, pady=(0, 10))
 
         content_frame = tk.Frame(page_frame, bg='white')
@@ -3591,7 +3598,11 @@ class TimedBroadcastApp:
         selection = self.todo_tree.selection()
         self.todo_tree.delete(*self.todo_tree.get_children())
 
+        active_todos_count = 0
         for todo in self.todos:
+            if todo.get('status') == '启用':
+                active_todos_count += 1
+
             content = todo.get('content', '').replace('\n', ' ').replace('\r', '')
             content_preview = (content[:30] + '...') if len(content) > 30 else content
             
@@ -3621,6 +3632,10 @@ class TimedBroadcastApp:
                 if valid_selection: self.todo_tree.selection_set(valid_selection)
             except tk.TclError:
                 pass
+
+        # 更新状态栏的待办事项计数
+        if hasattr(self, 'status_labels') and len(self.status_labels) > 4:
+            self.status_labels[4].config(text=f"待办事项: {active_todos_count}")
 
     def add_todo(self):
         self.open_todo_dialog()
@@ -3697,9 +3712,11 @@ class TimedBroadcastApp:
         tk.Label(onetime_lf, text="执行日期:", font=font_spec, bg='#F0F8FF').grid(row=0, column=0, sticky='e', pady=5, padx=5)
         onetime_date_entry = tk.Entry(onetime_lf, font=font_spec, width=20)
         onetime_date_entry.grid(row=0, column=1, sticky='w', pady=5)
+        self._bind_mousewheel_to_entry(onetime_date_entry, self._handle_date_scroll) # 滚轮
         tk.Label(onetime_lf, text="执行时间:", font=font_spec, bg='#F0F8FF').grid(row=1, column=0, sticky='e', pady=5, padx=5)
         onetime_time_entry = tk.Entry(onetime_lf, font=font_spec, width=20)
         onetime_time_entry.grid(row=1, column=1, sticky='w', pady=5)
+        self._bind_mousewheel_to_entry(onetime_time_entry, self._handle_time_scroll) # 滚轮
 
         tk.Label(recurring_lf, text="开始时间:", font=font_spec, bg='#F0F8FF').grid(row=0, column=0, sticky='e', padx=5, pady=5)
         recurring_time_entry = tk.Entry(recurring_lf, font=font_spec, width=40)
@@ -3714,6 +3731,7 @@ class TimedBroadcastApp:
         tk.Label(recurring_lf, text="日期范围:", font=font_spec, bg='#F0F8FF').grid(row=2, column=0, sticky='e', padx=5, pady=5)
         recurring_daterange_entry = tk.Entry(recurring_lf, font=font_spec, width=40)
         recurring_daterange_entry.grid(row=2, column=1, sticky='w', padx=5, pady=5)
+        self._bind_mousewheel_to_entry(recurring_daterange_entry, self._handle_date_scroll) # 滚轮
         tk.Button(recurring_lf, text="设置...", command=lambda: self.show_daterange_settings_dialog(recurring_daterange_entry), bg='#D0D0D0', font=font_spec).grid(row=2, column=2, padx=5)
 
         tk.Label(recurring_lf, text="循环间隔:", font=font_spec, bg='#F0F8FF').grid(row=3, column=0, sticky='e', padx=5, pady=5)
@@ -3751,7 +3769,7 @@ class TimedBroadcastApp:
         else:
             onetime_date_entry.insert(0, now.strftime('%Y-%m-%d'))
             onetime_time_entry.insert(0, (now + timedelta(minutes=5)).strftime('%H:%M:%S'))
-            recurring_time_entry.insert(0, now.strftime('%H:%M:%S')) # 修复点：为循环任务的开始时间设置默认值
+            recurring_time_entry.insert(0, now.strftime('%H:%M:%S'))
             recurring_weekday_entry.insert(0, '每周:1234567')
             recurring_daterange_entry.insert(0, '2000-01-01 ~ 2099-12-31')
             recurring_interval_entry.insert(0, '0')
@@ -3782,7 +3800,7 @@ class TimedBroadcastApp:
             else: # recurring
                 try:
                     interval = int(recurring_interval_entry.get().strip() or '0')
-                    if not (0 <= interval <= 1440): raise ValueError # 0 to 24 hours
+                    if not (0 <= interval <= 1440): raise ValueError
                 except ValueError:
                     messagebox.showerror("格式错误", "循环间隔必须是 0-1440 之间的整数。", parent=dialog)
                     return
@@ -3986,47 +4004,6 @@ class TimedBroadcastApp:
         
         self.root.after(1000, self._process_reminder_queue)
 
-    ### 修复点 3/3: 修复闪烁功能 ###
-    def _start_flashing(self):
-        """开始任务栏图标的闪烁循环。"""
-        if self.is_flashing:
-            return
-        self.is_flashing = True
-        self._flashing_worker()
-
-    def _stop_flashing(self):
-        """停止任务栏图标的闪烁循环。"""
-        self.is_flashing = False
-        if self.flash_job_id:
-            self.root.after_cancel(self.flash_job_id)
-            self.flash_job_id = None
-        try:
-            hwnd = self.root.winfo_id() # 使用更可靠的 winfo_id()
-            if hwnd:
-                win32gui.FlashWindow(hwnd, False) 
-        except Exception as e:
-            self.log(f"停止任务栏闪烁时出错: {e}")
-            
-    def _flashing_worker(self):
-        """闪烁循环的核心工作函数。"""
-        if not self.is_flashing:
-            return
-
-        try:
-            hwnd = self.root.winfo_id() # 使用更可靠的 winfo_id()
-            if hwnd:
-                info = win32gui.FLASHWINFO()
-                info.cbSize = ctypes.sizeof(info)
-                info.hwnd = hwnd
-                info.dwFlags = win32con.FLASHW_ALL | win32con.FLASHW_TIMERNOFG
-                info.uCount = 0 
-                info.dwTimeout = 0
-                ctypes.windll.user32.FlashWindowEx(ctypes.byref(info))
-        except Exception as e:
-            self.log(f"任务栏闪烁工作函数出错: {e}")
-        
-        self.flash_job_id = self.root.after(1000, self._flashing_worker)
-
     def _play_reminder_sound(self):
         if not AUDIO_AVAILABLE:
             self.log("警告：pygame未安装，无法播放提示音。")
@@ -4051,9 +4028,7 @@ class TimedBroadcastApp:
                 self.log(f"播放系统默认提示音失败: {e}")
 
     def show_todo_reminder(self, todo):
-        # 1. 播放提示音 & 启动闪烁
         self._play_reminder_sound()
-        self._start_flashing()
 
         reminder_win = tk.Toplevel(self.root)
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
@@ -4079,7 +4054,6 @@ class TimedBroadcastApp:
         title_label = tk.Label(reminder_win, text=todo.get('name', '无标题'), font=('Microsoft YaHei', 14, 'bold'), bg='#FFFFE0', wraplength=460)
         title_label.pack(pady=(15, 10))
         
-        ### 修复点 1/3: 调整布局，确保按钮可见 ###
         btn_frame = tk.Frame(reminder_win, bg='#FFFFE0')
         btn_frame.pack(side=tk.BOTTOM, pady=15)
 
@@ -4094,7 +4068,6 @@ class TimedBroadcastApp:
         font_spec = ('Microsoft YaHei', 11)
 
         def close_and_release():
-            self._stop_flashing()
             self.is_reminder_active = False
             reminder_win.destroy()
 
@@ -4128,7 +4101,6 @@ class TimedBroadcastApp:
                         self.log(f"已删除待办事项: {todo['name']}")
                 close_and_release()
         
-        ### 修复点 2/3: 处理 'X' 按钮点击事件 ###
         def on_closing_protocol():
             if task_type == 'onetime':
                 handle_complete()
@@ -4141,9 +4113,87 @@ class TimedBroadcastApp:
             tk.Button(btn_frame, text="已完成", font=font_spec, bg='#27AE60', fg='white', width=10, command=handle_complete).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="稍后提醒", font=font_spec, width=10, command=handle_snooze).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=handle_delete).pack(side=tk.LEFT, padx=10)
-        else: # recurring
+        else:
             tk.Button(btn_frame, text="本次完成", font=font_spec, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=handle_delete).pack(side=tk.LEFT, padx=10)
+
+    # --- 新增: 鼠标滚轮功能的核心函数 ---
+    def _bind_mousewheel_to_entry(self, entry, handler):
+        entry.bind("<MouseWheel>", handler)
+        entry.bind("<Button-4>", handler)
+        entry.bind("<Button-5>", handler)
+
+    def _handle_time_scroll(self, event):
+        entry = event.widget
+        current_val = entry.get()
+        cursor_pos = entry.index(tk.INSERT)
+        
+        try:
+            dt = datetime.strptime(current_val, "%H:%M:%S")
+        except ValueError:
+            return "break"
+
+        delta = 1 if event.num == 4 or event.delta > 0 else -1
+        
+        if 0 <= cursor_pos <= 2:
+            dt += timedelta(hours=delta)
+        elif 3 <= cursor_pos <= 5:
+            dt += timedelta(minutes=delta)
+        else: # 6 and beyond
+            dt += timedelta(seconds=delta)
+
+        new_val = dt.strftime("%H:%M:%S")
+        entry.delete(0, tk.END)
+        entry.insert(0, new_val)
+        entry.icursor(cursor_pos)
+        return "break"
+
+    def _handle_date_scroll(self, event):
+        entry = event.widget
+        current_val = entry.get().strip()
+        cursor_pos = entry.index(tk.INSERT)
+        
+        parts = [p.strip() for p in current_val.split("~")]
+        is_range_start = "~" not in current_val or cursor_pos <= len(parts[0])
+        target_val = parts[0] if is_range_start else parts[1]
+
+        try:
+            dt = datetime.strptime(target_val, "%Y-%m-%d")
+        except ValueError:
+            return "break"
+
+        delta = 1 if event.num == 4 or event.delta > 0 else -1
+        
+        effective_cursor_pos = cursor_pos if is_range_start else cursor_pos - (len(parts[0]) + 3)
+
+        if 0 <= effective_cursor_pos <= 4: # Year
+            dt = dt.replace(year=dt.year + delta)
+        elif 5 <= effective_cursor_pos <= 7: # Month
+            new_month = dt.month + delta
+            new_year = dt.year
+            if new_month > 12:
+                new_month = 1; new_year += 1
+            elif new_month < 1:
+                new_month = 12; new_year -= 1
+            
+            try:
+                dt = dt.replace(year=new_year, month=new_month)
+            except ValueError: # Handle cases like Feb 29
+                dt = dt.replace(year=new_year, month=new_month, day=28)
+        else: # Day
+            dt += timedelta(days=delta)
+
+        new_date_part = dt.strftime("%Y-%m-%d")
+        
+        if "~" in current_val:
+            new_full_val = f"{new_date_part} ~ {parts[1]}" if is_range_start else f"{parts[0]} ~ {new_date_part}"
+        else:
+            new_full_val = new_date_part
+
+        entry.delete(0, tk.END)
+        entry.insert(0, new_full_val)
+        entry.icursor(cursor_pos)
+        return "break"
 
 
 def main():
