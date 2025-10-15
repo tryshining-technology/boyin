@@ -1,3 +1,11 @@
+好的，完全理解。为了确保您能顺利复制和使用，我将整合所有修改（包括您之前提出的问题修复和这次的闪烁功能修复），然后重新将完整的、最新的代码分成两部分提供给您。
+
+以下是整合了所有修复后的**第一部分代码**。
+
+您可以像上次一样，先用这部分代码完全替换掉您项目中对应的部分。
+
+**代码第一部分 (整合修复版):**
+```python
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog, simpledialog
 import json
@@ -131,6 +139,10 @@ class TimedBroadcastApp:
         self.fullscreen_label = None
         self.image_tk_ref = None 
         self.current_stop_visual_event = None
+
+        # 闪烁功能相关的属性
+        self.is_flashing = False
+        self.flash_job_id = None
 
         self.create_folder_structure()
         self.load_settings()
@@ -2949,7 +2961,7 @@ class TimedBroadcastApp:
             "last_power_action_date": "",
             "time_chime_enabled": False, "time_chime_voice": "",
             "time_chime_speed": "0", "time_chime_pitch": "0",
-            "bg_image_interval": 6  # 新增：背景图片切换间隔，默认6秒
+            "bg_image_interval": 6
         }
         if os.path.exists(SETTINGS_FILE):
             try:
@@ -3933,7 +3945,6 @@ class TimedBroadcastApp:
                     todo_with_index = todo.copy()
                     todo_with_index['original_index'] = index
                     self.reminder_queue.put(todo_with_index)
-                    # 状态在弹窗时再改变，以避免快速连续触发
             
             elif todo.get('type') == 'recurring':
                 try:
@@ -3983,31 +3994,48 @@ class TimedBroadcastApp:
         
         self.root.after(1000, self._process_reminder_queue)
 
-    def _flash_taskbar_icon(self):
-        if not WIN32_AVAILABLE:
-            self.log("警告：pywin32未安装，无法闪烁任务栏图标。")
+    def _start_flashing(self):
+        """开始任务栏图标的闪烁循环。"""
+        if self.is_flashing: # 如果已经在闪烁，则不再创建新的循环
             return
+        self.is_flashing = True
+        self._flashing_worker() # 启动工作循环
+
+    def _stop_flashing(self):
+        """停止任务栏图标的闪烁循环。"""
+        self.is_flashing = False
+        if self.flash_job_id:
+            self.root.after_cancel(self.flash_job_id)
+            self.flash_job_id = None
+        # 发送一个最终的停止闪烁指令
         try:
             hwnd = win32gui.FindWindow(None, self.root.title())
-            if not hwnd:
-                # 如果按标题找不到，尝试通过进程ID获取主窗口
-                pid = os.getpid()
-                def callback(h, p):
-                    if h and win32gui.IsWindowVisible(h) and win32gui.IsWindowEnabled(h):
-                        _, found_pid = win32gui.GetWindowThreadProcessId(h)
-                        if found_pid == p:
-                           p.append(h)
-                
-                hwnds = []
-                win32gui.EnumWindows(callback, (pid, hwnds))
-                if hwnds: hwnd = hwnds[0]
-
             if hwnd:
-                win32gui.FlashWindow(hwnd, True)
-            else:
-                self.log("警告：无法找到主窗口句柄，任务栏闪烁失败。")
+                win32gui.FlashWindow(hwnd, False) # False 参数用于停止闪烁
         except Exception as e:
-            self.log(f"闪烁任务栏图标失败: {e}")
+            self.log(f"停止任务栏闪烁时出错: {e}")
+            
+    def _flashing_worker(self):
+        """闪烁循环的核心工作函数。"""
+        if not self.is_flashing:
+            return
+
+        try:
+            hwnd = win32gui.FindWindow(None, self.root.title())
+            if hwnd:
+                # 使用 FlashWindowEx 获得更可靠的闪烁效果
+                info = win32gui.FLASHWINFO()
+                info.cbSize = ctypes.sizeof(info)
+                info.hwnd = hwnd
+                info.dwFlags = win32con.FLASHW_ALL | win32con.FLASHW_TIMERNOFG
+                info.uCount = 0 # 持续闪烁
+                info.dwTimeout = 0
+                ctypes.windll.user32.FlashWindowEx(ctypes.byref(info))
+        except Exception as e:
+            self.log(f"任务栏闪烁工作函数出错: {e}")
+        
+        # 安排下一次闪烁
+        self.flash_job_id = self.root.after(1000, self._flashing_worker)
 
     def _play_reminder_sound(self):
         if not AUDIO_AVAILABLE:
@@ -4033,8 +4061,9 @@ class TimedBroadcastApp:
                 self.log(f"播放系统默认提示音失败: {e}")
 
     def show_todo_reminder(self, todo):
+        # 1. 播放提示音 & 启动闪烁
         self._play_reminder_sound()
-        self.root.after(100, self._flash_taskbar_icon)
+        self._start_flashing()
 
         reminder_win = tk.Toplevel(self.root)
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
@@ -4043,16 +4072,20 @@ class TimedBroadcastApp:
         self.center_window(reminder_win, 480, 320)
         reminder_win.configure(bg='#FFFFE0')
 
+        # 温和地提升窗口，而不是强制抓取焦点
         reminder_win.attributes('-topmost', True)
         reminder_win.lift()
         reminder_win.focus_force()
-        reminder_win.after(500, lambda: reminder_win.attributes('-topmost', False))
+        # 短暂置顶后取消，避免窗口始终遮挡其他应用
+        reminder_win.after(1000, lambda: reminder_win.attributes('-topmost', False))
 
         original_index = todo.get('original_index')
 
+        # 更新任务状态为“待处理”（如果是一次性任务）
         if original_index is not None and original_index < len(self.todos):
-            if self.todos[original_index]['status'] != '禁用' and self.todos[original_index]['type'] == 'onetime':
-                self.todos[original_index]['status'] = '待处理'
+            task_in_list = self.todos[original_index]
+            if task_in_list.get('status') != '禁用' and task_in_list.get('type') == 'onetime':
+                task_in_list['status'] = '待处理'
                 self.root.after(0, self.update_todo_list)
 
         title_label = tk.Label(reminder_win, text=todo.get('name', '无标题'), font=('Microsoft YaHei', 14, 'bold'), bg='#FFFFE0', wraplength=460)
@@ -4070,6 +4103,7 @@ class TimedBroadcastApp:
         font_spec = ('Microsoft YaHei', 11)
 
         def close_and_release():
+            self._stop_flashing() # 停止闪烁
             self.is_reminder_active = False
             reminder_win.destroy()
 
@@ -4096,7 +4130,6 @@ class TimedBroadcastApp:
         def handle_delete():
             if messagebox.askyesno("确认删除", f"您确定要永久删除待办事项“{todo['name']}”吗？\n此操作不可恢复。", parent=reminder_win):
                 if original_index is not None and original_index < len(self.todos):
-                    # 安全检查，防止在操作期间列表被外部更改
                     if self.todos[original_index].get('name') == todo.get('name'):
                         self.todos.pop(original_index)
                         self.save_todos()
