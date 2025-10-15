@@ -24,20 +24,25 @@ except ImportError:
     TRAY_AVAILABLE = False
     IMAGE_AVAILABLE = False
 
-WIN32COM_AVAILABLE = False
+WIN32_AVAILABLE = False
 try:
     import win32com.client
     import pythoncom
     from pywintypes import com_error
     import winreg
-    WIN32COM_AVAILABLE = True
+    import win32gui
+    import win32con
+    import ctypes
+    WIN32_AVAILABLE = True
 except ImportError:
-    print("警告: pywin32 未安装，语音、开机启动和密码持久化/注册功能将受限。")
+    print("警告: pywin32 未安装，语音、开机启动、任务栏闪烁和密码持久化/注册功能将受限。")
 
 AUDIO_AVAILABLE = False
 try:
     import pygame
     pygame.mixer.init()
+    # 为提示音和报时预留单独的通道，避免与背景音乐冲突
+    pygame.mixer.set_num_channels(10) 
     AUDIO_AVAILABLE = True
 except ImportError:
     print("警告: pygame 未安装，音频播放功能将不可用。")
@@ -76,6 +81,7 @@ BGM_FOLDER = os.path.join(application_path, "文稿背景")
 VOICE_SCRIPT_FOLDER = os.path.join(application_path, "语音文稿")
 ICON_FILE = resource_path("icon.ico")
 
+REMINDER_SOUND_FILE = os.path.join(PROMPT_FOLDER, "reminder.wav")
 CHIME_FOLDER = os.path.join(AUDIO_FOLDER, "整点报时")
 
 REGISTRY_KEY_PATH = r"Software\创翔科技\TimedBroadcastApp"
@@ -151,7 +157,7 @@ class TimedBroadcastApp:
             self.root.after(100, self.perform_lockdown)
 
     def _save_to_registry(self, key_name, value):
-        if not WIN32COM_AVAILABLE: return False
+        if not WIN32_AVAILABLE: return False
         try:
             key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH)
             winreg.SetValueEx(key, key_name, 0, winreg.REG_SZ, str(value))
@@ -162,7 +168,7 @@ class TimedBroadcastApp:
             return False
 
     def _load_from_registry(self, key_name):
-        if not WIN32COM_AVAILABLE: return None
+        if not WIN32_AVAILABLE: return None
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_READ)
             value, _ = winreg.QueryValueEx(key, key_name)
@@ -297,6 +303,13 @@ class TimedBroadcastApp:
         selected_btn.master.config(bg='#5DADE2')
 
     def _prompt_for_super_admin_password(self):
+        # 第一重验证：授权状态
+        if self.auth_info['status'] != 'Permanent':
+            messagebox.showerror("权限不足", "此功能仅对“永久授权”用户开放。\n\n请注册软件并获取永久授权后重试。")
+            self.log("非永久授权用户尝试进入超级管理模块被阻止。")
+            return
+            
+        # 第二重验证：动态密码
         dialog = tk.Toplevel(self.root)
         dialog.title("身份验证")
         dialog.geometry("350x180")
@@ -567,7 +580,7 @@ class TimedBroadcastApp:
         page_frame = tk.Frame(self.page_container, bg='white')
         title_label = tk.Label(page_frame, text="超级管理", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#C0392B')
         title_label.pack(anchor='w', padx=20, pady=20)
-        desc_label = tk.Label(page_frame, text="警告：此处的任何操作都可能导致数据丢失或配置重置，请谨慎操作。",
+        desc_label = tk.Label(page_frame, text="警告：此处的任何操作都可能导致数据丢失或配置重置，请谨慎操作。\n(此功能仅对“永久授权”用户开放)",
                               font=('Microsoft YaHei', 11), bg='white', fg='red', wraplength=700)
         desc_label.pack(anchor='w', padx=20, pady=(0, 20))
         
@@ -642,7 +655,7 @@ class TimedBroadcastApp:
         self.log("开始执行卸载流程...")
         self.running = False
 
-        if WIN32COM_AVAILABLE:
+        if WIN32_AVAILABLE:
             try:
                 winreg.DeleteKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH)
                 self.log(f"成功删除注册表项: {REGISTRY_KEY_PATH}")
@@ -769,7 +782,9 @@ class TimedBroadcastApp:
         self.time_chime_speed_var.set(self.settings.get("time_chime_speed", "0"))
         self.time_chime_pitch_var.set(self.settings.get("time_chime_pitch", "0"))
         
-        if self.lock_password_b64 and WIN32COM_AVAILABLE:
+        self.bg_image_interval_var.set(str(self.settings.get("bg_image_interval", 6)))
+        
+        if self.lock_password_b64 and WIN32_AVAILABLE:
             self.clear_password_btn.config(state=tk.NORMAL)
         else:
             self.clear_password_btn.config(state=tk.DISABLED)
@@ -802,7 +817,8 @@ class TimedBroadcastApp:
                 "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00",
                 "last_power_action_date": "",
                 "time_chime_enabled": False, "time_chime_voice": "",
-                "time_chime_speed": "0", "time_chime_pitch": "0"
+                "time_chime_speed": "0", "time_chime_pitch": "0",
+                "bg_image_interval": 6
             }
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(default_settings, f, ensure_ascii=False, indent=2)
@@ -845,7 +861,7 @@ class TimedBroadcastApp:
         self.lock_button = tk.Button(self.top_right_btn_frame, text="锁定", command=self.toggle_lock_state, bg='#E74C3C', fg='white',
                                      font=font_11, bd=0, padx=12, pady=5, cursor='hand2')
         self.lock_button.pack(side=tk.LEFT, padx=3)
-        if not WIN32COM_AVAILABLE:
+        if not WIN32_AVAILABLE:
             self.lock_button.config(state=tk.DISABLED, text="锁定(Win)")
 
         io_buttons = [("导入节目单", self.import_tasks, '#1ABC9C'), ("导出节目单", self.export_tasks, '#1ABC9C')]
@@ -920,70 +936,6 @@ class TimedBroadcastApp:
         self.log_text = scrolledtext.ScrolledText(log_frame, height=6, font=('Microsoft YaHei', 11),
                                                  bg='#F9F9F9', wrap=tk.WORD, state='disabled')
         self.log_text.pack(fill=tk.BOTH, expand=True)
-
-    def create_holiday_page(self):
-        page_frame = tk.Frame(self.page_container, bg='white')
-
-        top_frame = tk.Frame(page_frame, bg='white')
-        top_frame.pack(fill=tk.X, padx=10, pady=10)
-        title_label = tk.Label(top_frame, text="节假日", font=('Microsoft YaHei', 14, 'bold'),
-                              bg='white', fg='#2C5F7C')
-        title_label.pack(side=tk.LEFT)
-        
-        desc_label = tk.Label(page_frame, text="节假日不播放 (手动和立即播任务除外)，整点报时和待办事项也受此约束", font=('Microsoft YaHei', 11),
-                              bg='white', fg='#555')
-        desc_label.pack(anchor='w', padx=10, pady=(0, 10))
-
-        content_frame = tk.Frame(page_frame, bg='white')
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        table_frame = tk.Frame(content_frame, bg='white')
-        table_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        columns = ('节假日名称', '状态', '开始日期时间', '结束日期时间')
-        self.holiday_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended')
-        
-        self.holiday_tree.heading('节假日名称', text='节假日名称')
-        self.holiday_tree.column('节假日名称', width=250, anchor='w')
-        self.holiday_tree.heading('状态', text='状态')
-        self.holiday_tree.column('状态', width=100, anchor='center')
-        self.holiday_tree.heading('开始日期时间', text='开始日期时间')
-        self.holiday_tree.column('开始日期时间', width=200, anchor='center')
-        self.holiday_tree.heading('结束日期时间', text='结束日期时间')
-        self.holiday_tree.column('结束日期时间', width=200, anchor='center')
-
-        self.holiday_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.holiday_tree.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.holiday_tree.configure(yscrollcommand=scrollbar.set)
-        
-        self.holiday_tree.bind("<Double-1>", lambda e: self.edit_holiday())
-        self.holiday_tree.bind("<Button-3>", self.show_holiday_context_menu)
-        self._enable_drag_selection(self.holiday_tree)
-
-        action_frame = tk.Frame(content_frame, bg='white', padx=10)
-        action_frame.pack(side=tk.RIGHT, fill=tk.Y)
-
-        btn_font = ('Microsoft YaHei', 11)
-        btn_width = 10 
-        
-        buttons_config = [
-            ("添加", self.add_holiday), ("修改", self.edit_holiday), ("删除", self.delete_holiday),
-            (None, None),
-            ("全部启用", self.enable_all_holidays), ("全部禁用", self.disable_all_holidays),
-            (None, None),
-            ("导入节日", self.import_holidays), ("导出节日", self.export_holidays), ("清空节日", self.clear_all_holidays),
-        ]
-
-        for text, cmd in buttons_config:
-            if text is None:
-                tk.Frame(action_frame, height=20, bg='white').pack()
-                continue
-            
-            tk.Button(action_frame, text=text, command=cmd, font=btn_font, width=btn_width, pady=5).pack(pady=5)
-
-        self.update_holiday_list()
-        return page_frame
         
     def create_settings_page(self):
         settings_frame = tk.Frame(self.page_container, bg='white')
@@ -997,6 +949,7 @@ class TimedBroadcastApp:
         self.autostart_var = tk.BooleanVar()
         self.start_minimized_var = tk.BooleanVar()
         self.lock_on_start_var = tk.BooleanVar()
+        self.bg_image_interval_var = tk.StringVar()
         
         tk.Checkbutton(general_frame, text="登录windows后自动启动", variable=self.autostart_var, font=('Microsoft YaHei', 11), bg='white', anchor='w', command=self._handle_autostart_setting).pack(fill=tk.X, pady=5)
         tk.Checkbutton(general_frame, text="启动后最小化到系统托盘", variable=self.start_minimized_var, font=('Microsoft YaHei', 11), bg='white', anchor='w', command=self.save_settings).pack(fill=tk.X, pady=5)
@@ -1006,7 +959,7 @@ class TimedBroadcastApp:
         
         self.lock_on_start_cb = tk.Checkbutton(lock_and_buttons_frame, text="启动软件后立即锁定", variable=self.lock_on_start_var, font=('Microsoft YaHei', 11), bg='white', anchor='w', command=self._handle_lock_on_start_toggle)
         self.lock_on_start_cb.grid(row=0, column=0, sticky='w')
-        if not WIN32COM_AVAILABLE:
+        if not WIN32_AVAILABLE:
             self.lock_on_start_cb.config(state=tk.DISABLED)
             
         tk.Label(lock_and_buttons_frame, text="(请先在主界面设置锁定密码)", font=('Microsoft YaHei', 9), bg='white', fg='grey').grid(row=1, column=0, sticky='w', padx=20)
@@ -1016,6 +969,15 @@ class TimedBroadcastApp:
         
         self.cancel_bg_images_btn = tk.Button(lock_and_buttons_frame, text="取消所有节目背景图片", font=('Microsoft YaHei', 11), command=self._cancel_all_background_images)
         self.cancel_bg_images_btn.grid(row=0, column=2, padx=10)
+        
+        bg_interval_frame = tk.Frame(general_frame, bg='white')
+        bg_interval_frame.pack(fill=tk.X, pady=8)
+        tk.Label(bg_interval_frame, text="背景图片切换间隔:", font=('Microsoft YaHei', 11), bg='white').pack(side=tk.LEFT)
+        interval_entry = tk.Entry(bg_interval_frame, textvariable=self.bg_image_interval_var, font=('Microsoft YaHei', 11), width=5)
+        interval_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(bg_interval_frame, text="秒 (范围: 5-60)", font=('Microsoft YaHei', 10), bg='white', fg='grey').pack(side=tk.LEFT)
+        interval_entry.bind("<FocusOut>", self._validate_bg_interval)
+        interval_entry.bind("<Return>", self._validate_bg_interval)
 
         time_chime_frame = tk.LabelFrame(settings_frame, text="整点报时", font=('Microsoft YaHei', 12, 'bold'), bg='white', padx=15, pady=10)
         time_chime_frame.pack(fill=tk.X, padx=20, pady=10)
@@ -1081,6 +1043,20 @@ class TimedBroadcastApp:
 
         return settings_frame
 
+    def _validate_bg_interval(self, event=None):
+        try:
+            value = int(self.bg_image_interval_var.get())
+            if not (5 <= value <= 60):
+                raise ValueError("超出范围")
+            # 如果值有效，则保存设置
+            self.save_settings()
+            self.log(f"背景图片切换间隔已更新为 {value} 秒。")
+        except (ValueError, TypeError):
+            # 如果无效，则恢复为上次保存的值
+            last_saved_value = str(self.settings.get("bg_image_interval", 6))
+            messagebox.showerror("输入无效", "请输入一个介于 5 和 60 之间的整数。", parent=self.root)
+            self.bg_image_interval_var.set(last_saved_value)
+
     def _cancel_all_background_images(self):
         if not self.tasks:
             messagebox.showinfo("提示", "当前没有节目，无需操作。")
@@ -1099,7 +1075,6 @@ class TimedBroadcastApp:
                 messagebox.showinfo("操作成功", f"已成功取消 {count} 个节目的背景图片设置。")
             else:
                 messagebox.showinfo("提示", "没有节目设置了背景图片，无需操作。")
-
 
     def _on_chime_params_changed(self, event=None, is_voice_change=False):
         current_voice = self.time_chime_voice_var.get()
@@ -1917,7 +1892,7 @@ class TimedBroadcastApp:
             self.root.after(0, callback, {'success': False, 'error': str(e)})
 
     def _synthesize_text_to_wav(self, text, voice_params, output_path):
-        if not WIN32COM_AVAILABLE:
+        if not WIN32_AVAILABLE:
             raise ImportError("pywin32 模块未安装，无法进行语音合成。")
         
         pythoncom.CoInitialize()
@@ -1946,7 +1921,7 @@ class TimedBroadcastApp:
             pythoncom.CoUninitialize()
 
     def get_available_voices(self):
-        if not WIN32COM_AVAILABLE: return []
+        if not WIN32_AVAILABLE: return []
         try:
             pythoncom.CoInitialize()
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
@@ -2548,22 +2523,23 @@ class TimedBroadcastApp:
             elif command == 'PLAY_CHIME':
                 if not AUDIO_AVAILABLE: continue
                 chime_path = data
-                was_playing = pygame.mixer.get_busy()
+                was_playing = pygame.mixer.music.get_busy()
                 if was_playing:
-                    pygame.mixer.pause()
+                    pygame.mixer.music.pause()
                     self.log("整点报时，暂停当前播放...")
                 
                 try:
                     chime_sound = pygame.mixer.Sound(chime_path)
                     chime_sound.set_volume(1.0)
-                    chime_channel = chime_sound.play()
+                    chime_channel = pygame.mixer.find_channel(True) # 找一个空闲通道
+                    chime_channel.play(chime_sound)
                     while chime_channel and chime_channel.get_busy():
                         time.sleep(0.1)
                 except Exception as e:
                     self.log(f"播放整点报时失败: {e}")
 
                 if was_playing:
-                    pygame.mixer.unpause()
+                    pygame.mixer.music.unpause()
                     self.log("报时结束，恢复播放。")
 
             elif command == 'STOP':
@@ -2720,7 +2696,8 @@ class TimedBroadcastApp:
                     self.log(f"播放提示音: {prompt_file}")
                     sound = pygame.mixer.Sound(prompt_path)
                     sound.set_volume(float(task.get('prompt_volume', 80)) / 100.0)
-                    channel = sound.play()
+                    channel = pygame.mixer.find_channel(True)
+                    channel.play(sound)
                     while channel and channel.get_busy():
                         if self._is_interrupted(): return
                         time.sleep(0.05)
@@ -2753,6 +2730,8 @@ class TimedBroadcastApp:
             speech_sound = pygame.mixer.Sound(speech_path)
             speech_sound.set_volume(float(task.get('volume', 80)) / 100.0)
             repeat_count = int(task.get('repeat', 1))
+            
+            speech_channel = pygame.mixer.find_channel(True)
 
             for i in range(repeat_count):
                 if self._is_interrupted(): return
@@ -2760,10 +2739,10 @@ class TimedBroadcastApp:
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
                 self.update_playing_text(f"[{task['name']}] 正在播报第 {i+1}/{repeat_count} 遍...")
                 
-                channel = speech_sound.play()
-                while channel and channel.get_busy():
+                speech_channel.play(speech_sound)
+                while speech_channel and speech_channel.get_busy():
                     if self._is_interrupted():
-                        channel.stop()
+                        speech_channel.stop()
                         return
                     time.sleep(0.1)
                 
@@ -2810,10 +2789,13 @@ class TimedBroadcastApp:
 
     def _visual_worker(self, task, stop_event):
         try:
+            # 给予主播放线程一点时间来准备
             if stop_event.wait(timeout=3.0): return
 
             image_path = task.get('bg_image_path')
             image_order = task.get('bg_image_order', 'sequential')
+            interval = float(self.settings.get("bg_image_interval", 6)) # 使用设置
+            
             valid_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff')
             image_files = [os.path.join(image_path, f) for f in os.listdir(image_path) if f.lower().endswith(valid_extensions)]
             
@@ -2834,12 +2816,14 @@ class TimedBroadcastApp:
                     break
                 
                 current_image_path = image_files[img_index]
+                # 使用淡入淡出效果
                 self.root.after(0, self._crossfade_to_image, previous_image_path, current_image_path)
                 
                 previous_image_path = current_image_path
                 img_index = (img_index + 1) % len(image_files)
                 
-                if stop_event.wait(timeout=6.0):
+                # 等待用户设置的间隔时间
+                if stop_event.wait(timeout=interval):
                     break
         
         except Exception as e:
@@ -2964,7 +2948,8 @@ class TimedBroadcastApp:
             "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00", 
             "last_power_action_date": "",
             "time_chime_enabled": False, "time_chime_voice": "",
-            "time_chime_speed": "0", "time_chime_pitch": "0"
+            "time_chime_speed": "0", "time_chime_pitch": "0",
+            "bg_image_interval": 6  # 新增：背景图片切换间隔，默认6秒
         }
         if os.path.exists(SETTINGS_FILE):
             try:
@@ -2979,6 +2964,14 @@ class TimedBroadcastApp:
 
     def save_settings(self):
         if hasattr(self, 'autostart_var'):
+            try:
+                # 再次验证图片间隔的合法性
+                interval = int(self.bg_image_interval_var.get())
+                if not (5 <= interval <= 60):
+                    interval = self.settings.get("bg_image_interval", 6) # 非法值则使用上次保存的值
+            except:
+                interval = self.settings.get("bg_image_interval", 6) # 非法值则使用上次保存的值
+
             self.settings.update({
                 "autostart": self.autostart_var.get(), 
                 "start_minimized": self.start_minimized_var.get(), 
@@ -2994,7 +2987,8 @@ class TimedBroadcastApp:
                 "time_chime_enabled": self.time_chime_enabled_var.get(),
                 "time_chime_voice": self.time_chime_voice_var.get(),
                 "time_chime_speed": self.time_chime_speed_var.get(),
-                "time_chime_pitch": self.time_chime_pitch_var.get()
+                "time_chime_pitch": self.time_chime_pitch_var.get(),
+                "bg_image_interval": interval
             })
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(self.settings, f, ensure_ascii=False, indent=2)
@@ -3003,7 +2997,7 @@ class TimedBroadcastApp:
     def _handle_autostart_setting(self):
         self.save_settings()
         enable = self.autostart_var.get()
-        if not WIN32COM_AVAILABLE:
+        if not WIN32_AVAILABLE:
             self.log("错误: 自动启动功能需要 pywin32 库。")
             if enable: self.autostart_var.set(False); self.save_settings()
             messagebox.showerror("功能受限", "未安装 pywin32 库，无法设置开机启动。")
@@ -3152,7 +3146,8 @@ class TimedBroadcastApp:
         tree.bind("<B1-Motion>", on_drag, True)
         tree.bind("<ButtonRelease-1>", on_release, True)
 
-    def save_holidays(self):
+# --- 代码第一部分结束 ---
+def save_holidays(self):
         try:
             with open(HOLIDAY_FILE, 'w', encoding='utf-8') as f:
                 json.dump(self.holidays, f, ensure_ascii=False, indent=2)
@@ -3428,7 +3423,7 @@ class TimedBroadcastApp:
             self.save_holidays()
             self.log("已清空所有节假日。")
 
-# --- 代码第一部分结束 ---
+# --- 代码第二部分开始 ---
 # --- NEW & REWORKED: 待办事项所有相关函数 ---
 
     def create_todo_page(self):
@@ -3439,7 +3434,7 @@ class TimedBroadcastApp:
         title_label = tk.Label(top_frame, text="待办事项", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#2C5F7C')
         title_label.pack(side=tk.LEFT)
 
-        desc_label = tk.Label(page_frame, text="到达提醒时间时会强制弹出窗口提醒，提醒功能受节假日约束。", font=('Microsoft YaHei', 11), bg='white', fg='#555')
+        desc_label = tk.Label(page_frame, text="到达提醒时间时会弹出窗口提醒，同时任务栏图标会闪烁。提醒功能受节假日约束。", font=('Microsoft YaHei', 11), bg='white', fg='#555')
         desc_label.pack(anchor='w', padx=10, pady=(0, 10))
 
         content_frame = tk.Frame(page_frame, bg='white')
@@ -3928,17 +3923,61 @@ class TimedBroadcastApp:
         
         self.root.after(1000, self._process_reminder_queue)
 
+    def _flash_taskbar_icon(self):
+        if not WIN32_AVAILABLE:
+            self.log("警告：pywin32未安装，无法闪烁任务栏图标。")
+            return
+        try:
+            hwnd = self.root.winfo_id()
+            win32gui.FlashWindow(hwnd, True)
+        except Exception as e:
+            self.log(f"闪烁任务栏图标失败: {e}")
+
+    def _play_reminder_sound(self):
+        if not AUDIO_AVAILABLE:
+            self.log("警告：pygame未安装，无法播放提示音。")
+            return
+        
+        # 优先使用用户指定的 reminder.wav
+        if os.path.exists(REMINDER_SOUND_FILE):
+            try:
+                sound = pygame.mixer.Sound(REMINDER_SOUND_FILE)
+                channel = pygame.mixer.find_channel(True)
+                channel.set_volume(0.7)
+                channel.play(sound)
+                return
+            except Exception as e:
+                self.log(f"播放自定义提示音 {REMINDER_SOUND_FILE} 失败: {e}")
+        
+        # 如果失败或文件不存在，则播放系统默认声音
+        if WIN32_AVAILABLE:
+            try:
+                # MB_OK 是一个常见的系统提示音
+                ctypes.windll.user32.MessageBeep(win32con.MB_OK)
+            except Exception as e:
+                self.log(f"播放系统默认提示音失败: {e}")
+
     def show_todo_reminder(self, todo):
+        # 1. 播放提示音 & 闪烁任务栏
+        self._play_reminder_sound()
+        self._flash_taskbar_icon()
+
         reminder_win = tk.Toplevel(self.root)
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
         reminder_win.geometry("480x320")
         reminder_win.resizable(False, False)
-        reminder_win.transient(self.root)
-        reminder_win.attributes('-topmost', True)
+        # 不再是 transient，成为一个独立的窗口
         self.center_window(reminder_win, 480, 320)
         reminder_win.configure(bg='#FFFFE0')
-        reminder_win.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        # 2. 移除强制置顶和抓取事件
+        # reminder_win.attributes('-topmost', True) -> REMOVED
+        # reminder_win.grab_set() -> REMOVED
         
+        # 3. 温和地提升窗口
+        reminder_win.lift()
+        reminder_win.focus_force()
+
         original_index = todo.get('original_index')
 
         if original_index is not None and original_index < len(self.todos):
@@ -3993,6 +4032,9 @@ class TimedBroadcastApp:
                         self.update_todo_list()
                         self.log(f"已删除待办事项: {todo['name']}")
                 close_and_release()
+        
+        # 窗口关闭按钮的行为
+        reminder_win.protocol("WM_DELETE_WINDOW", close_and_release)
 
         task_type = todo.get('type')
         if task_type == 'onetime':
@@ -4005,10 +4047,6 @@ class TimedBroadcastApp:
         else:
             tk.Button(btn_frame, text="确定", font=font_spec, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
 
-        reminder_win.update_idletasks()
-        reminder_win.update()
-        reminder_win.grab_set()
-
 
 def main():
     root = tk.Tk()
@@ -4016,8 +4054,8 @@ def main():
     root.mainloop()
 
 if __name__ == "__main__":
-    if not WIN32COM_AVAILABLE:
-        messagebox.showerror("核心依赖缺失", "pywin32 库未安装或损坏，软件无法运行注册和锁定等核心功能，即将退出。")
+    if not WIN32_AVAILABLE:
+        messagebox.showerror("核心依赖缺失", "pywin32 库未安装或损坏，软件无法运行语音、注册和锁定等核心功能，即将退出。")
         sys.exit()
     if not PSUTIL_AVAILABLE:
         messagebox.showerror("核心依赖缺失", "psutil 库未安装，软件无法获取机器码以进行授权验证，即将退出。")
