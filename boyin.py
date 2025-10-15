@@ -1,11 +1,3 @@
-好的，完全理解。为了确保您能顺利复制和使用，我将整合所有修改（包括您之前提出的问题修复和这次的闪烁功能修复），然后重新将完整的、最新的代码分成两部分提供给您。
-
-以下是整合了所有修复后的**第一部分代码**。
-
-您可以像上次一样，先用这部分代码完全替换掉您项目中对应的部分。
-
-**代码第一部分 (整合修复版):**
-```python
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog, simpledialog
 import json
