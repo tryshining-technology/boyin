@@ -3147,6 +3147,67 @@ class TimedBroadcastApp:
         tree.bind("<ButtonRelease-1>", on_release, True)
 
 # --- 代码第一部分结束 ---
+    def create_holiday_page(self):
+        page_frame = tk.Frame(self.page_container, bg='white')
+
+        top_frame = tk.Frame(page_frame, bg='white')
+        top_frame.pack(fill=tk.X, padx=10, pady=10)
+        title_label = tk.Label(top_frame, text="节假日管理", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#2C5F7C')
+        title_label.pack(side=tk.LEFT)
+        
+        desc_label = tk.Label(page_frame, text="在节假日期间，所有“定时广播”、“整点报时”和“待办事项”都将自动暂停，节假日结束后自动恢复。", 
+                              font=('Microsoft YaHei', 11), bg='white', fg='#555')
+        desc_label.pack(anchor='w', padx=10, pady=(0, 10))
+
+        content_frame = tk.Frame(page_frame, bg='white')
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        table_frame = tk.Frame(content_frame, bg='white')
+        table_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        columns = ('名称', '状态', '开始时间', '结束时间')
+        self.holiday_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended')
+
+        self.holiday_tree.heading('名称', text='节假日名称')
+        self.holiday_tree.column('名称', width=250, anchor='w')
+        self.holiday_tree.heading('状态', text='状态')
+        self.holiday_tree.column('状态', width=100, anchor='center')
+        self.holiday_tree.heading('开始时间', text='开始时间')
+        self.holiday_tree.column('开始时间', width=200, anchor='center')
+        self.holiday_tree.heading('结束时间', text='结束时间')
+        self.holiday_tree.column('结束时间', width=200, anchor='center')
+
+        self.holiday_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.holiday_tree.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.holiday_tree.configure(yscrollcommand=scrollbar.set)
+
+        self.holiday_tree.bind("<Double-1>", lambda e: self.edit_holiday())
+        self.holiday_tree.bind("<Button-3>", self.show_holiday_context_menu)
+        self._enable_drag_selection(self.holiday_tree)
+        
+        action_frame = tk.Frame(content_frame, bg='white', padx=10)
+        action_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        btn_font = ('Microsoft YaHei', 11)
+        btn_width = 10
+        buttons_config = [
+            ("添加", self.add_holiday), ("修改", self.edit_holiday), ("删除", self.delete_holiday),
+            (None, None), # Separator
+            ("全部启用", self.enable_all_holidays), ("全部禁用", self.disable_all_holidays),
+            (None, None),
+            ("导入列表", self.import_holidays), ("导出列表", self.export_holidays), ("清空列表", self.clear_all_holidays)
+        ]
+
+        for text, cmd in buttons_config:
+            if text is None:
+                tk.Frame(action_frame, height=20, bg='white').pack() # Spacer
+                continue
+            tk.Button(action_frame, text=text, command=cmd, font=btn_font, width=btn_width, pady=5).pack(pady=5)
+        
+        self.update_holiday_list()
+        return page_frame
+        
     def save_holidays(self):
         try:
             with open(HOLIDAY_FILE, 'w', encoding='utf-8') as f:
@@ -3423,8 +3484,7 @@ class TimedBroadcastApp:
             self.save_holidays()
             self.log("已清空所有节假日。")
 
-# --- 代码第二部分开始 ---
-# --- NEW & REWORKED: 待办事项所有相关函数 ---
+# --- 待办事项所有相关函数 (已根据反馈修复) ---
 
     def create_todo_page(self):
         page_frame = tk.Frame(self.page_container, bg='white')
@@ -3687,6 +3747,7 @@ class TimedBroadcastApp:
         else:
             onetime_date_entry.insert(0, now.strftime('%Y-%m-%d'))
             onetime_time_entry.insert(0, (now + timedelta(minutes=5)).strftime('%H:%M:%S'))
+            recurring_time_entry.insert(0, now.strftime('%H:%M:%S')) # 修复点：为循环任务的开始时间设置默认值
             recurring_weekday_entry.insert(0, '每周:1234567')
             recurring_daterange_entry.insert(0, '2000-01-01 ~ 2099-12-31')
             recurring_interval_entry.insert(0, '0')
@@ -3872,8 +3933,7 @@ class TimedBroadcastApp:
                     todo_with_index = todo.copy()
                     todo_with_index['original_index'] = index
                     self.reminder_queue.put(todo_with_index)
-                    todo['status'] = '待处理'
-                    self.root.after(0, self.update_todo_list)
+                    # 状态在弹窗时再改变，以避免快速连续触发
             
             elif todo.get('type') == 'recurring':
                 try:
@@ -3895,7 +3955,7 @@ class TimedBroadcastApp:
                         break
                 
                 interval = todo.get('interval_minutes', 0)
-                if not triggered and interval > 0:
+                if not triggered and interval > 0 and todo.get('start_times'):
                     last_run_str = todo.get('last_interval_run')
                     if last_run_str:
                         try:
@@ -3928,8 +3988,24 @@ class TimedBroadcastApp:
             self.log("警告：pywin32未安装，无法闪烁任务栏图标。")
             return
         try:
-            hwnd = self.root.winfo_id()
-            win32gui.FlashWindow(hwnd, True)
+            hwnd = win32gui.FindWindow(None, self.root.title())
+            if not hwnd:
+                # 如果按标题找不到，尝试通过进程ID获取主窗口
+                pid = os.getpid()
+                def callback(h, p):
+                    if h and win32gui.IsWindowVisible(h) and win32gui.IsWindowEnabled(h):
+                        _, found_pid = win32gui.GetWindowThreadProcessId(h)
+                        if found_pid == p:
+                           p.append(h)
+                
+                hwnds = []
+                win32gui.EnumWindows(callback, (pid, hwnds))
+                if hwnds: hwnd = hwnds[0]
+
+            if hwnd:
+                win32gui.FlashWindow(hwnd, True)
+            else:
+                self.log("警告：无法找到主窗口句柄，任务栏闪烁失败。")
         except Exception as e:
             self.log(f"闪烁任务栏图标失败: {e}")
 
@@ -3938,50 +4014,44 @@ class TimedBroadcastApp:
             self.log("警告：pygame未安装，无法播放提示音。")
             return
         
-        # 优先使用用户指定的 reminder.wav
         if os.path.exists(REMINDER_SOUND_FILE):
             try:
                 sound = pygame.mixer.Sound(REMINDER_SOUND_FILE)
                 channel = pygame.mixer.find_channel(True)
                 channel.set_volume(0.7)
                 channel.play(sound)
+                self.log("已播放自定义提示音。")
                 return
             except Exception as e:
                 self.log(f"播放自定义提示音 {REMINDER_SOUND_FILE} 失败: {e}")
         
-        # 如果失败或文件不存在，则播放系统默认声音
         if WIN32_AVAILABLE:
             try:
-                # MB_OK 是一个常见的系统提示音
                 ctypes.windll.user32.MessageBeep(win32con.MB_OK)
+                self.log("已播放系统默认提示音。")
             except Exception as e:
                 self.log(f"播放系统默认提示音失败: {e}")
 
     def show_todo_reminder(self, todo):
-        # 1. 播放提示音 & 闪烁任务栏
         self._play_reminder_sound()
-        self._flash_taskbar_icon()
+        self.root.after(100, self._flash_taskbar_icon)
 
         reminder_win = tk.Toplevel(self.root)
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
         reminder_win.geometry("480x320")
         reminder_win.resizable(False, False)
-        # 不再是 transient，成为一个独立的窗口
         self.center_window(reminder_win, 480, 320)
         reminder_win.configure(bg='#FFFFE0')
 
-        # 2. 移除强制置顶和抓取事件
-        # reminder_win.attributes('-topmost', True) -> REMOVED
-        # reminder_win.grab_set() -> REMOVED
-        
-        # 3. 温和地提升窗口
+        reminder_win.attributes('-topmost', True)
         reminder_win.lift()
         reminder_win.focus_force()
+        reminder_win.after(500, lambda: reminder_win.attributes('-topmost', False))
 
         original_index = todo.get('original_index')
 
         if original_index is not None and original_index < len(self.todos):
-            if self.todos[original_index]['status'] != '禁用':
+            if self.todos[original_index]['status'] != '禁用' and self.todos[original_index]['type'] == 'onetime':
                 self.todos[original_index]['status'] = '待处理'
                 self.root.after(0, self.update_todo_list)
 
@@ -4003,7 +4073,7 @@ class TimedBroadcastApp:
             self.is_reminder_active = False
             reminder_win.destroy()
 
-        def _handle_complete():
+        def handle_complete():
             if original_index is not None and original_index < len(self.todos):
                 self.todos[original_index]['status'] = '禁用'
                 self.save_todos()
@@ -4011,7 +4081,7 @@ class TimedBroadcastApp:
                 self.log(f"待办事项 '{todo['name']}' 已标记为完成。")
             close_and_release()
 
-        def _handle_snooze():
+        def handle_snooze():
             minutes = simpledialog.askinteger("稍后提醒", "您想在多少分钟后再次提醒？ (1-60)", parent=reminder_win, minvalue=1, maxvalue=60, initialvalue=5)
             if minutes:
                 new_remind_time = datetime.now() + timedelta(minutes=minutes)
@@ -4023,29 +4093,27 @@ class TimedBroadcastApp:
                     self.log(f"待办事项 '{todo['name']}' 已推迟 {minutes} 分钟。")
             close_and_release()
 
-        def _handle_delete():
+        def handle_delete():
             if messagebox.askyesno("确认删除", f"您确定要永久删除待办事项“{todo['name']}”吗？\n此操作不可恢复。", parent=reminder_win):
                 if original_index is not None and original_index < len(self.todos):
-                    if self.todos[original_index]['name'] == todo['name']:
+                    # 安全检查，防止在操作期间列表被外部更改
+                    if self.todos[original_index].get('name') == todo.get('name'):
                         self.todos.pop(original_index)
                         self.save_todos()
                         self.update_todo_list()
                         self.log(f"已删除待办事项: {todo['name']}")
                 close_and_release()
         
-        # 窗口关闭按钮的行为
         reminder_win.protocol("WM_DELETE_WINDOW", close_and_release)
 
         task_type = todo.get('type')
         if task_type == 'onetime':
-            tk.Button(btn_frame, text="已完成", font=font_spec, bg='#27AE60', fg='white', width=10, command=_handle_complete).pack(side=tk.LEFT, padx=10)
-            tk.Button(btn_frame, text="稍后提醒", font=font_spec, width=10, command=_handle_snooze).pack(side=tk.LEFT, padx=10)
-            tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=_handle_delete).pack(side=tk.LEFT, padx=10)
-        elif task_type == 'recurring':
+            tk.Button(btn_frame, text="已完成", font=font_spec, bg='#27AE60', fg='white', width=10, command=handle_complete).pack(side=tk.LEFT, padx=10)
+            tk.Button(btn_frame, text="稍后提醒", font=font_spec, width=10, command=handle_snooze).pack(side=tk.LEFT, padx=10)
+            tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=handle_delete).pack(side=tk.LEFT, padx=10)
+        else: # recurring
             tk.Button(btn_frame, text="本次完成", font=font_spec, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
-            tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=_handle_delete).pack(side=tk.LEFT, padx=10)
-        else:
-            tk.Button(btn_frame, text="确定", font=font_spec, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
+            tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=handle_delete).pack(side=tk.LEFT, padx=10)
 
 
 def main():
@@ -4055,9 +4123,15 @@ def main():
 
 if __name__ == "__main__":
     if not WIN32_AVAILABLE:
-        messagebox.showerror("核心依赖缺失", "pywin32 库未安装或损坏，软件无法运行语音、注册和锁定等核心功能，即将退出。")
-        sys.exit()
+        try:
+            messagebox.showerror("核心依赖缺失", "pywin32 库未安装或损坏，软件无法运行语音、注册和锁定等核心功能，即将退出。")
+        except:
+            print("错误: pywin32 库未安装或损坏，无法显示图形化错误消息。")
+        sys.exit(1)
     if not PSUTIL_AVAILABLE:
-        messagebox.showerror("核心依赖缺失", "psutil 库未安装，软件无法获取机器码以进行授权验证，即将退出。")
-        sys.exit()
+        try:
+            messagebox.showerror("核心依赖缺失", "psutil 库未安装，软件无法获取机器码以进行授权验证，即将退出。")
+        except:
+            print("错误: psutil 库未安装，无法显示图形化错误消息。")
+        sys.exit(1)
     main()
