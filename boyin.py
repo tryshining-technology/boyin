@@ -1,6 +1,3 @@
-好的，这是修改后的第一部分代码，已为您增加了字体更换功能。
-
-```python
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog, simpledialog, font
 import json
