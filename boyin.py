@@ -3881,6 +3881,10 @@ class TimedBroadcastApp:
         reminder_win.lift()
         reminder_win.focus_force()
         self._flash_window()
+        
+        # 强制UI更新的关键步骤
+        reminder_win.update_idletasks()
+        reminder_win.update()
 
 
 def main():
