@@ -11,9 +11,6 @@ import getpass
 import base64
 import queue
 import shutil
-# NEW: 导入 ctypes 用于调用 Windows API
-import ctypes
-from ctypes import wintypes
 
 # 尝试导入所需库
 TRAY_AVAILABLE = False
@@ -78,9 +75,6 @@ AUDIO_FOLDER = os.path.join(application_path, "音频文件")
 BGM_FOLDER = os.path.join(application_path, "文稿背景")
 VOICE_SCRIPT_FOLDER = os.path.join(application_path, "语音文稿")
 ICON_FILE = resource_path("icon.ico")
-# NEW: 默认提示音文件路径
-NOTIFY_SOUND_FILE = os.path.join(PROMPT_FOLDER, "notify.wav")
-
 
 CHIME_FOLDER = os.path.join(AUDIO_FOLDER, "整点报时")
 
@@ -132,8 +126,6 @@ class TimedBroadcastApp:
         self.image_tk_ref = None 
         self.current_stop_visual_event = None
 
-        self.notification_sound = None
-
         self.create_folder_structure()
         self.load_settings()
         self.load_lock_password()
@@ -145,12 +137,6 @@ class TimedBroadcastApp:
         self.load_holidays()
         self.load_todos()
         
-        if AUDIO_AVAILABLE and os.path.exists(NOTIFY_SOUND_FILE):
-            try:
-                self.notification_sound = pygame.mixer.Sound(NOTIFY_SOUND_FILE)
-            except Exception as e:
-                print(f"警告: 无法加载提示音文件 {NOTIFY_SOUND_FILE}: {e}")
-
         self.start_background_threads()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
         self.start_tray_icon_thread()
@@ -3453,7 +3439,7 @@ class TimedBroadcastApp:
         title_label = tk.Label(top_frame, text="待办事项", font=('Microsoft YaHei', 14, 'bold'), bg='white', fg='#2C5F7C')
         title_label.pack(side=tk.LEFT)
 
-        desc_label = tk.Label(page_frame, text="到达提醒时间时会弹出窗口提醒，提醒功能受节假日约束。", font=('Microsoft YaHei', 11), bg='white', fg='#555')
+        desc_label = tk.Label(page_frame, text="到达提醒时间时会强制弹出窗口提醒，提醒功能受节假日约束。", font=('Microsoft YaHei', 11), bg='white', fg='#555')
         desc_label.pack(anchor='w', padx=10, pady=(0, 10))
 
         content_frame = tk.Frame(page_frame, bg='white')
@@ -3768,59 +3754,197 @@ class TimedBroadcastApp:
         tk.Button(button_frame, text="保存", command=save, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
         tk.Button(button_frame, text="取消", command=dialog.destroy, font=font_spec, width=10).pack(side=tk.LEFT, padx=10)
     
-    def _flash_window(self):
-        """调用Windows API使任务栏图标闪烁"""
-        try:
-            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
-            
-            class FLASHWINFO(ctypes.Structure):
-                _fields_ = [
-                    ("cbSize", ctypes.c_uint),
-                    ("hwnd", wintypes.HWND),
-                    ("dwFlags", ctypes.c_ulong),
-                    ("uCount", ctypes.c_uint),
-                    ("dwTimeout", ctypes.c_ulong)
-                ]
+    def show_todo_context_menu(self, event):
+        if self.is_locked: return
+        iid = self.todo_tree.identify_row(event.y)
+        if not iid: return
 
-            info = FLASHWINFO()
-            info.cbSize = ctypes.sizeof(info)
-            info.hwnd = hwnd
-            info.dwFlags = 2 | 12  # FLASHW_TRAY | FLASHW_TIMERNOFG
-            info.uCount = 0  # Flash indefinitely
-            info.dwTimeout = 0
+        context_menu = tk.Menu(self.root, tearoff=0, font=('Microsoft YaHei', 11))
+        self.todo_tree.selection_set(iid)
+        
+        context_menu.add_command(label="修改", command=self.edit_todo)
+        context_menu.add_command(label="删除", command=self.delete_todo)
+        context_menu.add_separator()
+        context_menu.add_command(label="置顶", command=self.move_todo_to_top)
+        context_menu.add_command(label="上移", command=lambda: self.move_todo(-1))
+        context_menu.add_command(label="下移", command=lambda: self.move_todo(1))
+        context_menu.add_command(label="置末", command=self.move_todo_to_bottom)
+        context_menu.add_separator()
+        context_menu.add_command(label="启用", command=lambda: self._set_todo_status('启用'))
+        context_menu.add_command(label="禁用", command=lambda: self._set_todo_status('禁用'))
+        
+        context_menu.post(event.x_root, event.y_root)
+
+    def move_todo(self, direction):
+        selection = self.todo_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.todo_tree.index(selection[0])
+        new_index = index + direction
+        if 0 <= new_index < len(self.todos):
+            item = self.todos.pop(index)
+            self.todos.insert(new_index, item)
+            self.update_todo_list(); self.save_todos()
+            new_selection_id = self.todo_tree.get_children()[new_index]
+            self.todo_tree.selection_set(new_selection_id)
+            self.todo_tree.focus(new_selection_id)
+
+    def move_todo_to_top(self):
+        selection = self.todo_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.todo_tree.index(selection[0])
+        if index > 0:
+            item = self.todos.pop(index)
+            self.todos.insert(0, item)
+            self.update_todo_list(); self.save_todos()
+            new_selection_id = self.todo_tree.get_children()[0]
+            self.todo_tree.selection_set(new_selection_id)
+            self.todo_tree.focus(new_selection_id)
+
+    def move_todo_to_bottom(self):
+        selection = self.todo_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.todo_tree.index(selection[0])
+        if index < len(self.todos) - 1:
+            item = self.todos.pop(index)
+            self.todos.append(item)
+            self.update_todo_list(); self.save_todos()
+            new_selection_id = self.todo_tree.get_children()[-1]
+            self.todo_tree.selection_set(new_selection_id)
+            self.todo_tree.focus(new_selection_id)
+
+    def enable_all_todos(self):
+        if not self.todos: return
+        for todo in self.todos: todo['status'] = '启用'
+        self.update_todo_list(); self.save_todos(); self.log("已启用全部待办事项。")
+
+    def disable_all_todos(self):
+        if not self.todos: return
+        for todo in self.todos: todo['status'] = '禁用'
+        self.update_todo_list(); self.save_todos(); self.log("已禁用全部待办事项。")
+
+    def import_todos(self):
+        filename = filedialog.askopenfilename(title="选择导入待办事项文件", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
+        if filename:
+            try:
+                with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
+
+                if not isinstance(imported, list) or \
+                   (imported and (not isinstance(imported[0], dict) or 'name' not in imported[0] or 'type' not in imported[0])):
+                    messagebox.showerror("导入失败", "文件格式不正确，看起来不是一个有效的待办事项备份文件。")
+                    return
+
+                self.todos.extend(imported)
+                self.update_todo_list(); self.save_todos()
+                self.log(f"已从 {os.path.basename(filename)} 导入 {len(imported)} 个待办事项")
+            except Exception as e:
+                messagebox.showerror("错误", f"导入失败: {e}")
+
+    def export_todos(self):
+        if not self.todos:
+            messagebox.showwarning("警告", "没有待办事项可以导出")
+            return
+        filename = filedialog.asksaveasfilename(title="导出待办事项到...", defaultextension=".json",
+                                              initialfile="todos_backup.json", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
+        if filename:
+            try:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(self.todos, f, ensure_ascii=False, indent=2)
+                self.log(f"已导出 {len(self.todos)} 个待办事项到 {os.path.basename(filename)}")
+            except Exception as e:
+                messagebox.showerror("错误", f"导出失败: {e}")
+    
+    def clear_all_todos(self):
+        if not self.todos: return
+        if messagebox.askyesno("严重警告", "您确定要清空所有待办事项吗？\n此操作不可恢复！"):
+            self.todos.clear()
+            self.update_todo_list()
+            self.save_todos()
+            self.log("已清空所有待办事项。")
+
+    def _check_todo_tasks(self, now):
+        if self._is_in_holiday(now): return
+
+        now_str_dt = now.strftime('%Y-%m-%d %H:%M:%S')
+        now_str_date = now.strftime('%Y-%m-%d')
+        now_str_time = now.strftime('%H:%M:%S')
+
+        for index, todo in enumerate(self.todos):
+            if todo.get('status') != '启用': continue
+
+            if todo.get('type') == 'onetime':
+                if todo.get('remind_datetime') == now_str_dt:
+                    self.log(f"触发一次性待办事项: {todo['name']}")
+                    todo_with_index = todo.copy()
+                    todo_with_index['original_index'] = index
+                    self.reminder_queue.put(todo_with_index)
+                    todo['status'] = '待处理'
+                    self.root.after(0, self.update_todo_list)
             
-            ctypes.windll.user32.FlashWindowEx(ctypes.byref(info))
-        except Exception as e:
-            print(f"警告: 无法使窗口闪烁 - {e}")
+            elif todo.get('type') == 'recurring':
+                try:
+                    start, end = [d.strip() for d in todo.get('date_range', '').split('~')]
+                    if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()): 
+                        continue
+                except (ValueError, IndexError): pass
+                
+                schedule = todo.get('weekday', '每周:1234567')
+                run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or \
+                            (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
+                if not run_today: continue
+                
+                triggered = False
+                for trigger_time in [t.strip() for t in todo.get('start_times', '').split(',')]:
+                    if trigger_time == now_str_time and todo.get('last_run', {}).get(trigger_time) != now_str_date:
+                        triggered = True
+                        todo.setdefault('last_run', {})[trigger_time] = now_str_date
+                        break
+                
+                interval = todo.get('interval_minutes', 0)
+                if not triggered and interval > 0:
+                    last_run_str = todo.get('last_interval_run')
+                    if last_run_str:
+                        try:
+                            last_run_dt = datetime.strptime(last_run_str, '%Y-%m-%d %H:%M:%S')
+                            if now >= last_run_dt + timedelta(minutes=interval):
+                                triggered = True
+                        except ValueError: pass
+
+                if triggered:
+                    self.log(f"触发循环待办事项: {todo['name']}")
+                    todo_with_index = todo.copy()
+                    todo_with_index['original_index'] = index
+                    self.reminder_queue.put(todo_with_index)
+                    todo['last_interval_run'] = now_str_dt
+                    self.save_todos()
+
+    def _process_reminder_queue(self):
+        if not self.is_reminder_active and not self.reminder_queue.empty():
+            try:
+                todo_task = self.reminder_queue.get_nowait()
+                self.is_reminder_active = True
+                self.show_todo_reminder(todo_task)
+            except queue.Empty:
+                pass
+        
+        self.root.after(1000, self._process_reminder_queue)
 
     def show_todo_reminder(self, todo):
-        self.is_reminder_active = True
-
         reminder_win = tk.Toplevel(self.root)
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
         reminder_win.geometry("480x320")
         reminder_win.resizable(False, False)
         reminder_win.transient(self.root)
-        
+        reminder_win.attributes('-topmost', True)
         self.center_window(reminder_win, 480, 320)
         reminder_win.configure(bg='#FFFFE0')
-
-        original_index = todo.get('original_index')
+        reminder_win.protocol("WM_DELETE_WINDOW", lambda: None)
         
-        def on_close():
-            self.is_reminder_active = False
-            if original_index is not None and original_index < len(self.todos):
-                if self.todos[original_index].get('status') == '待处理':
-                    self.todos[original_index]['status'] = '启用'
-                    self.update_todo_list()
-            reminder_win.destroy()
-
-        reminder_win.protocol("WM_DELETE_WINDOW", on_close)
+        original_index = todo.get('original_index')
 
         if original_index is not None and original_index < len(self.todos):
             if self.todos[original_index]['status'] != '禁用':
                 self.todos[original_index]['status'] = '待处理'
-                self.update_todo_list()
+                self.root.after(0, self.update_todo_list)
 
         title_label = tk.Label(reminder_win, text=todo.get('name', '无标题'), font=('Microsoft YaHei', 14, 'bold'), bg='#FFFFE0', wraplength=460)
         title_label.pack(pady=(15, 10))
@@ -3835,14 +3959,18 @@ class TimedBroadcastApp:
         btn_frame = tk.Frame(reminder_win, bg='#FFFFE0')
         btn_frame.pack(pady=15)
         font_spec = ('Microsoft YaHei', 11)
-        
+
+        def close_and_release():
+            self.is_reminder_active = False
+            reminder_win.destroy()
+
         def _handle_complete():
             if original_index is not None and original_index < len(self.todos):
                 self.todos[original_index]['status'] = '禁用'
                 self.save_todos()
                 self.update_todo_list()
                 self.log(f"待办事项 '{todo['name']}' 已标记为完成。")
-            on_close()
+            close_and_release()
 
         def _handle_snooze():
             minutes = simpledialog.askinteger("稍后提醒", "您想在多少分钟后再次提醒？ (1-60)", parent=reminder_win, minvalue=1, maxvalue=60, initialvalue=5)
@@ -3854,7 +3982,7 @@ class TimedBroadcastApp:
                     self.save_todos()
                     self.update_todo_list()
                     self.log(f"待办事项 '{todo['name']}' 已推迟 {minutes} 分钟。")
-            on_close()
+            close_and_release()
 
         def _handle_delete():
             if messagebox.askyesno("确认删除", f"您确定要永久删除待办事项“{todo['name']}”吗？\n此操作不可恢复。", parent=reminder_win):
@@ -3864,7 +3992,7 @@ class TimedBroadcastApp:
                         self.save_todos()
                         self.update_todo_list()
                         self.log(f"已删除待办事项: {todo['name']}")
-                on_close()
+                close_and_release()
 
         task_type = todo.get('type')
         if task_type == 'onetime':
@@ -3872,17 +4000,14 @@ class TimedBroadcastApp:
             tk.Button(btn_frame, text="稍后提醒", font=font_spec, width=10, command=_handle_snooze).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=_handle_delete).pack(side=tk.LEFT, padx=10)
         elif task_type == 'recurring':
-            tk.Button(btn_frame, text="本次完成", font=font_spec, bg='#3498DB', fg='white', width=10, command=on_close).pack(side=tk.LEFT, padx=10)
+            tk.Button(btn_frame, text="本次完成", font=font_spec, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
             tk.Button(btn_frame, text="删除任务", font=font_spec, bg='#E74C3C', fg='white', width=10, command=_handle_delete).pack(side=tk.LEFT, padx=10)
         else:
-            tk.Button(btn_frame, text="确定", font=font_spec, bg='#3498DB', fg='white', width=10, command=on_close).pack(side=tk.LEFT, padx=10)
+            tk.Button(btn_frame, text="确定", font=font_spec, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
 
-        if self.notification_sound:
-            self.notification_sound.play()
-            
-        reminder_win.lift()
-        reminder_win.focus_force()
-        self._flash_window()
+        reminder_win.update_idletasks()
+        reminder_win.update()
+        reminder_win.grab_set()
 
 
 def main():
