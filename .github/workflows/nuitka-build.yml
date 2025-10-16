@@ -60,19 +60,20 @@ jobs:
           Write-Host "=== 构建 Nuitka 编译版本（原生机器码，高保护强度）==="
           $exeName = "创翔多功能定时播音旗舰版_${{ matrix.exe-name-suffix }}.exe"
           
+          # 关键修复：为每个以 '--' 开头的参数加上引号，以避免 PowerShell 解析错误
           python -m nuitka --standalone --onefile `
-            --windows-disable-console `
-            --lto=yes ` # <--- 建议添加：启用链接时优化
-            --output-filename="$exeName" `
-            --windows-icon-from-ico="icon.ico" `
-            --product-name="创翔多功能定时播音旗舰版" `
-            --file-version="1.0.0" `
-            --company-name="创翔" `
-            --enable-plugin=tk-inter `
-            --include-package-data=pygame `
-            --include-data-file="icon.ico=." `
-            --include-data-file="${{ matrix.vlc-folder }}/*=${{ matrix.vlc-folder }}/" `
-            --include-data-file="ttkbootstrap/themes/*=ttkbootstrap/themes/" `
+            "--windows-disable-console" `
+            "--lto=yes" `
+            "--output-filename=$exeName" `
+            "--windows-icon-from-ico=icon.ico" `
+            "--product-name=创翔多功能定时播音旗舰版" `
+            "--file-version=1.0.0" `
+            "--company-name=创翔" `
+            "--enable-plugin=tk-inter" `
+            "--include-package-data=pygame" `
+            "--include-data-file=icon.ico=." `
+            "--include-data-file=${{ matrix.vlc-folder }}/*=${{ matrix.vlc-folder }}/" `
+            "--include-data-file=ttkbootstrap/themes/*=ttkbootstrap/themes/" `
             boyin.py
         shell: pwsh
 
@@ -80,5 +81,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact-name }}
-          # <--- 重要修改：使用精确路径
+          # 使用精确的文件名进行上传，而不是通配符
           path: "创翔多功能定时播音旗舰版_${{ matrix.exe-name-suffix }}.exe"
