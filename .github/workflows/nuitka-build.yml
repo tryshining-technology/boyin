@@ -62,6 +62,7 @@ jobs:
           
           python -m nuitka --standalone --onefile `
             --windows-disable-console `
+            --lto=yes ` # <--- 建议添加：启用链接时优化
             --output-filename="$exeName" `
             --windows-icon-from-ico="icon.ico" `
             --product-name="创翔多功能定时播音旗舰版" `
@@ -79,4 +80,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact-name }}
-          path: "创翔多功能定时播音旗舰版_*_NUITKA.exe"
+          # <--- 重要修改：使用精确路径
+          path: "创翔多功能定时播音旗舰版_${{ matrix.exe-name-suffix }}.exe"
