@@ -64,7 +64,7 @@ jobs:
           $nuitkaArgs = @(
               "--standalone",
               "--onefile",
-              "--windows-console-mode=disable", # <--- 修正1：使用新的推荐参数
+              "--windows-console-mode=disable",
               "--lto=yes",
               "--output-filename=$exeName",
               "--windows-icon-from-ico=icon.ico",
@@ -74,8 +74,9 @@ jobs:
               "--enable-plugin=tk-inter",
               "--include-package-data=pygame",
               "--include-package-data=ttkbootstrap",
-              "--include-data-file=icon.ico=icon.ico", # <--- 修正2：使用 Nuitka 的正确语法
-              "--include-data-file=${{ matrix.vlc-folder }}/*=${{ matrix.vlc-folder }}/",
+              "--include-data-file=icon.ico=icon.ico",
+              # --- 关键修复：使用 --include-data-dir 来包含整个 VLC 库文件夹 ---
+              "--include-data-dir=${{ matrix.vlc-folder }}=${{ matrix.vlc-folder }}",
               "boyin.py"
           )
           
