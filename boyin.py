@@ -16,13 +16,6 @@ import queue
 import shutil
 import re
 
-# 为DPI感知导入ctypes
-try:
-    import ctypes
-except ImportError:
-    pass
-
-
 # 尝试导入所需库
 TRAY_AVAILABLE = False
 try:
@@ -43,6 +36,7 @@ try:
     import winreg
     import win32gui
     import win32con
+    import ctypes
     WIN32_AVAILABLE = True
 except ImportError:
     print("警告: pywin32 未安装，语音、开机启动、任务栏闪烁和密码持久化/注册功能将受限。")
@@ -66,7 +60,7 @@ try:
 except ImportError:
     print("警告: psutil 未安装，无法获取机器码，注册功能不可用。")
 
-# --- 导入 VLC 库 ---
+# --- 新增: 导入 VLC 库 ---
 VLC_AVAILABLE = False
 try:
     import vlc
@@ -112,9 +106,7 @@ class TimedBroadcastApp:
     def __init__(self, root):
         self.root = root
         self.root.title(" 创翔多功能定时播音旗舰版")
-        # 修复1: 设置初始和最小尺寸
-        self.root.geometry("1024x768")
-        self.root.minsize(1024, 768)
+        self.root.geometry("1400x800")
 
         if os.path.exists(ICON_FILE):
             try:
@@ -189,6 +181,7 @@ class TimedBroadcastApp:
         font_name = self.settings.get("app_font", "Microsoft YaHei")
 
         try:
+            # 检查字体是否存在于系统中，不存在则回退
             if font_name not in font.families():
                 self.log(f"警告：字体 '{font_name}' 未在系统中找到，已回退至默认字体。")
                 font_name = "Microsoft YaHei"
@@ -198,6 +191,7 @@ class TimedBroadcastApp:
 
         self.log(f"应用全局字体: {font_name}")
 
+        # 定义不同大小的字体对象
         self.font_8 = (font_name, 8)
         self.font_9 = (font_name, 9)
         self.font_10 = (font_name, 10)
@@ -209,8 +203,11 @@ class TimedBroadcastApp:
         self.font_14_bold = (font_name, 14, 'bold')
         self.font_22_bold = (font_name, 22, 'bold')
 
+        # --- 全局应用 ---
+        # 1. 对标准 tk 控件使用 option_add (非常有效)
         self.root.option_add("*Font", self.font_11)
 
+        # 2. 对 ttk 控件使用 Style
         style = ttk.Style.get_instance()
         style.configure("TButton", font=self.font_11)
         style.configure("TLabel", font=self.font_11)
@@ -218,8 +215,12 @@ class TimedBroadcastApp:
         style.configure("TRadiobutton", font=self.font_11)
         style.configure("TCombobox", font=self.font_11)
         style.configure("TEntry", font=self.font_11)
+
+        # 3. 对 Treeview 单独设置
         style.configure("Treeview", font=self.font_11, rowheight=28)
         style.configure("Treeview.Heading", font=self.font_11_bold)
+
+        # 4. 对 LabelFrame 单独设置
         style.configure("TLabelframe.Label", font=self.font_12_bold)
 
     def _save_to_registry(self, key_name, value):
@@ -255,12 +256,12 @@ class TimedBroadcastApp:
                 os.makedirs(folder)
 
     def create_widgets(self):
-        # 修复2: 移除固定高度，让其自适应内容
-        self.status_frame = ttk.Frame(self.root, style='secondary.TFrame')
+        self.status_frame = ttk.Frame(self.root, style='secondary.TFrame', height=30)
         self.status_frame.pack(side=BOTTOM, fill=X)
+        self.status_frame.pack_propagate(False)
         self.create_status_bar_content()
 
-        self.nav_frame = ttk.Frame(self.root, width=180, style='light.TFrame')
+        self.nav_frame = ttk.Frame(self.root, width=160, style='light.TFrame')
         self.nav_frame.pack(side=LEFT, fill=Y)
         self.nav_frame.pack_propagate(False)
 
@@ -270,17 +271,15 @@ class TimedBroadcastApp:
         nav_button_titles = ["定时广播", "节假日", "待办事项", "设置", "注册软件", "超级管理"]
 
         for i, title in enumerate(nav_button_titles):
-            cmd = lambda t=title: self.switch_page(t)
-            if title == "超级管理":
-                cmd = self._prompt_for_super_admin_password
-            
-            btn = ttk.Button(self.nav_frame, text=title,
-                           style='Link.TButton', command=cmd)
-            btn.pack(fill=X, pady=1, ipady=8, padx=10)
+            btn = ttk.Button(self.nav_frame, text=title, bootstyle="light",
+                           style='Link.TButton',
+                           command=lambda t=title: self.switch_page(t) if t != "超级管理" else self._prompt_for_super_admin_password())
+            btn.pack(fill=X, pady=1, ipady=8, padx=5)
             self.nav_buttons[title] = btn
             
         style = ttk.Style.get_instance()
         style.configure('Link.TButton', font=self.font_13_bold, anchor='w')
+
 
         self.main_frame = ttk.Frame(self.page_container)
         self.pages["定时广播"] = self.main_frame
@@ -299,16 +298,15 @@ class TimedBroadcastApp:
         copyright_label = ttk.Label(self.status_frame, text="© 创翔科技", font=self.font_11,
                                     bootstyle=(SECONDARY, INVERSE), padding=(15, 0))
         copyright_label.pack(side=RIGHT, padx=2)
-        
-        # 修复4: 在这里创建按钮，但不显示
+
         self.statusbar_unlock_button = ttk.Button(self.status_frame, text="🔓 解锁",
                                                   bootstyle="success",
                                                   command=self._prompt_for_password_unlock)
-        
+
         for i, text in enumerate(status_texts):
             label = ttk.Label(self.status_frame, text=f"{text}: --", font=self.font_11,
                               bootstyle=(PRIMARY, INVERSE) if i % 2 == 0 else (SECONDARY, INVERSE),
-                              padding=(15, 8)) # 增加垂直内边距
+                              padding=(15, 5))
             label.pack(side=LEFT, padx=2, fill=Y)
             self.status_labels.append(label)
 
@@ -812,6 +810,7 @@ class TimedBroadcastApp:
             self.update_todo_list()
             self._refresh_settings_ui()
             
+            # 还原后需要重新应用字体
             self._apply_global_font()
             messagebox.showinfo("还原成功", "所有设置已成功还原。\n软件需要重启以应用字体更改。")
             self.log("所有设置已从备份文件成功还原。")
@@ -982,7 +981,7 @@ class TimedBroadcastApp:
         self.clear_log_btn.pack(side=LEFT, padx=10)
 
         self.log_text = ScrolledText(log_frame, height=6, font=self.font_11,
-                                                  wrap=WORD, state='disabled', autohide=True)
+                                                  wrap=WORD, state='disabled')
         self.log_text.pack(fill=BOTH, expand=True)
 
     def create_settings_page(self):
@@ -994,10 +993,10 @@ class TimedBroadcastApp:
         general_frame = ttk.LabelFrame(settings_frame, text="通用设置", padding=(15, 10))
         general_frame.pack(fill=X, pady=10)
 
-        self.autostart_var = tk.BooleanVar()
-        self.start_minimized_var = tk.BooleanVar()
-        self.lock_on_start_var = tk.BooleanVar()
-        self.bg_image_interval_var = tk.StringVar()
+        self.autostart_var = ttk.BooleanVar()
+        self.start_minimized_var = ttk.BooleanVar()
+        self.lock_on_start_var = ttk.BooleanVar()
+        self.bg_image_interval_var = ttk.StringVar()
 
         ttk.Checkbutton(general_frame, text="登录windows后自动启动", variable=self.autostart_var, bootstyle="round-toggle", command=self._handle_autostart_setting).pack(fill=X, pady=5)
         ttk.Checkbutton(general_frame, text="启动后最小化到系统托盘", variable=self.start_minimized_var, bootstyle="round-toggle", command=self.save_settings).pack(fill=X, pady=5)
@@ -1042,7 +1041,7 @@ class TimedBroadcastApp:
         except:
             available_fonts = ["Microsoft YaHei"]
 
-        self.font_var = tk.StringVar()
+        self.font_var = ttk.StringVar()
 
         font_combo = ttk.Combobox(font_frame, textvariable=self.font_var, values=available_fonts, font=self.font_10, width=25, state='readonly')
         font_combo.pack(side=LEFT, padx=10)
@@ -1054,10 +1053,10 @@ class TimedBroadcastApp:
         time_chime_frame = ttk.LabelFrame(settings_frame, text="整点报时", padding=(15, 10))
         time_chime_frame.pack(fill=X, pady=10)
 
-        self.time_chime_enabled_var = tk.BooleanVar()
-        self.time_chime_voice_var = tk.StringVar()
-        self.time_chime_speed_var = tk.StringVar()
-        self.time_chime_pitch_var = tk.StringVar()
+        self.time_chime_enabled_var = ttk.BooleanVar()
+        self.time_chime_voice_var = ttk.StringVar()
+        self.time_chime_speed_var = ttk.StringVar()
+        self.time_chime_pitch_var = ttk.StringVar()
 
         chime_control_frame = ttk.Frame(time_chime_frame)
         chime_control_frame.pack(fill=X, pady=5)
@@ -1065,8 +1064,7 @@ class TimedBroadcastApp:
         ttk.Checkbutton(chime_control_frame, text="启用整点报时功能", variable=self.time_chime_enabled_var, bootstyle="round-toggle", command=self._handle_time_chime_toggle).pack(side=LEFT)
 
         available_voices = self.get_available_voices()
-        # 修复8: 增加 Combobox 宽度
-        self.chime_voice_combo = ttk.Combobox(chime_control_frame, textvariable=self.time_chime_voice_var, values=available_voices, font=self.font_10, width=60, state='readonly')
+        self.chime_voice_combo = ttk.Combobox(chime_control_frame, textvariable=self.time_chime_voice_var, values=available_voices, font=self.font_10, width=35, state='readonly')
         self.chime_voice_combo.pack(side=LEFT, padx=10)
         self.chime_voice_combo.bind("<<ComboboxSelected>>", lambda e: self._on_chime_params_changed(is_voice_change=True))
 
@@ -1085,18 +1083,18 @@ class TimedBroadcastApp:
         power_frame = ttk.LabelFrame(settings_frame, text="电源管理", padding=(15, 10))
         power_frame.pack(fill=X, pady=10)
 
-        self.daily_shutdown_enabled_var = tk.BooleanVar()
-        self.daily_shutdown_time_var = tk.StringVar()
-        self.weekly_shutdown_enabled_var = tk.BooleanVar()
-        self.weekly_shutdown_time_var = tk.StringVar()
-        self.weekly_shutdown_days_var = tk.StringVar()
-        self.weekly_reboot_enabled_var = tk.BooleanVar()
-        self.weekly_reboot_time_var = tk.StringVar()
-        self.weekly_reboot_days_var = tk.StringVar()
+        self.daily_shutdown_enabled_var = ttk.BooleanVar()
+        self.daily_shutdown_time_var = ttk.StringVar()
+        self.weekly_shutdown_enabled_var = ttk.BooleanVar()
+        self.weekly_shutdown_time_var = ttk.StringVar()
+        self.weekly_shutdown_days_var = ttk.StringVar()
+        self.weekly_reboot_enabled_var = ttk.BooleanVar()
+        self.weekly_reboot_time_var = ttk.StringVar()
+        self.weekly_reboot_days_var = ttk.StringVar()
 
         daily_frame = ttk.Frame(power_frame)
         daily_frame.pack(fill=X, pady=4)
-        ttk.Checkbutton(daily_frame, text="每天关机", variable=self.daily_shutdown_enabled_var, bootstyle="round-toggle", command=self.save_settings).pack(side=LEFT, padx=(0,10))
+        ttk.Checkbutton(daily_frame, text="每天关机", variable=self.daily_shutdown_enabled_var, bootstyle="round-toggle", command=self.save_settings).pack(side=LEFT)
         daily_time_entry = ttk.Entry(daily_frame, textvariable=self.daily_shutdown_time_var, font=self.font_11, width=15)
         daily_time_entry.pack(side=LEFT, padx=10)
         self._bind_mousewheel_to_entry(daily_time_entry, self._handle_time_scroll)
@@ -1104,7 +1102,7 @@ class TimedBroadcastApp:
 
         weekly_frame = ttk.Frame(power_frame)
         weekly_frame.pack(fill=X, pady=4)
-        ttk.Checkbutton(weekly_frame, text="每周关机", variable=self.weekly_shutdown_enabled_var, bootstyle="round-toggle", command=self.save_settings).pack(side=LEFT, padx=(0,10))
+        ttk.Checkbutton(weekly_frame, text="每周关机", variable=self.weekly_shutdown_enabled_var, bootstyle="round-toggle", command=self.save_settings).pack(side=LEFT)
         ttk.Entry(weekly_frame, textvariable=self.weekly_shutdown_days_var, font=self.font_11, width=20).pack(side=LEFT, padx=(10,5))
         weekly_shutdown_time_entry = ttk.Entry(weekly_frame, textvariable=self.weekly_shutdown_time_var, font=self.font_11, width=15)
         weekly_shutdown_time_entry.pack(side=LEFT, padx=5)
@@ -1113,7 +1111,7 @@ class TimedBroadcastApp:
 
         reboot_frame = ttk.Frame(power_frame)
         reboot_frame.pack(fill=X, pady=4)
-        ttk.Checkbutton(reboot_frame, text="每周重启", variable=self.weekly_reboot_enabled_var, bootstyle="round-toggle", command=self.save_settings).pack(side=LEFT, padx=(0,10))
+        ttk.Checkbutton(reboot_frame, text="每周重启", variable=self.weekly_reboot_enabled_var, bootstyle="round-toggle", command=self.save_settings).pack(side=LEFT)
         ttk.Entry(reboot_frame, textvariable=self.weekly_reboot_days_var, font=self.font_11, width=20).pack(side=LEFT, padx=(10,5))
         weekly_reboot_time_entry = ttk.Entry(reboot_frame, textvariable=self.weekly_reboot_time_var, font=self.font_11, width=15)
         weekly_reboot_time_entry.pack(side=LEFT, padx=5)
@@ -1331,15 +1329,13 @@ class TimedBroadcastApp:
         self.is_locked = True
         self.lock_button.config(text="解锁", bootstyle='success')
         self._set_ui_lock_state(DISABLED)
-        # 修复4: 正确地显示解锁按钮
-        self.statusbar_unlock_button.pack(side=RIGHT, padx=5, before=self.status_labels[0])
+        self.statusbar_unlock_button.pack(side=RIGHT, padx=5)
         self.log("界面已锁定。")
 
     def _apply_unlock(self):
         self.is_locked = False
         self.lock_button.config(text="锁定", bootstyle='danger')
         self._set_ui_lock_state(NORMAL)
-        # 修复4: 正确地隐藏解锁按钮
         self.statusbar_unlock_button.pack_forget()
         self.log("界面已解锁。")
 
@@ -1389,10 +1385,9 @@ class TimedBroadcastApp:
     def _prompt_for_password_unlock(self):
         dialog = ttk.Toplevel(self.root)
         dialog.title("解锁界面")
-        # 修复3: 增加解锁对话框的高度
-        dialog.geometry("400x200"); dialog.resizable(False, False)
+        dialog.geometry("400x180"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
-        self.center_window(dialog, 400, 200)
+        self.center_window(dialog, 400, 180)
 
         ttk.Label(dialog, text="请输入密码以解锁", font=self.font_11).pack(pady=10)
 
@@ -1543,11 +1538,10 @@ class TimedBroadcastApp:
     def add_task(self):
         choice_dialog = ttk.Toplevel(self.root)
         choice_dialog.title("选择节目类型")
-        # 修复5: 增加添加节目对话框高度
-        choice_dialog.geometry("350x400")
+        choice_dialog.geometry("350x350")
         choice_dialog.resizable(False, False)
         choice_dialog.transient(self.root); choice_dialog.grab_set()
-        self.center_window(choice_dialog, 350, 400)
+        self.center_window(choice_dialog, 350, 350)
         main_frame = ttk.Frame(choice_dialog, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
         title_label = ttk.Label(main_frame, text="请选择要添加的节目类型",
@@ -1575,7 +1569,7 @@ class TimedBroadcastApp:
         is_edit_mode = task_to_edit is not None
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改音频节目" if is_edit_mode else "添加音频节目")
-        # 修复6: 移除固定尺寸，让窗口自适应
+        dialog.geometry("950x750")
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
 
@@ -1748,16 +1742,13 @@ class TimedBroadcastApp:
         ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
 
         content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
-        
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_width(), dialog.winfo_height())
 
     def open_video_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改视频节目" if is_edit_mode else "添加视频节目")
-        # 修复6: 移除固定尺寸
+        dialog.geometry("950x750")
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
@@ -2006,16 +1997,13 @@ class TimedBroadcastApp:
         button_text = "保存修改" if is_edit_mode else "添加"
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
         ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
-        
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_width(), dialog.winfo_height())
-#标记
+
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
-        # 修复6: 移除固定尺寸
+        dialog.geometry("950x750")
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
 
@@ -2031,7 +2019,7 @@ class TimedBroadcastApp:
         ttk.Label(content_frame, text="播音文字:").grid(row=1, column=0, sticky='nw', padx=5, pady=2)
         text_frame = ttk.Frame(content_frame)
         text_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        content_text = ScrolledText(text_frame, height=5, font=self.font_11, width=65, wrap=WORD, autohide=True)
+        content_text = ScrolledText(text_frame, height=5, font=self.font_11, width=65, wrap=WORD)
         content_text.pack(fill=BOTH, expand=True)
         script_btn_frame = ttk.Frame(content_frame)
         script_btn_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=(0, 2))
@@ -2042,8 +2030,7 @@ class TimedBroadcastApp:
         voice_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=3)
         available_voices = self.get_available_voices()
         voice_var = tk.StringVar()
-        # 修复8: 增加 Combobox 宽度
-        voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, values=available_voices, font=self.font_11, width=60, state='readonly')
+        voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, values=available_voices, font=self.font_11, width=50, state='readonly')
         voice_combo.pack(side=LEFT)
         speech_params_frame = ttk.Frame(content_frame)
         speech_params_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=2)
@@ -2219,9 +2206,6 @@ class TimedBroadcastApp:
         ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
 
         content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
-        
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_width(), dialog.winfo_height())
 
     def _import_voice_script(self, text_widget):
         filename = filedialog.askopenfilename(
@@ -2583,11 +2567,9 @@ class TimedBroadcastApp:
 
     def show_time_settings_dialog(self, time_entry):
         dialog = ttk.Toplevel(self.root)
-        dialog.title("开始时间设置")
-        # 修复7: 让窗口自适应
-        dialog.resizable(False, False)
+        dialog.title("开始时间设置"); dialog.geometry("480x450"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
-        
+        self.center_window(dialog, 480, 450)
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
         ttk.Label(main_frame, text="24小时制 HH:MM:SS", font=self.font_11_bold).pack(anchor='w', pady=5)
@@ -2636,16 +2618,11 @@ class TimedBroadcastApp:
         ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=5, ipady=5)
         ttk.Button(bottom_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=5, ipady=5)
 
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_width(), dialog.winfo_height())
-
-
     def show_weekday_settings_dialog(self, weekday_entry):
         dialog = ttk.Toplevel(self.root); dialog.title("周几或几号")
-        # 修复7: 让窗口自适应
-        dialog.resizable(False, False)
+        dialog.geometry("550x550"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
-        
+        self.center_window(dialog, 550, 550)
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
         week_type_var = tk.StringVar(value="week")
@@ -2678,17 +2655,11 @@ class TimedBroadcastApp:
         ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=5, ipady=5)
         ttk.Button(bottom_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=5, ipady=5)
 
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_width(), dialog.winfo_height())
-
-
     def show_daterange_settings_dialog(self, date_range_entry):
         dialog = ttk.Toplevel(self.root)
-        dialog.title("日期范围")
-        # 修复7: 让窗口自适应
-        dialog.resizable(False, False)
+        dialog.title("日期范围"); dialog.geometry("450x250"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
-        
+        self.center_window(dialog, 450, 250)
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
         from_frame = ttk.Frame(main_frame)
@@ -2718,17 +2689,11 @@ class TimedBroadcastApp:
         ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=5, ipady=5)
         ttk.Button(bottom_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=5, ipady=5)
 
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_width(), dialog.winfo_height())
-
-
     def show_single_time_dialog(self, time_var):
         dialog = ttk.Toplevel(self.root)
-        dialog.title("设置时间")
-        # 修复7 & 9: 让窗口自适应
-        dialog.resizable(False, False)
+        dialog.title("设置时间"); dialog.geometry("320x200"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
-
+        self.center_window(dialog, 320, 200)
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
         ttk.Label(main_frame, text="24小时制 HH:MM:SS", font=self.font_11_bold).pack(pady=5)
@@ -2746,29 +2711,20 @@ class TimedBroadcastApp:
         bottom_frame = ttk.Frame(main_frame); bottom_frame.pack(pady=10)
         ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=10)
         ttk.Button(bottom_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10)
-        
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_width(), dialog.winfo_height())
-
 
     def show_power_week_time_dialog(self, title, days_var, time_var):
         dialog = ttk.Toplevel(self.root); dialog.title(title)
-        # 修复7 & 9: 让窗口自适应
-        dialog.resizable(False, False)
+        dialog.geometry("580x330"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
-        
-        main_frame = ttk.Frame(dialog, padding=10)
-        main_frame.pack(fill=BOTH, expand=True)
-
-        week_frame = ttk.LabelFrame(main_frame, text="选择周几", padding=10)
+        self.center_window(dialog, 580, 330)
+        week_frame = ttk.LabelFrame(dialog, text="选择周几", padding=10)
         week_frame.pack(fill=X, pady=10, padx=10)
         weekdays = [("周一", 1), ("周二", 2), ("周三", 3), ("周四", 4), ("周五", 5), ("周六", 6), ("周日", 7)]
         week_vars = {num: tk.IntVar() for day, num in weekdays}
         current_days = days_var.get().replace("每周:", "")
         for day_num_str in current_days: week_vars[int(day_num_str)].set(1)
         for i, (day, num) in enumerate(weekdays): ttk.Checkbutton(week_frame, text=day, variable=week_vars[num]).grid(row=0, column=i, sticky='w', padx=10, pady=3)
-        
-        time_frame = ttk.LabelFrame(main_frame, text="设置时间", padding=10)
+        time_frame = ttk.LabelFrame(dialog, text="设置时间", padding=10)
         time_frame.pack(fill=X, pady=10, padx=10)
         ttk.Label(time_frame, text="时间 (HH:MM:SS):").pack(side=LEFT)
         time_entry = ttk.Entry(time_frame, font=self.font_11, width=15)
@@ -2783,21 +2739,2045 @@ class TimedBroadcastApp:
             time_var.set(normalized_time)
             self.save_settings()
             dialog.destroy()
-        bottom_frame = ttk.Frame(main_frame); bottom_frame.pack(pady=15)
+        bottom_frame = ttk.Frame(dialog); bottom_frame.pack(pady=15)
         ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=10)
         ttk.Button(bottom_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10)
+
+    def update_task_list(self):
+        if not hasattr(self, 'task_tree') or not self.task_tree.winfo_exists(): return
+        selection = self.task_tree.selection()
+        self.task_tree.delete(*self.task_tree.get_children())
+        for task in self.tasks:
+            content = task.get('content', '')
+            task_type = task.get('type')
+
+            if task_type == 'voice':
+                source_text = task.get('source_text', '')
+                clean_content = source_text.replace('\n', ' ').replace('\r', '')
+                content_preview = (clean_content[:30] + '...') if len(clean_content) > 30 else clean_content
+            elif task_type in ['audio', 'video']:
+                content_preview = os.path.basename(content)
+            else:
+                content_preview = os.path.basename(content)
+
+            display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
+            self.task_tree.insert('', END, values=(
+                task.get('name', ''),
+                task.get('status', ''),
+                task.get('time', ''),
+                display_mode,
+                content_preview,
+                task.get('volume', ''),
+                task.get('weekday', ''),
+                task.get('date_range', '')
+            ))
+        if selection:
+            try:
+                valid_selection = [s for s in selection if self.task_tree.exists(s)]
+                if valid_selection: self.task_tree.selection_set(valid_selection)
+            except tk.TclError: pass
+        self.stats_label.config(text=f"节目单：{len(self.tasks)}")
+        if hasattr(self, 'status_labels'): self.status_labels[3].config(text=f"任务数量: {len(self.tasks)}")
+
+    def update_status_bar(self):
+        if not self.running: return
+        now = datetime.now()
+        week_map = {"1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "日"}
+        day_of_week = week_map.get(str(now.isoweekday()), '')
+        time_str = now.strftime(f'%Y-%m-%d 星期{day_of_week} %H:%M:%S')
+
+        self.status_labels[0].config(text=f"当前时间: {time_str}")
+        self.status_labels[1].config(text="系统状态: 运行中")
+        self.root.after(1000, self.update_status_bar)
+
+    def start_background_threads(self):
+        threading.Thread(target=self._scheduler_worker, daemon=True).start()
+        threading.Thread(target=self._playback_worker, daemon=True).start()
+        self.root.after(1000, self._process_reminder_queue)
+
+    def _scheduler_worker(self):
+        while self.running:
+            now = datetime.now()
+            if not self.is_app_locked_down:
+                self._check_broadcast_tasks(now)
+                self._check_time_chime(now)
+                self._check_todo_tasks(now)
+
+            self._check_power_tasks(now)
+            time.sleep(1)
+
+    def _is_in_holiday(self, check_time):
+        for holiday in self.holidays:
+            if holiday.get('status') != '启用':
+                continue
+            try:
+                start_dt = datetime.strptime(holiday['start_datetime'], '%Y-%m-%d %H:%M:%S')
+                end_dt = datetime.strptime(holiday['end_datetime'], '%Y-%m-%d %H:%M:%S')
+                if start_dt <= check_time <= end_dt:
+                    return True
+            except (ValueError, KeyError):
+                self.log(f"错误：节假日 '{holiday.get('name')}' 日期格式无效，已跳过。")
+                continue
+        return False
+
+    def _check_time_chime(self, now):
+        if not self.settings.get("time_chime_enabled", False):
+            return
+
+        if now.minute == 0 and now.second == 0 and now.hour != self.last_chime_hour:
+            self.last_chime_hour = now.hour
+
+            if self._is_in_holiday(now):
+                self.log("当前处于节假日，跳过整点报时。")
+                return
+
+            chime_file = os.path.join(CHIME_FOLDER, f"{now.hour:02d}.wav")
+            if os.path.exists(chime_file):
+                self.log(f"触发整点报时: {now.hour:02d}点")
+                self.playback_command_queue.put(('PLAY_CHIME', chime_file))
+            else:
+                self.log(f"警告：找不到整点报时文件 {chime_file}，报时失败。")
+
+    def _check_broadcast_tasks(self, now):
+        current_date_str = now.strftime("%Y-%m-%d")
+        current_time_str = now.strftime("%H:%M:%S")
+
+        is_holiday_now = self._is_in_holiday(now)
+
+        tasks_to_play = []
+
+        for task in self.tasks:
+            if task.get('status') != '启用': continue
+            try:
+                start, end = [d.strip() for d in task.get('date_range', '').split('~')]
+                if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()): continue
+            except (ValueError, IndexError): pass
+            schedule = task.get('weekday', '每周:1234567')
+            run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
+            if not run_today: continue
+
+            for trigger_time in [t.strip() for t in task.get('time', '').split(',')]:
+                if trigger_time == current_time_str and task.get('last_run', {}).get(trigger_time) != current_date_str:
+
+                    if is_holiday_now:
+                        self.log(f"任务 '{task['name']}' 因处于节假日期间而被跳过。")
+                        continue
+
+                    tasks_to_play.append((task, trigger_time))
+
+        if not tasks_to_play:
+            return
+
+        ontime_tasks = [t for t in tasks_to_play if t[0].get('delay') == 'ontime']
+        delay_tasks = [t for t in tasks_to_play if t[0].get('delay') != 'ontime']
+
+        if ontime_tasks:
+            task, trigger_time = ontime_tasks[0]
+            self.log(f"准时任务 '{task['name']}' 已到时间，执行高优先级中断。")
+            self.playback_command_queue.put(('PLAY_INTERRUPT', (task, trigger_time)))
+
+        for task, trigger_time in delay_tasks:
+            self.log(f"延时任务 '{task['name']}' 已到时间，加入播放队列。")
+            self.playback_command_queue.put(('PLAY', (task, trigger_time)))
+
+    def _check_power_tasks(self, now):
+        current_date_str = now.strftime("%Y-%m-%d")
+        current_time_str = now.strftime("%H:%M:%S")
+        if self.settings.get("last_power_action_date") == current_date_str: return
+        action_to_take = None
+        if self.settings.get("daily_shutdown_enabled") and current_time_str == self.settings.get("daily_shutdown_time"): action_to_take = ("shutdown /s /t 60", "每日定时关机")
+        if not action_to_take and self.settings.get("weekly_shutdown_enabled"):
+            days = self.settings.get("weekly_shutdown_days", "").replace("每周:", "")
+            if str(now.isoweekday()) in days and current_time_str == self.settings.get("weekly_shutdown_time"): action_to_take = ("shutdown /s /t 60", "每周定时关机")
+        if not action_to_take and self.settings.get("weekly_reboot_enabled"):
+            days = self.settings.get("weekly_reboot_days", "").replace("每周:", "")
+            if str(now.isoweekday()) in days and current_time_str == self.settings.get("weekly_reboot_time"): action_to_take = ("shutdown /r /t 60", "每周定时重启")
+        if action_to_take:
+            command, reason = action_to_take
+            self.log(f"执行系统电源任务: {reason}。系统将在60秒后操作。")
+            self.settings["last_power_action_date"] = current_date_str
+            self.save_settings(); os.system(command)
+
+    def _playback_worker(self):
+        is_playing = False
+        while self.running:
+            try:
+                command, data = self.playback_command_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            if command == 'PLAY_INTERRUPT':
+                is_playing = True
+                while not self.playback_command_queue.empty():
+                    try: self.playback_command_queue.get_nowait()
+                    except queue.Empty: break
+                self._execute_broadcast(data[0], data[1])
+                is_playing = False
+
+            elif command == 'PLAY':
+                if not is_playing:
+                    is_playing = True
+                    self._execute_broadcast(data[0], data[1])
+                    is_playing = False
+
+            elif command == 'PLAY_CHIME':
+                if not AUDIO_AVAILABLE: continue
+                chime_path = data
+                was_playing = pygame.mixer.music.get_busy()
+                if was_playing:
+                    pygame.mixer.music.pause()
+                    self.log("整点报时，暂停当前播放...")
+
+                try:
+                    chime_sound = pygame.mixer.Sound(chime_path)
+                    chime_sound.set_volume(1.0)
+                    chime_channel = pygame.mixer.find_channel(True) # 找一个空闲通道
+                    chime_channel.play(chime_sound)
+                    while chime_channel and chime_channel.get_busy():
+                        time.sleep(0.1)
+                except Exception as e:
+                    self.log(f"播放整点报时失败: {e}")
+
+                if was_playing:
+                    pygame.mixer.music.unpause()
+                    self.log("报时结束，恢复播放。")
+
+            elif command == 'STOP':
+                is_playing = False
+                if AUDIO_AVAILABLE:
+                    pygame.mixer.music.stop()
+                    pygame.mixer.stop()
+
+                if VLC_AVAILABLE and self.vlc_player:
+                    self.vlc_player.stop()
+                if self.video_stop_event:
+                    self.video_stop_event.set()
+
+                self.log("STOP 命令已处理，所有播放已停止。")
+                self.update_playing_text("等待播放...")
+                self.status_labels[2].config(text="播放状态: 待机")
+                while not self.playback_command_queue.empty():
+                    try: self.playback_command_queue.get_nowait()
+                    except queue.Empty: break
+
+    def _execute_broadcast(self, task, trigger_time):
+        self.update_playing_text(f"[{task['name']}] 正在准备播放...")
+        self.status_labels[2].config(text="播放状态: 播放中")
+
+        if trigger_time != "manual_play":
+            task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
+            self.save_tasks()
+
+        visual_thread = None
+        stop_visual_event = None
+        task_type = task.get('type')
+
+        if task_type == 'video':
+            self.video_stop_event = threading.Event()
+
+        if task.get('bg_image_enabled') and task.get('bg_image_path') and os.path.isdir(task.get('bg_image_path')):
+            if not IMAGE_AVAILABLE:
+                self.log("警告：背景图片功能已启用，但 Pillow 库未安装，无法显示图片。")
+            else:
+                total_duration = self._get_task_total_duration(task)
+                if total_duration < 10:
+                    self.log(f"任务 '{task['name']}' 总时长 ({total_duration:.1f}s) 小于10秒，不加载背景图片。")
+                else:
+                    stop_visual_event = threading.Event()
+                    self.current_stop_visual_event = stop_visual_event
+                    visual_thread = threading.Thread(target=self._visual_worker, args=(task, stop_visual_event), daemon=True)
+                    visual_thread.start()
+
+        try:
+            if task_type == 'audio':
+                self.log(f"开始音频任务: {task['name']}")
+                self._play_audio_task_internal(task)
+            elif task_type == 'voice':
+                self.log(f"开始语音任务: {task['name']} (共 {task.get('repeat', 1)} 遍)")
+                self._play_voice_task_internal(task)
+            elif task_type == 'video':
+                self.log(f"开始视频任务: {task['name']}")
+                self._play_video_task_internal(task, self.video_stop_event)
+
+        except Exception as e:
+            self.log(f"播放任务 '{task['name']}' 时发生严重错误: {e}")
+        finally:
+            if stop_visual_event:
+                stop_visual_event.set()
+                self.current_stop_visual_event = None
+            if visual_thread:
+                visual_thread.join(timeout=1.5)
+
+            if AUDIO_AVAILABLE:
+                pygame.mixer.music.stop()
+                pygame.mixer.stop()
+
+            if VLC_AVAILABLE and self.vlc_player:
+                self.vlc_player.stop()
+                self.vlc_player = None
+            
+            if self.video_stop_event:
+                self.video_stop_event = None
+
+            self.update_playing_text("等待播放...")
+            self.status_labels[2].config(text="播放状态: 待机")
+            self.log(f"任务 '{task['name']}' 播放结束。")
+
+    def _is_interrupted(self):
+        try:
+            command_tuple = self.playback_command_queue.get_nowait()
+            command = command_tuple[0]
+            if command in ['STOP', 'PLAY_INTERRUPT']:
+                self.playback_command_queue.put(command_tuple)
+                return True
+            else:
+                self.playback_command_queue.put(command_tuple)
+        except queue.Empty:
+            return False
+        return False
+
+    def _play_audio_task_internal(self, task):
+        if not AUDIO_AVAILABLE:
+            self.log("错误: Pygame未初始化，无法播放音频。")
+            return
+
+        interval_type = task.get('interval_type', 'first')
+        duration_seconds = int(task.get('interval_seconds', 0))
+        repeat_count = int(task.get('interval_first', 1))
+
+        playlist = []
+        if task.get('audio_type') == 'single':
+            if os.path.exists(task['content']): playlist = [task['content']] * repeat_count
+        else:
+            folder_path = task['content']
+            if os.path.isdir(folder_path):
+                all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
+                if task.get('play_order') == 'random': random.shuffle(all_files)
+                playlist = all_files[:repeat_count]
+
+        if not playlist:
+            self.log(f"错误: 音频列表为空，任务 '{task['name']}' 无法播放。")
+            return
+
+        start_time = time.time()
+        for i, audio_path in enumerate(playlist):
+            if self._is_interrupted():
+                self.log(f"任务 '{task['name']}' 被新指令中断。")
+                return
+
+            if interval_type == 'first':
+                status_msg = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)} ({i+1}/{len(playlist)})"
+                self.update_playing_text(status_msg)
+
+            self.log(f"正在播放: {os.path.basename(audio_path)} ({i+1}/{len(playlist)})")
+
+            try:
+                pygame.mixer.music.load(audio_path)
+                pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
+                pygame.mixer.music.play()
+
+                last_text_update_time = 0
+
+                while pygame.mixer.music.get_busy():
+                    if self._is_interrupted():
+                        pygame.mixer.music.stop()
+                        return
+
+                    if interval_type == 'seconds':
+                        now = time.time()
+                        elapsed = now - start_time
+                        if elapsed >= duration_seconds:
+                            pygame.mixer.music.stop()
+                            self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
+                            return
+                        if now - last_text_update_time >= 1.0:
+                            remaining_seconds = int(duration_seconds - elapsed)
+                            status_msg = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)} (剩余 {remaining_seconds} 秒)"
+                            self.update_playing_text(status_msg)
+                            last_text_update_time = now
+
+                    time.sleep(0.1)
+
+                if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
+                    return
+            except Exception as e:
+                self.log(f"播放音频文件 {os.path.basename(audio_path)} 失败: {e}")
+                continue
+
+    def _play_voice_task_internal(self, task):
+        if not AUDIO_AVAILABLE:
+            self.log("错误: Pygame未初始化，无法播放语音。")
+            return
+
+        if task.get('prompt', 0):
+            if self._is_interrupted(): return
+            prompt_file = task.get('prompt_file', '')
+            prompt_path = os.path.join(PROMPT_FOLDER, prompt_file)
+            if os.path.exists(prompt_path):
+                try:
+                    self.log(f"播放提示音: {prompt_file}")
+                    sound = pygame.mixer.Sound(prompt_path)
+                    sound.set_volume(float(task.get('prompt_volume', 80)) / 100.0)
+                    channel = pygame.mixer.find_channel(True)
+                    channel.play(sound)
+                    while channel and channel.get_busy():
+                        if self._is_interrupted(): return
+                        time.sleep(0.05)
+                except Exception as e:
+                    self.log(f"播放提示音失败: {e}")
+            else:
+                self.log(f"警告: 提示音文件不存在 - {prompt_path}")
+
+        if task.get('bgm', 0):
+            if self._is_interrupted(): return
+            bgm_file = task.get('bgm_file', '')
+            bgm_path = os.path.join(BGM_FOLDER, bgm_file)
+            if os.path.exists(bgm_path):
+                try:
+                    self.log(f"播放背景音乐: {bgm_file}")
+                    pygame.mixer.music.load(bgm_path)
+                    pygame.mixer.music.set_volume(float(task.get('bgm_volume', 40)) / 100.0)
+                    pygame.mixer.music.play(-1)
+                except Exception as e:
+                    self.log(f"播放背景音乐失败: {e}")
+            else:
+                self.log(f"警告: 背景音乐文件不存在 - {bgm_path}")
+
+        speech_path = task.get('content', '')
+        if not os.path.exists(speech_path):
+            self.log(f"错误: 语音文件不存在 - {speech_path}")
+            return
+
+        try:
+            speech_sound = pygame.mixer.Sound(speech_path)
+            speech_sound.set_volume(float(task.get('volume', 80)) / 100.0)
+            repeat_count = int(task.get('repeat', 1))
+
+            speech_channel = pygame.mixer.find_channel(True)
+
+            for i in range(repeat_count):
+                if self._is_interrupted(): return
+
+                self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
+                self.update_playing_text(f"[{task['name']}] 正在播报第 {i+1}/{repeat_count} 遍...")
+
+                speech_channel.play(speech_sound)
+                while speech_channel and speech_channel.get_busy():
+                    if self._is_interrupted():
+                        speech_channel.stop()
+                        return
+                    time.sleep(0.1)
+
+                if i < repeat_count - 1:
+                    time.sleep(0.5)
+        except Exception as e:
+            self.log(f"播放语音内容失败: {e}")
+
+    def _play_video_task_internal(self, task, stop_event):
+        if not VLC_AVAILABLE:
+            self.log("错误: python-vlc 库未安装或VLC播放器未找到，无法播放视频。")
+            return
+
+        interval_type = task.get('interval_type', 'first')
+        duration_seconds = int(task.get('interval_seconds', 0))
+        repeat_count = int(task.get('interval_first', 1))
+
+        playlist = []
+        if task.get('video_type') == 'single':
+            if os.path.exists(task['content']):
+                playlist = [task['content']] * repeat_count
+        else:
+            folder_path = task['content']
+            if os.path.isdir(folder_path):
+                video_extensions = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv')
+                all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(video_extensions)]
+                if task.get('play_order') == 'random':
+                    random.shuffle(all_files)
+                playlist = all_files[:repeat_count]
+
+        if not playlist:
+            self.log(f"错误: 视频列表为空，任务 '{task['name']}' 无法播放。")
+            return
+
+        try:
+            if AUDIO_AVAILABLE:
+                pygame.mixer.music.stop()
+                pygame.mixer.stop()
+
+            instance = vlc.Instance()
+            self.vlc_player = instance.media_player_new()
+
+            self.root.after(0, self._create_video_window, task)
+            time.sleep(0.5)
+
+            if not (self.video_window and self.video_window.winfo_exists()):
+                self.log("错误: 视频窗口创建失败，无法播放。")
+                return
+
+            self.vlc_player.set_hwnd(self.video_window.winfo_id())
+
+            start_time = time.time()
+            for i, video_path in enumerate(playlist):
+                if self._is_interrupted() or stop_event.is_set():
+                    self.log(f"任务 '{task['name']}' 在播放列表循环中被中断。")
+                    break
+
+                media = instance.media_new(video_path)
+                self.vlc_player.set_media(media)
+                self.vlc_player.play()
+
+                rate_input = task.get('playback_rate', '1.0').strip()
+                rate_match = re.match(r"(\d+(\.\d+)?)", rate_input)
+                rate_val = float(rate_match.group(1)) if rate_match else 1.0
+                self.vlc_player.set_rate(rate_val)
+                self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
+                self.log(f"设置播放速率为: {rate_val}")
+
+                time.sleep(0.5)
+
+                last_text_update_time = 0
+                while self.vlc_player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
+                    if self._is_interrupted() or stop_event.is_set():
+                        self.log(f"视频任务 '{task['name']}' 在播放期间被中断。")
+                        self.vlc_player.stop()
+                        break
+
+                    now = time.time()
+                    if interval_type == 'seconds':
+                        elapsed = now - start_time
+                        if elapsed >= duration_seconds:
+                            self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
+                            self.vlc_player.stop()
+                            break
+
+                        if now - last_text_update_time >= 1.0:
+                            remaining_seconds = int(duration_seconds - elapsed)
+                            status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
+                            self.update_playing_text(f"[{task['name']}] {os.path.basename(video_path)} ({status_text} - 剩余 {remaining_seconds} 秒)")
+                            last_text_update_time = now
+                    else:
+                         if now - last_text_update_time >= 1.0:
+                            status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
+                            self.update_playing_text(f"[{task['name']}] {os.path.basename(video_path)} ({i+1}/{len(playlist)} - {status_text})")
+                            last_text_update_time = now
+
+                    time.sleep(0.2)
+
+                if (interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds) or stop_event.is_set():
+                    break
+
+        except Exception as e:
+            self.log(f"播放视频任务 '{task['name']}' 时发生错误: {e}")
+        finally:
+            if self.vlc_player:
+                self.vlc_player.stop()
+                self.vlc_player = None
+
+            self.root.after(0, self._destroy_video_window)
+            self.log(f"视频任务 '{task['name']}' 的播放逻辑结束。")
+
+    def _create_video_window(self, task):
+        if self.video_window and self.video_window.winfo_exists():
+            self.video_window.destroy()
+
+        self.video_window = ttk.Toplevel(self.root)
+        self.video_window.title(f"正在播放: {task['name']}")
+        self.video_window.configure(bg='black')
+
+        mode = task.get('playback_mode', 'fullscreen')
+        if mode == 'fullscreen':
+            self.video_window.attributes('-fullscreen', True)
+        else:
+            try:
+                w, h = map(int, task.get('resolution', '1024x768').split('x'))
+                x = (self.video_window.winfo_screenwidth() - w) // 2
+                y = (self.video_window.winfo_screenheight() - h) // 2
+                self.video_window.geometry(f'{w}x{h}+{x}+{y}')
+            except Exception as e:
+                self.log(f"设置视频分辨率失败: {e}, 使用默认尺寸。")
+                self.video_window.geometry('1024x768')
+
+        self.video_window.bind('<Escape>', self._handle_video_manual_stop)
+        self.video_window.bind('<space>', self._handle_video_space)
+        self.video_window.protocol("WM_DELETE_WINDOW", self._handle_video_manual_stop)
+        self.video_window.focus_force()
+
+    def _destroy_video_window(self):
+        if self.video_window and self.video_window.winfo_exists():
+            self.video_window.destroy()
+        self.video_window = None
+
+    def _handle_video_manual_stop(self, event=None):
+        self.log("用户手动关闭视频窗口，将停止整个视频任务。")
+        if self.video_stop_event:
+            self.video_stop_event.set()
+        if self.vlc_player:
+            self.vlc_player.stop()
+
+    def _handle_video_space(self, event=None):
+        if self.vlc_player:
+            self.vlc_player.pause()
+            status = "暂停" if self.vlc_player.get_state() == vlc.State.Paused else "播放"
+            self.log(f"空格键按下，视频已{status}。")
+
+    def _get_task_total_duration(self, task):
+        if not AUDIO_AVAILABLE: return 0.0
+
+        total_duration = 0.0
+        try:
+            if task.get('type') == 'audio':
+                if task.get('interval_type') == 'seconds':
+                    return float(task.get('interval_seconds', 0))
+
+                repeat_count = int(task.get('interval_first', 1))
+                if task.get('audio_type') == 'single':
+                    if os.path.exists(task['content']):
+                        sound = pygame.mixer.Sound(task['content'])
+                        total_duration = sound.get_length() * repeat_count
+                else:
+                    folder_path = task['content']
+                    if os.path.isdir(folder_path):
+                        all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
+                        playlist = all_files[:repeat_count]
+                        for audio_path in playlist:
+                            if os.path.exists(audio_path):
+                                sound = pygame.mixer.Sound(audio_path)
+                                total_duration += sound.get_length()
+
+            elif task.get('type') == 'voice':
+                speech_path = task.get('content', '')
+                if os.path.exists(speech_path):
+                    repeat_count = int(task.get('repeat', 1))
+                    sound = pygame.mixer.Sound(speech_path)
+                    total_duration = sound.get_length() * repeat_count
+        except Exception as e:
+            self.log(f"计算任务 '{task['name']}' 时长失败: {e}")
+            return 0.0
+
+        return total_duration
+
+    def _visual_worker(self, task, stop_event):
+        try:
+            if stop_event.wait(timeout=3.0): return
+
+            image_path = task.get('bg_image_path')
+            image_order = task.get('bg_image_order', 'sequential')
+            interval = float(self.settings.get("bg_image_interval", 6))
+
+            valid_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff')
+            image_files = [os.path.join(image_path, f) for f in os.listdir(image_path) if f.lower().endswith(valid_extensions)]
+
+            if not image_files:
+                self.log(f"背景图片文件夹 '{os.path.basename(image_path)}' 中没有找到有效的图片。")
+                return
+
+            if image_order == 'random':
+                random.shuffle(image_files)
+
+            self.root.after(0, self._setup_fullscreen_display)
+            time.sleep(0.5)
+
+            img_index = 0
+            previous_image_path = None
+            while not stop_event.is_set():
+                if not self.fullscreen_window:
+                    break
+
+                current_image_path = image_files[img_index]
+                self.root.after(0, self._crossfade_to_image, previous_image_path, current_image_path)
+
+                previous_image_path = current_image_path
+                img_index = (img_index + 1) % len(image_files)
+
+                if stop_event.wait(timeout=interval):
+                    break
+
+        except Exception as e:
+            self.log(f"背景图片线程出错: {e}")
+
+        finally:
+            self.root.after(0, self._destroy_fullscreen_display)
+            self.log("背景图片显示已结束。")
+
+    def _setup_fullscreen_display(self):
+        if self.fullscreen_window:
+            self.fullscreen_window.destroy()
+
+        self.fullscreen_window = ttk.Toplevel(self.root)
+        self.fullscreen_window.attributes('-fullscreen', True)
+        self.fullscreen_window.attributes('-topmost', True)
+        self.fullscreen_window.configure(bg='black', cursor='none')
+        self.fullscreen_window.protocol("WM_DELETE_WINDOW", lambda: None)
+        self.fullscreen_window.bind("<Escape>", self._handle_esc_press)
+
+        self.fullscreen_label = ttk.Label(self.fullscreen_window, background='black')
+        self.fullscreen_label.pack(expand=True, fill=BOTH)
+
+    def _handle_esc_press(self, event=None):
+        self.log("用户按下ESC，手动退出背景图片显示。")
+        if hasattr(self, 'current_stop_visual_event') and self.current_stop_visual_event:
+            self.current_stop_visual_event.set()
+
+    def _crossfade_to_image(self, from_path, to_path):
+        if not self.fullscreen_window or not self.fullscreen_label:
+            return
+
+        TRANSITION_DURATION_MS = 800
+        STEPS = 20
+        DELAY_PER_STEP_MS = int(TRANSITION_DURATION_MS / STEPS)
+
+        try:
+            screen_width = self.fullscreen_window.winfo_width()
+            screen_height = self.fullscreen_window.winfo_height()
+
+            with Image.open(to_path) as img_to_pil:
+                img_to_pil.thumbnail((screen_width, screen_height), Image.Resampling.LANCZOS)
+                img_to_rgba = img_to_pil.convert('RGBA')
+
+            if from_path is None:
+                self.image_tk_ref = ImageTk.PhotoImage(img_to_rgba)
+                self.fullscreen_label.config(image=self.image_tk_ref)
+                return
+
+            with Image.open(from_path) as img_from_pil:
+                img_from_pil.thumbnail((screen_width, screen_height), Image.Resampling.LANCZOS)
+                img_from_rgba = img_from_pil.convert('RGBA')
+
+            if img_from_rgba.size != img_to_rgba.size:
+                 img_from_rgba = img_from_rgba.resize(img_to_rgba.size, Image.Resampling.LANCZOS)
+
+        except Exception as e:
+            self.log(f"加载过渡图片失败: {e}")
+            return
+
+        def animate_step(step):
+            if not self.fullscreen_window: return
+
+            alpha = step / STEPS
+            blended_img = Image.blend(img_from_rgba, img_to_rgba, alpha)
+
+            self.image_tk_ref = ImageTk.PhotoImage(blended_img)
+            self.fullscreen_label.config(image=self.image_tk_ref)
+
+            if step < STEPS:
+                self.root.after(DELAY_PER_STEP_MS, animate_step, step + 1)
+
+        animate_step(0)
+
+
+    def _destroy_fullscreen_display(self):
+        if self.fullscreen_window:
+            self.fullscreen_window.destroy()
+            self.fullscreen_window = None
+            self.fullscreen_label = None
+            self.image_tk_ref = None
+
+    def log(self, message): self.root.after(0, lambda: self._log_threadsafe(message))
+    def _log_threadsafe(self, message):
+        if hasattr(self, 'log_text') and self.log_text.winfo_exists():
+            self.log_text.config(state='normal')
+            self.log_text.insert(END, f"{datetime.now().strftime('%H:%M:%S')} -> {message}\n")
+            self.log_text.see(END); self.log_text.config(state='disabled')
+
+    def update_playing_text(self, message): self.root.after(0, lambda: self._update_playing_text_threadsafe(message))
+
+    def _update_playing_text_threadsafe(self, message):
+        if hasattr(self, 'playing_label') and self.playing_label.winfo_exists():
+            self.playing_label.config(text=message)
+
+    def save_tasks(self):
+        try:
+            with open(TASK_FILE, 'w', encoding='utf-8') as f: json.dump(self.tasks, f, ensure_ascii=False, indent=2)
+        except Exception as e: self.log(f"保存任务失败: {e}")
+
+    def load_tasks(self):
+        if not os.path.exists(TASK_FILE): return
+        try:
+            with open(TASK_FILE, 'r', encoding='utf-8') as f: self.tasks = json.load(f)
+            migrated = False
+            for task in self.tasks:
+                if 'delay' not in task: task['delay'] = 'delay' if task.get('type') == 'voice' else 'ontime'; migrated = True
+                if not isinstance(task.get('last_run'), dict): task['last_run'] = {}; migrated = True
+                if task.get('type') == 'voice' and 'source_text' not in task:
+                    task['source_text'] = task.get('content', '')
+                    task['wav_filename'] = 'needs_regeneration'
+                    migrated = True
+
+            if migrated: self.log("旧版任务数据已迁移，部分语音节目首次播放前可能需要重新编辑保存。"); self.save_tasks()
+            self.update_task_list(); self.log(f"已加载 {len(self.tasks)} 个节目")
+        except Exception as e: self.log(f"加载任务失败: {e}")
+
+    def load_settings(self):
+        defaults = {
+            "app_font": "Microsoft YaHei",
+            "autostart": False, "start_minimized": False, "lock_on_start": False,
+            "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00",
+            "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00",
+            "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00",
+            "last_power_action_date": "",
+            "time_chime_enabled": False, "time_chime_voice": "",
+            "time_chime_speed": "0", "time_chime_pitch": "0",
+            "bg_image_interval": 6
+        }
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, 'r', encoding='utf-8') as f: self.settings = json.load(f)
+                for key, value in defaults.items(): self.settings.setdefault(key, value)
+            except Exception as e:
+                self.log(f"加载设置失败: {e}, 将使用默认设置。")
+                self.settings = defaults
+        else:
+            self.settings = defaults
+        self.log("系统设置已加载。")
+
+    def save_settings(self):
+        if hasattr(self, 'autostart_var'):
+            try:
+                interval = int(self.bg_image_interval_var.get())
+                if not (5 <= interval <= 60):
+                    interval = self.settings.get("bg_image_interval", 6)
+            except:
+                interval = self.settings.get("bg_image_interval", 6)
+
+            self.settings.update({
+                "autostart": self.autostart_var.get(),
+                "start_minimized": self.start_minimized_var.get(),
+                "lock_on_start": self.lock_on_start_var.get(),
+                "daily_shutdown_enabled": self.daily_shutdown_enabled_var.get(),
+                "daily_shutdown_time": self.daily_shutdown_time_var.get(),
+                "weekly_shutdown_enabled": self.weekly_shutdown_enabled_var.get(),
+                "weekly_shutdown_days": self.weekly_shutdown_days_var.get(),
+                "weekly_shutdown_time": self.weekly_shutdown_time_var.get(),
+                "weekly_reboot_enabled": self.weekly_reboot_enabled_var.get(),
+                "weekly_reboot_days": self.weekly_reboot_days_var.get(),
+                "weekly_reboot_time": self.weekly_reboot_time_var.get(),
+                "time_chime_enabled": self.time_chime_enabled_var.get(),
+                "time_chime_voice": self.time_chime_voice_var.get(),
+                "time_chime_speed": self.time_chime_speed_var.get(),
+                "time_chime_pitch": self.time_chime_pitch_var.get(),
+                "bg_image_interval": interval
+            })
+        try:
+            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(self.settings, f, ensure_ascii=False, indent=2)
+        except Exception as e: self.log(f"保存设置失败: {e}")
+
+    def _handle_autostart_setting(self):
+        self.save_settings()
+        enable = self.autostart_var.get()
+        if not WIN32_AVAILABLE:
+            self.log("错误: 自动启动功能需要 pywin32 库。")
+            if enable: self.autostart_var.set(False); self.save_settings()
+            messagebox.showerror("功能受限", "未安装 pywin32 库，无法设置开机启动。")
+            return
+        shortcut_path = os.path.join(os.environ['APPDATA'], 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', " 创翔多功能定时播音旗舰版.lnk")
+        target_path = sys.executable
+        try:
+            if enable:
+                pythoncom.CoInitialize()
+                shell = win32com.client.Dispatch("WScript.Shell")
+                shortcut = shell.CreateShortCut(shortcut_path)
+                shortcut.Targetpath = target_path
+                shortcut.WorkingDirectory = application_path
+                shortcut.IconLocation = ICON_FILE if os.path.exists(ICON_FILE) else target_path
+                shortcut.save()
+                pythoncom.CoUninitialize()
+                self.log("已设置开机自动启动。")
+            else:
+                if os.path.exists(shortcut_path): os.remove(shortcut_path); self.log("已取消开机自动启动。")
+        except Exception as e:
+            self.log(f"错误: 操作自动启动设置失败 - {e}")
+            self.autostart_var.set(not enable); self.save_settings()
+            messagebox.showerror("错误", f"操作失败: {e}")
+
+    def center_window(self, win, width, height):
+        x = (win.winfo_screenwidth() - width) // 2
+        y = (win.winfo_screenheight() - height) // 2
+        win.geometry(f'{width}x{height}+{x}+{y}')
+
+    def _normalize_time_string(self, time_str):
+        try:
+            parts = str(time_str).split(':')
+            if len(parts) == 2: parts.append('00')
+            if len(parts) != 3: return None
+            h, m, s = int(parts[0]), int(parts[1]), int(parts[2])
+            if not (0 <= h <= 23 and 0 <= m <= 59 and 0 <= s <= 59): return None
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        except (ValueError, IndexError): return None
+
+    def _normalize_multiple_times_string(self, times_input_str):
+        if not times_input_str.strip(): return True, ""
+        original_times = [t.strip() for t in times_input_str.split(',') if t.strip()]
+        normalized_times, invalid_times = [], []
+        for t in original_times:
+            normalized = self._normalize_time_string(t)
+            if normalized: normalized_times.append(normalized)
+            else: invalid_times.append(t)
+        if invalid_times: return False, f"以下时间格式无效: {', '.join(invalid_times)}"
+        return True, ", ".join(sorted(list(set(normalized_times))))
+
+    def _normalize_date_string(self, date_str):
+        try: return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d")
+        except ValueError: return None
+
+    def _normalize_date_range_string(self, date_range_input_str):
+        if not date_range_input_str.strip(): return True, ""
+        try:
+            start_str, end_str = [d.strip() for d in date_range_input_str.split('~')]
+            norm_start, norm_end = self._normalize_date_string(start_str), self._normalize_date_string(end_str)
+            if norm_start and norm_end: return True, f"{norm_start} ~ {norm_end}"
+            invalid_parts = [p for p, n in [(start_str, norm_start), (end_str, norm_end)] if not n]
+            return False, f"以下日期格式无效 (应为 YYYY-MM-DD): {', '.join(invalid_parts)}"
+        except (ValueError, IndexError): return False, "日期范围格式无效，应为 'YYYY-MM-DD ~ YYYY-MM-DD'"
+
+    def show_quit_dialog(self):
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("确认")
+        dialog.geometry("380x170")
+        dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
+        self.center_window(dialog, 380, 170)
+        ttk.Label(dialog, text="您想要如何操作？", font=self.font_12).pack(pady=20)
+        btn_frame = ttk.Frame(dialog); btn_frame.pack(pady=10)
+        ttk.Button(btn_frame, text="退出程序", command=lambda: [dialog.destroy(), self.quit_app()], bootstyle="danger").pack(side=LEFT, padx=10)
+        if TRAY_AVAILABLE: ttk.Button(btn_frame, text="最小化到托盘", command=lambda: [dialog.destroy(), self.hide_to_tray()], bootstyle="primary-outline").pack(side=LEFT, padx=10)
+        ttk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10)
+
+    def hide_to_tray(self):
+        if not TRAY_AVAILABLE: messagebox.showwarning("功能不可用", "pystray 或 Pillow 库未安装，无法最小化到托盘。"); return
+        self.root.withdraw()
+        self.log("程序已最小化到系统托盘。")
+
+    def show_from_tray(self, icon, item):
+        self.root.after(0, self.root.deiconify)
+        self.log("程序已从托盘恢复。")
+
+    def quit_app(self, icon=None, item=None):
+        if self.tray_icon: self.tray_icon.stop()
+        self.running = False
+        self.playback_command_queue.put(('STOP', None))
+
+        self.save_tasks()
+        self.save_settings()
+        self.save_holidays()
+        self.save_todos()
+
+        if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
+        self.root.destroy()
+        sys.exit()
+
+    def setup_tray_icon(self):
+        try: image = Image.open(ICON_FILE)
+        except Exception as e: image = Image.new('RGB', (64, 64), 'white'); print(f"警告: 未找到或无法加载图标文件 '{ICON_FILE}': {e}")
+
+        menu = (
+            item('显示', self.show_from_tray, default=True),
+            item('退出', self.quit_app)
+        )
+
+        self.tray_icon = Icon("boyin", image, " 创翔多功能定时播音旗舰版", menu)
+
+    def start_tray_icon_thread(self):
+        if TRAY_AVAILABLE and self.tray_icon is None:
+            self.setup_tray_icon()
+            threading.Thread(target=self.tray_icon.run, daemon=True).start()
+            self.log("系统托盘图标已启动。")
+
+    def _enable_drag_selection(self, tree):
+
+        def on_press(event):
+            self.drag_start_item = tree.identify_row(event.y)
+
+        def on_drag(event):
+            if not self.drag_start_item:
+                return
+
+            current_item = tree.identify_row(event.y)
+            if not current_item:
+                return
+
+            start_index = tree.index(self.drag_start_item)
+            current_index = tree.index(current_item)
+
+            min_idx = min(start_index, current_index)
+            max_idx = max(start_index, current_index)
+
+            all_items = tree.get_children('')
+            items_to_select = all_items[min_idx : max_idx + 1]
+
+            tree.selection_set(items_to_select)
+
+        def on_release(event):
+            self.drag_start_item = None
+
+        tree.bind("<ButtonPress-1>", on_press, True)
+        tree.bind("<B1-Motion>", on_drag, True)
+        tree.bind("<ButtonRelease-1>", on_release, True)
+
+    def create_holiday_page(self):
+        page_frame = ttk.Frame(self.page_container, padding=10)
+
+        top_frame = ttk.Frame(page_frame)
+        top_frame.pack(fill=X, pady=(0, 10))
+        title_label = ttk.Label(top_frame, text="节假日管理", font=self.font_14_bold, bootstyle="primary")
+        title_label.pack(side=LEFT)
+
+        desc_label = ttk.Label(page_frame, text="在节假日期间，所有“定时广播”、“整点报时”和“待办事项”都将自动暂停，节假日结束后自动恢复。",
+                              font=self.font_11, bootstyle="secondary")
+        desc_label.pack(anchor='w', pady=(0, 10))
+
+        content_frame = ttk.Frame(page_frame)
+        content_frame.pack(fill=BOTH, expand=True, pady=5)
+
+        table_frame = ttk.Frame(content_frame)
+        table_frame.pack(side=LEFT, fill=BOTH, expand=True)
+
+        columns = ('名称', '状态', '开始时间', '结束时间')
+        self.holiday_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended', bootstyle="primary")
+
+        self.holiday_tree.heading('名称', text='节假日名称')
+        self.holiday_tree.column('名称', width=250, anchor='w')
+        self.holiday_tree.heading('状态', text='状态')
+        self.holiday_tree.column('状态', width=100, anchor='center')
+        self.holiday_tree.heading('开始时间', text='开始时间')
+        self.holiday_tree.column('开始时间', width=200, anchor='center')
+        self.holiday_tree.heading('结束时间', text='结束时间')
+        self.holiday_tree.column('结束时间', width=200, anchor='center')
+
+        self.holiday_tree.pack(side=LEFT, fill=BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(table_frame, orient=VERTICAL, command=self.holiday_tree.yview, bootstyle="round")
+        scrollbar.pack(side=RIGHT, fill=Y)
+        self.holiday_tree.configure(yscrollcommand=scrollbar.set)
+
+        self.holiday_tree.bind("<Double-1>", lambda e: self.edit_holiday())
+        self.holiday_tree.bind("<Button-3>", self.show_holiday_context_menu)
+        self._enable_drag_selection(self.holiday_tree)
+
+        action_frame = ttk.Frame(content_frame, padding=(10, 0))
+        action_frame.pack(side=RIGHT, fill=Y)
+
+        buttons_config = [
+            ("添加", self.add_holiday, "primary"), 
+            ("修改", self.edit_holiday, "info"), 
+            ("删除", self.delete_holiday, "danger"),
+            (None, None, None), # Separator
+            ("全部启用", self.enable_all_holidays, "success-outline"), 
+            ("全部禁用", self.disable_all_holidays, "warning-outline"),
+            (None, None, None),
+            ("导入列表", self.import_holidays, "secondary-outline"), 
+            ("导出列表", self.export_holidays, "secondary-outline"), 
+            ("清空列表", self.clear_all_holidays, "danger-outline")
+        ]
+
+        for text, cmd, style in buttons_config:
+            if text is None:
+                ttk.Separator(action_frame, orient=HORIZONTAL).pack(fill=X, pady=10)
+                continue
+            ttk.Button(action_frame, text=text, command=cmd, bootstyle=style).pack(pady=5, fill=X)
+
+        self.update_holiday_list()
+        return page_frame
+
+    def save_holidays(self):
+        try:
+            with open(HOLIDAY_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.holidays, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log(f"保存节假日失败: {e}")
+
+    def load_holidays(self):
+        if not os.path.exists(HOLIDAY_FILE):
+            return
+        try:
+            with open(HOLIDAY_FILE, 'r', encoding='utf-8') as f:
+                self.holidays = json.load(f)
+            self.log(f"已加载 {len(self.holidays)} 个节假日设置")
+            if hasattr(self, 'holiday_tree'):
+                self.update_holiday_list()
+        except Exception as e:
+            self.log(f"加载节假日失败: {e}")
+            self.holidays = []
+
+    def update_holiday_list(self):
+        if not hasattr(self, 'holiday_tree') or not self.holiday_tree.winfo_exists(): return
+        selection = self.holiday_tree.selection()
+        self.holiday_tree.delete(*self.holiday_tree.get_children())
+        for holiday in self.holidays:
+            self.holiday_tree.insert('', END, values=(
+                holiday.get('name', ''),
+                holiday.get('status', '启用'),
+                holiday.get('start_datetime', ''),
+                holiday.get('end_datetime', '')
+            ))
+        if selection:
+            try:
+                valid_selection = [s for s in selection if self.holiday_tree.exists(s)]
+                if valid_selection: self.holiday_tree.selection_set(valid_selection)
+            except tk.TclError:
+                pass
+
+    def add_holiday(self):
+        self.open_holiday_dialog()
+
+    def edit_holiday(self):
+        selection = self.holiday_tree.selection()
+        if not selection:
+            messagebox.showwarning("警告", "请先选择要修改的节假日")
+            return
+        index = self.holiday_tree.index(selection[0])
+        holiday_to_edit = self.holidays[index]
+        self.open_holiday_dialog(holiday_to_edit=holiday_to_edit, index=index)
+
+    def delete_holiday(self):
+        selections = self.holiday_tree.selection()
+        if not selections:
+            messagebox.showwarning("警告", "请先选择要删除的节假日")
+            return
+        if messagebox.askyesno("确认", f"确定要删除选中的 {len(selections)} 个节假日吗？"):
+            indices = sorted([self.holiday_tree.index(s) for s in selections], reverse=True)
+            for index in indices:
+                self.holidays.pop(index)
+            self.update_holiday_list()
+            self.save_holidays()
+
+    def _set_holiday_status(self, status):
+        selection = self.holiday_tree.selection()
+        if not selection:
+            messagebox.showwarning("警告", f"请先选择要{status}的节假日")
+            return
+        for item_id in selection:
+            index = self.holiday_tree.index(item_id)
+            self.holidays[index]['status'] = status
+        self.update_holiday_list()
+        self.save_holidays()
+
+    def open_holiday_dialog(self, holiday_to_edit=None, index=None):
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("修改节假日" if holiday_to_edit else "添加节假日")
+        dialog.geometry("500x300"); dialog.resizable(False, False)
+        dialog.transient(self.root); dialog.grab_set()
+        self.center_window(dialog, 500, 300)
+
+        main_frame = ttk.Frame(dialog, padding=20)
+        main_frame.pack(fill=BOTH, expand=True)
+
+        ttk.Label(main_frame, text="名称:").grid(row=0, column=0, sticky='w', pady=5)
+        name_entry = ttk.Entry(main_frame, font=self.font_11, width=40)
+        name_entry.grid(row=0, column=1, columnspan=2, sticky='ew', pady=5)
+
+        ttk.Label(main_frame, text="开始时间:").grid(row=1, column=0, sticky='w', pady=5)
+        start_date_entry = ttk.Entry(main_frame, font=self.font_11, width=15)
+        start_date_entry.grid(row=1, column=1, sticky='w', pady=5)
+        self._bind_mousewheel_to_entry(start_date_entry, self._handle_date_scroll)
+        start_time_entry = ttk.Entry(main_frame, font=self.font_11, width=15)
+        start_time_entry.grid(row=1, column=2, sticky='w', pady=5, padx=5)
+        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
+
+        ttk.Label(main_frame, text="结束时间:").grid(row=2, column=0, sticky='w', pady=5)
+        end_date_entry = ttk.Entry(main_frame, font=self.font_11, width=15)
+        end_date_entry.grid(row=2, column=1, sticky='w', pady=5)
+        self._bind_mousewheel_to_entry(end_date_entry, self._handle_date_scroll)
+        end_time_entry = ttk.Entry(main_frame, font=self.font_11, width=15)
+        end_time_entry.grid(row=2, column=2, sticky='w', pady=5, padx=5)
+        self._bind_mousewheel_to_entry(end_time_entry, self._handle_time_scroll)
+
+        ttk.Label(main_frame, text="格式: YYYY-MM-DD", font=self.font_9, bootstyle="secondary").grid(row=3, column=1, sticky='n')
+        ttk.Label(main_frame, text="格式: HH:MM:SS", font=self.font_9, bootstyle="secondary").grid(row=3, column=2, sticky='n')
+
+        if holiday_to_edit:
+            name_entry.insert(0, holiday_to_edit.get('name', ''))
+            start_dt_str = holiday_to_edit.get('start_datetime', ' ')
+            end_dt_str = holiday_to_edit.get('end_datetime', ' ')
+            start_date, start_time = start_dt_str.split(' ') if ' ' in start_dt_str else ('', '')
+            end_date, end_time = end_dt_str.split(' ') if ' ' in end_dt_str else ('', '')
+            start_date_entry.insert(0, start_date)
+            start_time_entry.insert(0, start_time)
+            end_date_entry.insert(0, end_date)
+            end_time_entry.insert(0, end_time)
+        else:
+            now = datetime.now()
+            start_date_entry.insert(0, now.strftime('%Y-%m-%d'))
+            start_time_entry.insert(0, "00:00:00")
+            end_date_entry.insert(0, now.strftime('%Y-%m-%d'))
+            end_time_entry.insert(0, "23:59:59")
+
+        def save():
+            name = name_entry.get().strip()
+            if not name:
+                messagebox.showerror("错误", "节假日名称不能为空", parent=dialog)
+                return
+
+            start_date = self._normalize_date_string(start_date_entry.get().strip())
+            start_time = self._normalize_time_string(start_time_entry.get().strip())
+            end_date = self._normalize_date_string(end_date_entry.get().strip())
+            end_time = self._normalize_time_string(end_time_entry.get().strip())
+
+            if not all([start_date, start_time, end_date, end_time]):
+                messagebox.showerror("格式错误", "日期或时间格式不正确。\n日期: YYYY-MM-DD, 时间: HH:MM:SS", parent=dialog)
+                return
+
+            try:
+                start_dt = datetime.strptime(f"{start_date} {start_time}", '%Y-%m-%d %H:%M:%S')
+                end_dt = datetime.strptime(f"{end_date} {end_time}", '%Y-%m-%d %H:%M:%S')
+                if start_dt >= end_dt:
+                    messagebox.showerror("逻辑错误", "开始时间必须早于结束时间", parent=dialog)
+                    return
+            except ValueError:
+                messagebox.showerror("错误", "无法解析日期时间", parent=dialog)
+                return
+
+            new_holiday_data = {
+                "name": name,
+                "start_datetime": start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+                "end_datetime": end_dt.strftime('%Y-%m-%d %H:%M:%S'),
+                "status": "启用" if not holiday_to_edit else holiday_to_edit.get('status', '启用')
+            }
+
+            if holiday_to_edit:
+                self.holidays[index] = new_holiday_data
+            else:
+                self.holidays.append(new_holiday_data)
+
+            self.update_holiday_list()
+            self.save_holidays()
+            dialog.destroy()
+
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=4, column=0, columnspan=3, pady=20)
+        ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
+        ttk.Button(button_frame, text="取消", command=dialog.destroy, width=10).pack(side=LEFT, padx=10)
+
+    def show_holiday_context_menu(self, event):
+        if self.is_locked: return
+        iid = self.holiday_tree.identify_row(event.y)
+        if not iid: return
+
+        context_menu = tk.Menu(self.root, tearoff=0, font=self.font_11)
+
+        self.holiday_tree.selection_set(iid)
+
+        context_menu.add_command(label="修改", command=self.edit_holiday)
+        context_menu.add_command(label="删除", command=self.delete_holiday)
+        context_menu.add_separator()
+        context_menu.add_command(label="置顶", command=self.move_holiday_to_top)
+        context_menu.add_command(label="上移", command=lambda: self.move_holiday(-1))
+        context_menu.add_command(label="下移", command=lambda: self.move_holiday(1))
+        context_menu.add_command(label="置末", command=self.move_holiday_to_bottom)
+        context_menu.add_separator()
+        context_menu.add_command(label="启用", command=lambda: self._set_holiday_status('启用'))
+        context_menu.add_command(label="禁用", command=lambda: self._set_holiday_status('禁用'))
+
+        context_menu.post(event.x_root, event.y_root)
+
+    def move_holiday(self, direction):
+        selection = self.holiday_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.holiday_tree.index(selection[0])
+        new_index = index + direction
+        if 0 <= new_index < len(self.holidays):
+            item = self.holidays.pop(index)
+            self.holidays.insert(new_index, item)
+            self.update_holiday_list(); self.save_holidays()
+            new_selection_id = self.holiday_tree.get_children()[new_index]
+            self.holiday_tree.selection_set(new_selection_id)
+            self.holiday_tree.focus(new_selection_id)
+
+    def move_holiday_to_top(self):
+        selection = self.holiday_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.holiday_tree.index(selection[0])
+        if index > 0:
+            item = self.holidays.pop(index)
+            self.holidays.insert(0, item)
+            self.update_holiday_list(); self.save_holidays()
+            new_selection_id = self.holiday_tree.get_children()[0]
+            self.holiday_tree.selection_set(new_selection_id)
+            self.holiday_tree.focus(new_selection_id)
+
+    def move_holiday_to_bottom(self):
+        selection = self.holiday_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.holiday_tree.index(selection[0])
+        if index < len(self.holidays) - 1:
+            item = self.holidays.pop(index)
+            self.holidays.append(item)
+            self.update_holiday_list(); self.save_holidays()
+            new_selection_id = self.holiday_tree.get_children()[-1]
+            self.holiday_tree.selection_set(new_selection_id)
+            self.holiday_tree.focus(new_selection_id)
+
+    def enable_all_holidays(self):
+        if not self.holidays: return
+        for holiday in self.holidays: holiday['status'] = '启用'
+        self.update_holiday_list(); self.save_holidays(); self.log("已启用全部节假日。")
+
+    def disable_all_holidays(self):
+        if not self.holidays: return
+        for holiday in self.holidays: holiday['status'] = '禁用'
+        self.update_holiday_list(); self.save_holidays(); self.log("已禁用全部节假日。")
+
+    def import_holidays(self):
+        filename = filedialog.askopenfilename(title="选择导入节假日文件", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
+        if filename:
+            try:
+                with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
+
+                if not isinstance(imported, list) or \
+                   (imported and (not isinstance(imported[0], dict) or 'start_datetime' not in imported[0] or 'end_datetime' not in imported[0])):
+                    messagebox.showerror("导入失败", "文件格式不正确，看起来不是一个有效的节假日备份文件。")
+                    self.log(f"尝试导入格式错误的节假日文件: {os.path.basename(filename)}")
+                    return
+
+                self.holidays.extend(imported)
+                self.update_holiday_list(); self.save_holidays()
+                self.log(f"已从 {os.path.basename(filename)} 导入 {len(imported)} 个节假日")
+            except Exception as e:
+                messagebox.showerror("错误", f"导入失败: {e}")
+
+    def export_holidays(self):
+        if not self.holidays:
+            messagebox.showwarning("警告", "没有节假日可以导出")
+            return
+        filename = filedialog.asksaveasfilename(title="导出节假日到...", defaultextension=".json",
+                                              initialfile="holidays_backup.json", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
+        if filename:
+            try:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(self.holidays, f, ensure_ascii=False, indent=2)
+                self.log(f"已导出 {len(self.holidays)} 个节假日到 {os.path.basename(filename)}")
+            except Exception as e:
+                messagebox.showerror("错误", f"导出失败: {e}")
+
+    def clear_all_holidays(self):
+        if not self.holidays:
+            return
+        if messagebox.askyesno("严重警告", "您确定要清空所有节假日吗？\n此操作不可恢复！"):
+            self.holidays.clear()
+            self.update_holiday_list()
+            self.save_holidays()
+            self.log("已清空所有节假日。")
+
+    def create_todo_page(self):
+        page_frame = ttk.Frame(self.page_container, padding=10)
+
+        top_frame = ttk.Frame(page_frame)
+        top_frame.pack(fill=X, pady=(0, 10))
+        title_label = ttk.Label(top_frame, text="待办事项", font=self.font_14_bold, bootstyle="primary")
+        title_label.pack(side=LEFT)
+
+        desc_label = ttk.Label(page_frame, text="到达提醒时间时会弹出窗口并播放提示音。提醒功能受节假日约束。", font=self.font_11, bootstyle="secondary")
+        desc_label.pack(anchor='w', pady=(0, 10))
+
+        content_frame = ttk.Frame(page_frame)
+        content_frame.pack(fill=BOTH, expand=True, pady=5)
+
+        table_frame = ttk.Frame(content_frame)
+        table_frame.pack(side=LEFT, fill=BOTH, expand=True)
+
+        columns = ('待办事项名称', '状态', '类型', '内容', '提醒规则')
+        self.todo_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended', bootstyle="primary")
+
+        self.todo_tree.heading('待办事项名称', text='待办事项名称')
+        self.todo_tree.column('待办事项名称', width=200, anchor='w')
+        self.todo_tree.heading('状态', text='状态')
+        self.todo_tree.column('状态', width=80, anchor='center')
+        self.todo_tree.heading('类型', text='类型')
+        self.todo_tree.column('类型', width=80, anchor='center')
+        self.todo_tree.heading('内容', text='内容')
+        self.todo_tree.column('内容', width=300, anchor='w')
+        self.todo_tree.heading('提醒规则', text='提醒规则')
+        self.todo_tree.column('提醒规则', width=250, anchor='center')
+
+        self.todo_tree.pack(side=LEFT, fill=BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(table_frame, orient=VERTICAL, command=self.todo_tree.yview, bootstyle="round")
+        scrollbar.pack(side=RIGHT, fill=Y)
+        self.todo_tree.configure(yscrollcommand=scrollbar.set)
+
+        self.todo_tree.bind("<Double-1>", lambda e: self.edit_todo())
+        self.todo_tree.bind("<Button-3>", self.show_todo_context_menu)
+        self._enable_drag_selection(self.todo_tree)
+
+        action_frame = ttk.Frame(content_frame, padding=(10, 0))
+        action_frame.pack(side=RIGHT, fill=Y)
+
+        buttons_config = [
+            ("添加", self.add_todo, "primary"), 
+            ("修改", self.edit_todo, "info"), 
+            ("删除", self.delete_todo, "danger"),
+            (None, None, None),
+            ("全部启用", self.enable_all_todos, "success-outline"), 
+            ("全部禁用", self.disable_all_todos, "warning-outline"),
+            (None, None, None),
+            ("导入事项", self.import_todos, "secondary-outline"), 
+            ("导出事项", self.export_todos, "secondary-outline"), 
+            ("清空事项", self.clear_all_todos, "danger-outline")
+        ]
+
+        for text, cmd, style in buttons_config:
+            if text is None:
+                ttk.Separator(action_frame, orient=HORIZONTAL).pack(fill=X, pady=10)
+                continue
+            ttk.Button(action_frame, text=text, command=cmd, bootstyle=style).pack(pady=5, fill=X)
+
+        self.update_todo_list()
+        return page_frame
+
+    def save_todos(self):
+        try:
+            with open(TODO_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.todos, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log(f"保存待办事项失败: {e}")
+
+    def load_todos(self):
+        if not os.path.exists(TODO_FILE):
+            return
+        try:
+            with open(TODO_FILE, 'r', encoding='utf-8') as f:
+                self.todos = json.load(f)
+
+            migrated = False
+            for todo in self.todos:
+                if 'type' not in todo:
+                    todo['type'] = 'onetime'
+                    migrated = True
+                if todo.get('status') == '待处理':
+                    todo['status'] = '启用'
+                    migrated = True
+
+            if migrated:
+                self.log("检测到旧版或异常状态的待办事项数据，已自动修复。")
+                self.save_todos()
+
+            self.log(f"已加载 {len(self.todos)} 个待办事项")
+            if hasattr(self, 'todo_tree'):
+                self.update_todo_list()
+        except Exception as e:
+            self.log(f"加载待办事项失败: {e}")
+            self.todos = []
+
+    def update_todo_list(self):
+        if not hasattr(self, 'todo_tree') or not self.todo_tree.winfo_exists(): return
+        selection = self.todo_tree.selection()
+        self.todo_tree.delete(*self.todo_tree.get_children())
+
+        active_todos_count = 0
+        for todo in self.todos:
+            if todo.get('status') == '启用':
+                active_todos_count += 1
+
+            content = todo.get('content', '').replace('\n', ' ').replace('\r', '')
+            content_preview = (content[:30] + '...') if len(content) > 30 else content
+
+            task_type = "一次性" if todo.get('type') == 'onetime' else "循环"
+
+            remind_info = ""
+            if task_type == '一次性':
+                remind_info = todo.get('remind_datetime', '')
+            else:
+                times = todo.get('start_times') or "无固定时间"
+                interval = todo.get('interval_minutes', 0)
+                if interval > 0:
+                    remind_info = f"{times} (每{interval}分钟)"
+                else:
+                    remind_info = times
+
+            self.todo_tree.insert('', END, values=(
+                todo.get('name', ''),
+                todo.get('status', '启用'),
+                task_type,
+                content_preview,
+                remind_info
+            ))
+        if selection:
+            try:
+                valid_selection = [s for s in selection if self.todo_tree.exists(s)]
+                if valid_selection: self.todo_tree.selection_set(valid_selection)
+            except tk.TclError:
+                pass
+
+        if hasattr(self, 'status_labels') and len(self.status_labels) > 4:
+            self.status_labels[4].config(text=f"待办事项: {active_todos_count}")
+
+    def add_todo(self):
+        self.open_todo_dialog()
+
+    def edit_todo(self):
+        selection = self.todo_tree.selection()
+        if not selection:
+            messagebox.showwarning("警告", "请先选择要修改的待办事项")
+            return
+        if len(selection) > 1:
+            messagebox.showwarning("警告", "一次只能修改一个待办事项")
+            return
+        index = self.todo_tree.index(selection[0])
+        todo_to_edit = self.todos[index]
+        self.open_todo_dialog(todo_to_edit=todo_to_edit, index=index)
+
+    def delete_todo(self):
+        selections = self.todo_tree.selection()
+        if not selections:
+            messagebox.showwarning("警告", "请先选择要删除的待办事项")
+            return
+        if messagebox.askyesno("确认", f"确定要删除选中的 {len(selections)} 个待办事项吗？"):
+            indices = sorted([self.todo_tree.index(s) for s in selections], reverse=True)
+            for index in indices:
+                self.todos.pop(index)
+            self.update_todo_list()
+            self.save_todos()
+
+    def _set_todo_status(self, status):
+        selection = self.todo_tree.selection()
+        if not selection:
+            messagebox.showwarning("警告", f"请先选择要{status}的待办事项")
+            return
+        for item_id in selection:
+            index = self.todo_tree.index(item_id)
+            self.todos[index]['status'] = status
+        self.update_todo_list()
+        self.save_todos()
+
+    def open_todo_dialog(self, todo_to_edit=None, index=None):
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
+        dialog.geometry("750x600")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        self.center_window(dialog, 750, 600)
+
+        main_frame = ttk.Frame(dialog, padding=20)
+        main_frame.pack(fill=BOTH, expand=True)
+
+        ttk.Label(main_frame, text="名称:").grid(row=0, column=0, sticky='e', pady=5, padx=5)
+        name_entry = ttk.Entry(main_frame, font=self.font_11, width=60)
+        name_entry.grid(row=0, column=1, columnspan=3, sticky='w', pady=5)
+
+        ttk.Label(main_frame, text="内容:").grid(row=1, column=0, sticky='ne', pady=5, padx=5)
+        content_text = ScrolledText(main_frame, height=5, font=self.font_11, width=60, wrap=WORD)
+        content_text.grid(row=1, column=1, columnspan=3, sticky='w', pady=5)
+
+        type_var = tk.StringVar(value="onetime")
+        type_frame = ttk.Frame(main_frame)
+        type_frame.grid(row=2, column=1, columnspan=3, sticky='w', pady=10)
+
+        onetime_rb = ttk.Radiobutton(type_frame, text="一次性任务", variable=type_var, value="onetime")
+        onetime_rb.pack(side=LEFT, padx=10)
+        recurring_rb = ttk.Radiobutton(type_frame, text="循环任务", variable=type_var, value="recurring")
+        recurring_rb.pack(side=LEFT, padx=10)
+
+        onetime_lf = ttk.LabelFrame(main_frame, text="一次性任务设置", padding=10)
+        recurring_lf = ttk.LabelFrame(main_frame, text="循环任务设置", padding=10)
+
+        ttk.Label(onetime_lf, text="执行日期:").grid(row=0, column=0, sticky='e', pady=5, padx=5)
+        onetime_date_entry = ttk.Entry(onetime_lf, font=self.font_11, width=20)
+        onetime_date_entry.grid(row=0, column=1, sticky='w', pady=5)
+        self._bind_mousewheel_to_entry(onetime_date_entry, self._handle_date_scroll)
+        ttk.Label(onetime_lf, text="执行时间:").grid(row=1, column=0, sticky='e', pady=5, padx=5)
+        onetime_time_entry = ttk.Entry(onetime_lf, font=self.font_11, width=20)
+        onetime_time_entry.grid(row=1, column=1, sticky='w', pady=5)
+        self._bind_mousewheel_to_entry(onetime_time_entry, self._handle_time_scroll)
+
+        ttk.Label(recurring_lf, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        recurring_time_entry = ttk.Entry(recurring_lf, font=self.font_11, width=40)
+        recurring_time_entry.grid(row=0, column=1, sticky='w', padx=5, pady=5)
+        self._bind_mousewheel_to_entry(recurring_time_entry, self._handle_time_scroll)
+        ttk.Button(recurring_lf, text="设置...", command=lambda: self.show_time_settings_dialog(recurring_time_entry), bootstyle="outline").grid(row=0, column=2, padx=5)
+
+        ttk.Label(recurring_lf, text="周几/几号:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        recurring_weekday_entry = ttk.Entry(recurring_lf, font=self.font_11, width=40)
+        recurring_weekday_entry.grid(row=1, column=1, sticky='w', padx=5, pady=5)
+        ttk.Button(recurring_lf, text="选取...", command=lambda: self.show_weekday_settings_dialog(recurring_weekday_entry), bootstyle="outline").grid(row=1, column=2, padx=5)
+
+        ttk.Label(recurring_lf, text="日期范围:").grid(row=2, column=0, sticky='e', padx=5, pady=5)
+        recurring_daterange_entry = ttk.Entry(recurring_lf, font=self.font_11, width=40)
+        recurring_daterange_entry.grid(row=2, column=1, sticky='w', padx=5, pady=5)
+        self._bind_mousewheel_to_entry(recurring_daterange_entry, self._handle_date_scroll)
+        ttk.Button(recurring_lf, text="设置...", command=lambda: self.show_daterange_settings_dialog(recurring_daterange_entry), bootstyle="outline").grid(row=2, column=2, padx=5)
+
+        ttk.Label(recurring_lf, text="循环间隔:").grid(row=3, column=0, sticky='e', padx=5, pady=5)
+        interval_frame = ttk.Frame(recurring_lf)
+        interval_frame.grid(row=3, column=1, sticky='w', padx=5, pady=5)
+        recurring_interval_entry = ttk.Entry(interval_frame, font=self.font_11, width=8)
+        recurring_interval_entry.pack(side=LEFT)
+        ttk.Label(interval_frame, text="分钟 (0表示仅在'开始时间'提醒)", font=self.font_10).pack(side=LEFT, padx=5)
+
+        def toggle_frames(*args):
+            if type_var.get() == 'onetime':
+                recurring_lf.grid_forget()
+                onetime_lf.grid(row=3, column=0, columnspan=4, sticky='ew', padx=5, pady=5)
+            else:
+                onetime_lf.grid_forget()
+                recurring_lf.grid(row=3, column=0, columnspan=4, sticky='ew', padx=5, pady=5)
+
+        type_var.trace_add("write", toggle_frames)
+
+        now = datetime.now()
+        if todo_to_edit:
+            name_entry.insert(0, todo_to_edit.get('name', ''))
+            content_text.insert('1.0', todo_to_edit.get('content', ''))
+            type_var.set(todo_to_edit.get('type', 'onetime'))
+
+            dt_str = todo_to_edit.get('remind_datetime', now.strftime('%Y-%m-%d %H:%M:%S'))
+            d, t = dt_str.split(' ') if ' ' in dt_str else ('', '')
+            onetime_date_entry.insert(0, d)
+            onetime_time_entry.insert(0, t)
+
+            recurring_time_entry.insert(0, todo_to_edit.get('start_times', ''))
+            recurring_weekday_entry.insert(0, todo_to_edit.get('weekday', '每周:1234567'))
+            recurring_daterange_entry.insert(0, todo_to_edit.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            recurring_interval_entry.insert(0, todo_to_edit.get('interval_minutes', '0'))
+        else:
+            onetime_date_entry.insert(0, now.strftime('%Y-%m-%d'))
+            onetime_time_entry.insert(0, (now + timedelta(minutes=5)).strftime('%H:%M:%S'))
+            recurring_time_entry.insert(0, now.strftime('%H:%M:%S'))
+            recurring_weekday_entry.insert(0, '每周:1234567')
+            recurring_daterange_entry.insert(0, '2000-01-01 ~ 2099-12-31')
+            recurring_interval_entry.insert(0, '0')
+
+        toggle_frames()
+
+        def save():
+            name = name_entry.get().strip()
+            if not name:
+                messagebox.showerror("错误", "待办事项名称不能为空", parent=dialog)
+                return
+
+            new_todo_data = {
+                "name": name,
+                "content": content_text.get('1.0', END).strip(),
+                "type": type_var.get(),
+                "status": "启用" if not todo_to_edit else todo_to_edit.get('status', '启用'),
+                "last_run": {} if not todo_to_edit else todo_to_edit.get('last_run', {}),
+            }
+
+            if new_todo_data['type'] == 'onetime':
+                date_str = self._normalize_date_string(onetime_date_entry.get().strip())
+                time_str = self._normalize_time_string(onetime_time_entry.get().strip())
+                if not date_str or not time_str:
+                    messagebox.showerror("格式错误", "一次性任务的日期或时间格式不正确。", parent=dialog)
+                    return
+                new_todo_data['remind_datetime'] = f"{date_str} {time_str}"
+            else:
+                try:
+                    interval = int(recurring_interval_entry.get().strip() or '0')
+                    if not (0 <= interval <= 1440): raise ValueError
+                except ValueError:
+                    messagebox.showerror("格式错误", "循环间隔必须是 0-1440 之间的整数。", parent=dialog)
+                    return
+
+                is_valid_time, time_msg = self._normalize_multiple_times_string(recurring_time_entry.get().strip())
+                if not is_valid_time:
+                    messagebox.showerror("格式错误", time_msg, parent=dialog); return
+                is_valid_date, date_msg = self._normalize_date_range_string(recurring_daterange_entry.get().strip())
+                if not is_valid_date:
+                    messagebox.showerror("格式错误", date_msg, parent=dialog); return
+
+                new_todo_data['start_times'] = time_msg
+                new_todo_data['weekday'] = recurring_weekday_entry.get().strip()
+                new_todo_data['date_range'] = date_msg
+                new_todo_data['interval_minutes'] = interval
+                new_todo_data['last_interval_run'] = ""
+
+            if todo_to_edit:
+                self.todos[index] = new_todo_data
+            else:
+                self.todos.append(new_todo_data)
+
+            self.update_todo_list()
+            self.save_todos()
+            dialog.destroy()
+
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=4, column=0, columnspan=4, pady=20)
+        ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
+        ttk.Button(button_frame, text="取消", command=dialog.destroy, width=10).pack(side=LEFT, padx=10)
+
+    def show_todo_context_menu(self, event):
+        if self.is_locked: return
+        iid = self.todo_tree.identify_row(event.y)
+        if not iid: return
+
+        context_menu = tk.Menu(self.root, tearoff=0, font=self.font_11)
+        self.todo_tree.selection_set(iid)
+
+        context_menu.add_command(label="修改", command=self.edit_todo)
+        context_menu.add_command(label="删除", command=self.delete_todo)
+        context_menu.add_separator()
+        context_menu.add_command(label="置顶", command=self.move_todo_to_top)
+        context_menu.add_command(label="上移", command=lambda: self.move_todo(-1))
+        context_menu.add_command(label="下移", command=lambda: self.move_todo(1))
+        context_menu.add_command(label="置末", command=self.move_todo_to_bottom)
+        context_menu.add_separator()
+        context_menu.add_command(label="启用", command=lambda: self._set_todo_status('启用'))
+        context_menu.add_command(label="禁用", command=lambda: self._set_todo_status('禁用'))
+
+        context_menu.post(event.x_root, event.y_root)
+
+    def move_todo(self, direction):
+        selection = self.todo_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.todo_tree.index(selection[0])
+        new_index = index + direction
+        if 0 <= new_index < len(self.todos):
+            item = self.todos.pop(index)
+            self.todos.insert(new_index, item)
+            self.update_todo_list(); self.save_todos()
+            new_selection_id = self.todo_tree.get_children()[new_index]
+            self.todo_tree.selection_set(new_selection_id)
+            self.todo_tree.focus(new_selection_id)
+
+    def move_todo_to_top(self):
+        selection = self.todo_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.todo_tree.index(selection[0])
+        if index > 0:
+            item = self.todos.pop(index)
+            self.todos.insert(0, item)
+            self.update_todo_list(); self.save_todos()
+            new_selection_id = self.todo_tree.get_children()[0]
+            self.todo_tree.selection_set(new_selection_id)
+            self.todo_tree.focus(new_selection_id)
+
+    def move_todo_to_bottom(self):
+        selection = self.todo_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.todo_tree.index(selection[0])
+        if index < len(self.todos) - 1:
+            item = self.todos.pop(index)
+            self.todos.append(item)
+            self.update_todo_list(); self.save_todos()
+            new_selection_id = self.todo_tree.get_children()[-1]
+            self.todo_tree.selection_set(new_selection_id)
+            self.todo_tree.focus(new_selection_id)
+
+    def enable_all_todos(self):
+        if not self.todos: return
+        for todo in self.todos: todo['status'] = '启用'
+        self.update_todo_list(); self.save_todos(); self.log("已启用全部待办事项。")
+
+    def disable_all_todos(self):
+        if not self.todos: return
+        for todo in self.todos: todo['status'] = '禁用'
+        self.update_todo_list(); self.save_todos(); self.log("已禁用全部待办事项。")
+
+    def import_todos(self):
+        filename = filedialog.askopenfilename(title="选择导入待办事项文件", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
+        if filename:
+            try:
+                with open(filename, 'r', encoding='utf-8') as f: imported = json.load(f)
+
+                if not isinstance(imported, list) or \
+                   (imported and (not isinstance(imported[0], dict) or 'name' not in imported[0] or 'type' not in imported[0])):
+                    messagebox.showerror("导入失败", "文件格式不正确，看起来不是一个有效的待办事项备份文件。")
+                    return
+
+                self.todos.extend(imported)
+                self.update_todo_list(); self.save_todos()
+                self.log(f"已从 {os.path.basename(filename)} 导入 {len(imported)} 个待办事项")
+            except Exception as e:
+                messagebox.showerror("错误", f"导入失败: {e}")
+
+    def export_todos(self):
+        if not self.todos:
+            messagebox.showwarning("警告", "没有待办事项可以导出")
+            return
+        filename = filedialog.asksaveasfilename(title="导出待办事项到...", defaultextension=".json",
+                                              initialfile="todos_backup.json", filetypes=[("JSON文件", "*.json")], initialdir=application_path)
+        if filename:
+            try:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(self.todos, f, ensure_ascii=False, indent=2)
+                self.log(f"已导出 {len(self.todos)} 个待办事项到 {os.path.basename(filename)}")
+            except Exception as e:
+                messagebox.showerror("错误", f"导出失败: {e}")
+
+    def clear_all_todos(self):
+        if not self.todos: return
+        if messagebox.askyesno("严重警告", "您确定要清空所有待办事项吗？\n此操作不可恢复！"):
+            self.todos.clear()
+            self.update_todo_list()
+            self.save_todos()
+            self.log("已清空所有待办事项。")
+
+    def _check_todo_tasks(self, now):
+        if self._is_in_holiday(now): return
+
+        now_str_dt = now.strftime('%Y-%m-%d %H:%M:%S')
+        now_str_date = now.strftime('%Y-%m-%d')
+        now_str_time = now.strftime('%H:%M:%S')
+
+        for index, todo in enumerate(self.todos):
+            if todo.get('status') != '启用': continue
+
+            if todo.get('type') == 'onetime':
+                if todo.get('remind_datetime') == now_str_dt:
+                    self.log(f"触发一次性待办事项: {todo['name']}")
+                    todo_with_index = todo.copy()
+                    todo_with_index['original_index'] = index
+                    self.reminder_queue.put(todo_with_index)
+
+            elif todo.get('type') == 'recurring':
+                try:
+                    start, end = [d.strip() for d in todo.get('date_range', '').split('~')]
+                    if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()):
+                        continue
+                except (ValueError, IndexError): pass
+
+                schedule = todo.get('weekday', '每周:1234567')
+                run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or \
+                            (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
+                if not run_today: continue
+
+                triggered = False
+                for trigger_time in [t.strip() for t in todo.get('start_times', '').split(',')]:
+                    if trigger_time == now_str_time and todo.get('last_run', {}).get(trigger_time) != now_str_date:
+                        triggered = True
+                        todo.setdefault('last_run', {})[trigger_time] = now_str_date
+                        break
+
+                interval = todo.get('interval_minutes', 0)
+                if not triggered and interval > 0 and todo.get('start_times'):
+                    last_run_str = todo.get('last_interval_run')
+                    if last_run_str:
+                        try:
+                            last_run_dt = datetime.strptime(last_run_str, '%Y-%m-%d %H:%M:%S')
+                            if now >= last_run_dt + timedelta(minutes=interval):
+                                triggered = True
+                        except ValueError: pass
+
+                if triggered:
+                    self.log(f"触发循环待办事项: {todo['name']}")
+                    todo_with_index = todo.copy()
+                    todo_with_index['original_index'] = index
+                    self.reminder_queue.put(todo_with_index)
+                    todo['last_interval_run'] = now_str_dt
+                    self.save_todos()
+
+    def _process_reminder_queue(self):
+        if not self.is_reminder_active and not self.reminder_queue.empty():
+            try:
+                todo_task = self.reminder_queue.get_nowait()
+                self.is_reminder_active = True
+                self.show_todo_reminder(todo_task)
+            except queue.Empty:
+                pass
+
+        self.root.after(1000, self._process_reminder_queue)
+
+    def _play_reminder_sound(self):
+        if not AUDIO_AVAILABLE:
+            self.log("警告：pygame未安装，无法播放提示音。")
+            return
+
+        if os.path.exists(REMINDER_SOUND_FILE):
+            try:
+                sound = pygame.mixer.Sound(REMINDER_SOUND_FILE)
+                channel = pygame.mixer.find_channel(True)
+                channel.set_volume(0.7)
+                channel.play(sound)
+                self.log("已播放自定义提示音。")
+                return
+            except Exception as e:
+                self.log(f"播放自定义提示音 {REMINDER_SOUND_FILE} 失败: {e}")
+
+        if WIN32_AVAILABLE:
+            try:
+                ctypes.windll.user32.MessageBeep(win32con.MB_OK)
+                self.log("已播放系统默认提示音。")
+            except Exception as e:
+                self.log(f"播放系统默认提示音失败: {e}")
+
+    def show_todo_reminder(self, todo):
+        self._play_reminder_sound()
+
+        reminder_win = ttk.Toplevel(self.root)
+        reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
+        reminder_win.geometry("480x320")
+        reminder_win.resizable(False, False)
+        self.center_window(reminder_win, 480, 320)
+
+        reminder_win.attributes('-topmost', True)
+        reminder_win.lift()
+        reminder_win.focus_force()
+        reminder_win.after(1000, lambda: reminder_win.attributes('-topmost', False))
+
+        original_index = todo.get('original_index')
+        task_type = todo.get('type')
+
+        if original_index is not None and original_index < len(self.todos):
+            task_in_list = self.todos[original_index]
+            if task_in_list.get('status') != '禁用' and task_in_list.get('type') == 'onetime':
+                task_in_list['status'] = '待处理'
+                self.root.after(0, self.update_todo_list)
+
+        title_label = ttk.Label(reminder_win, text=todo.get('name', '无标题'), font=self.font_14_bold, wraplength=460)
+        title_label.pack(pady=(15, 10))
+
+        btn_frame = ttk.Frame(reminder_win)
+        btn_frame.pack(side=BOTTOM, pady=15)
+
+        content_frame = ttk.Frame(reminder_win, bootstyle="secondary", padding=1)
+        content_frame.pack(fill=BOTH, expand=True, padx=20, pady=5)
+
+        content_text = ScrolledText(content_frame, font=self.font_11, wrap=WORD, bd=0)
+        content_text.pack(fill=BOTH, expand=True)
+        content_text.insert('1.0', todo.get('content', ''))
+        content_text.config(state='disabled')
+
+        def close_and_release():
+            self.is_reminder_active = False
+            reminder_win.destroy()
+
+        def handle_complete():
+            if original_index is not None and original_index < len(self.todos):
+                self.todos[original_index]['status'] = '禁用'
+                self.save_todos()
+                self.update_todo_list()
+                self.log(f"待办事项 '{todo['name']}' 已标记为完成。")
+            close_and_release()
+
+        def handle_snooze():
+            minutes = simpledialog.askinteger("稍后提醒", "您想在多少分钟后再次提醒？ (1-60)", parent=reminder_win, minvalue=1, maxvalue=60, initialvalue=5)
+            if minutes:
+                new_remind_time = datetime.now() + timedelta(minutes=minutes)
+                if original_index is not None and original_index < len(self.todos):
+                    self.todos[original_index]['remind_datetime'] = new_remind_time.strftime('%Y-%m-%d %H:%M:%S')
+                    self.todos[original_index]['status'] = '启用'
+                    self.save_todos()
+                    self.update_todo_list()
+                    self.log(f"待办事项 '{todo['name']}' 已推迟 {minutes} 分钟。")
+            close_and_release()
+
+        def handle_delete():
+            if messagebox.askyesno("确认删除", f"您确定要永久删除待办事项“{todo['name']}”吗？\n此操作不可恢复。", parent=reminder_win):
+                if original_index is not None and original_index < len(self.todos):
+                    if self.todos[original_index].get('name') == todo.get('name'):
+                        self.todos.pop(original_index)
+                        self.save_todos()
+                        self.update_todo_list()
+                        self.log(f"已删除待办事项: {todo['name']}")
+                close_and_release()
+
+        def on_closing_protocol():
+            if task_type == 'onetime':
+                handle_complete()
+            else:
+                close_and_release()
+
+        reminder_win.protocol("WM_DELETE_WINDOW", on_closing_protocol)
+
+        if task_type == 'onetime':
+            ttk.Button(btn_frame, text="已完成", bootstyle="success", width=10, command=handle_complete).pack(side=LEFT, padx=10)
+            ttk.Button(btn_frame, text="稍后提醒", bootstyle="outline", width=10, command=handle_snooze).pack(side=LEFT, padx=10)
+            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", width=10, command=handle_delete).pack(side=LEFT, padx=10)
+        else:
+            ttk.Button(btn_frame, text="本次完成", bootstyle="primary", width=10, command=close_and_release).pack(side=LEFT, padx=10)
+            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", width=10, command=handle_delete).pack(side=LEFT, padx=10)
+
+    def _bind_mousewheel_to_entry(self, entry, handler):
+        entry.bind("<MouseWheel>", handler)
+        entry.bind("<Button-4>", handler)
+        entry.bind("<Button-5>", handler)
+
+    def _handle_time_scroll(self, event):
+        entry = event.widget
+        current_val = entry.get()
+        cursor_pos = entry.index(INSERT)
+
+        try:
+            dt = datetime.strptime(current_val, "%H:%M:%S")
+        except ValueError:
+            parts = [p.strip() for p in current_val.split(',') if p.strip()]
+            if not parts: return "break"
+            
+            char_count = 0
+            target_part_index = -1
+            for i, part in enumerate(parts):
+                if char_count <= cursor_pos <= char_count + len(part):
+                    target_part_index = i
+                    break
+                char_count += len(part) + 2
+            
+            if target_part_index == -1: return "break"
+
+            try:
+                dt = datetime.strptime(parts[target_part_index], "%H:%M:%S")
+                cursor_pos_in_part = cursor_pos - char_count
+            except ValueError:
+                return "break"
+        else:
+            cursor_pos_in_part = cursor_pos
+
+        delta = 1 if event.num == 4 or event.delta > 0 else -1
+
+        if 0 <= cursor_pos_in_part <= 2:
+            dt += timedelta(hours=delta)
+        elif 3 <= cursor_pos_in_part <= 5:
+            dt += timedelta(minutes=delta)
+        else:
+            dt += timedelta(seconds=delta)
+
+        new_val_part = dt.strftime("%H:%M:%S")
         
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_width(), dialog.winfo_height())
+        if 'parts' in locals():
+            parts[target_part_index] = new_val_part
+            new_full_val = ", ".join(parts)
+        else:
+            new_full_val = new_val_part
+
+        entry.delete(0, END)
+        entry.insert(0, new_full_val)
+        entry.icursor(cursor_pos)
+        return "break"
+
+    def _handle_date_scroll(self, event):
+        entry = event.widget
+        current_val = entry.get().strip()
+        cursor_pos = entry.index(INSERT)
+
+        parts = [p.strip() for p in current_val.split("~")]
+        is_range_start = "~" not in current_val or cursor_pos <= len(parts[0])
+        target_val = parts[0] if is_range_start else parts[1]
+
+        try:
+            dt = datetime.strptime(target_val, "%Y-%m-%d")
+        except ValueError:
+            return "break"
+
+        delta = 1 if event.num == 4 or event.delta > 0 else -1
+
+        effective_cursor_pos = cursor_pos if is_range_start else cursor_pos - (len(parts[0]) + 3)
+
+        if 0 <= effective_cursor_pos <= 4:
+            dt = dt.replace(year=dt.year + delta)
+        elif 5 <= effective_cursor_pos <= 7:
+            new_month = dt.month + delta
+            new_year = dt.year
+            if new_month > 12:
+                new_month = 1; new_year += 1
+            elif new_month < 1:
+                new_month = 12; new_year -= 1
+            
+            try:
+                dt = dt.replace(year=new_year, month=new_month)
+            except ValueError:
+                dt = dt.replace(year=new_year, month=new_month, day=28)
+        else:
+            dt += timedelta(days=delta)
+
+        new_date_part = dt.strftime("%Y-%m-%d")
+        
+        if "~" in current_val:
+            new_full_val = f"{new_date_part} ~ {parts[1]}" if is_range_start else f"{parts[0]} ~ {new_date_part}"
+        else:
+            new_full_val = new_date_part
+
+        entry.delete(0, END)
+        entry.insert(0, new_full_val)
+        entry.icursor(cursor_pos)
+        return "break"
 
 
 def main():
-    # 修复：为更好的缩放效果设置DPI感知
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception as e:
-        print(f"警告: 无法设置DPI感知 - {e}")
-
     root = ttk.Window(themename="litera")
     app = TimedBroadcastApp(root)
     root.mainloop()
