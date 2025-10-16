@@ -1428,7 +1428,7 @@ class TimedBroadcastApp:
         ttk.Button(btn_frame, text="清除密码", command=clear_password_action).pack(side=LEFT, padx=5)
         ttk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=5)
         dialog.bind('<Return>', lambda event: confirm())
-#标记
+
     def _perform_password_clear_logic(self):
         if self._save_to_registry("LockPasswordB64", ""):
             self.lock_password_b64 = ""
@@ -1525,7 +1525,7 @@ class TimedBroadcastApp:
         context_menu.add_separator()
         context_menu.add_command(label="停止当前播放", command=self.stop_current_playback)
         context_menu.post(event.x_root, event.y_root)
-
+#标记
     def play_now(self):
         selection = self.task_tree.selection()
         if not selection:
@@ -2009,7 +2009,7 @@ class TimedBroadcastApp:
         
         dialog.update_idletasks()
         self.center_window(dialog, dialog.winfo_width(), dialog.winfo_height())
-#标记
+
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
@@ -2222,7 +2222,7 @@ class TimedBroadcastApp:
         
         dialog.update_idletasks()
         self.center_window(dialog, dialog.winfo_width(), dialog.winfo_height())
-
+#标记
     def _import_voice_script(self, text_widget):
         filename = filedialog.askopenfilename(
             title="选择要导入的文稿",
@@ -2816,3 +2816,4 @@ if __name__ == "__main__":
             print("错误: psutil 库未安装，无法显示图形化错误消息。")
         sys.exit(1)
     main()
+
