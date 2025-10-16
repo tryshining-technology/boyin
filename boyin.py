@@ -453,7 +453,7 @@ class TimedBroadcastApp:
             self.log("尝试进入超级管理模块失败：密码错误。")
 
 #第1部分
-def create_registration_page(self):
+    def create_registration_page(self):
         page_frame = ttk.Frame(self.page_container, padding=20)
         title_label = ttk.Label(page_frame, text="注册软件", font=self.font_14_bold, bootstyle="primary")
         title_label.pack(anchor=W)
@@ -865,7 +865,7 @@ def create_registration_page(self):
             self.log(f"还原失败: {e}"); messagebox.showerror("还原失败", f"发生错误: {e}")
 
 #第2部分
-def _refresh_settings_ui(self):
+    def _refresh_settings_ui(self):
         if "设置" not in self.pages or not hasattr(self, 'autostart_var'):
             return
         
@@ -1177,7 +1177,7 @@ def _refresh_settings_ui(self):
         return settings_frame
 
 #第3部分
-def _restore_all_video_speeds(self):
+    def _restore_all_video_speeds(self):
         """恢复所有视频节目的播放速度为1.0x"""
         if not self.tasks:
             messagebox.showinfo("提示", "当前没有节目，无需操作。")
@@ -1508,7 +1508,7 @@ def _restore_all_video_speeds(self):
             messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root)
 
 #第4部分
-def _handle_lock_on_start_toggle(self):
+    def _handle_lock_on_start_toggle(self):
         if not self.lock_password_b64:
             if self.lock_on_start_var.get():
                 messagebox.showwarning("无法启用", "您还未设置锁定密码。\n\n请返回“定时广播”页面，点击“锁定”按钮来首次设置密码。")
@@ -1834,7 +1834,7 @@ def _handle_lock_on_start_toggle(self):
 
 
 #第5部分
-def open_video_dialog(self, parent_dialog, task_to_edit=None, index=None):
+    def open_video_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
         dialog = ttk.Toplevel(self.root)
@@ -2091,7 +2091,7 @@ def open_video_dialog(self, parent_dialog, task_to_edit=None, index=None):
         ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
 
 #第6部分
-def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
+    def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
         dialog = ttk.Toplevel(self.root)
@@ -2330,7 +2330,7 @@ def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
 
 
 #第7部分
-def _import_voice_script(self, text_widget):
+    def _import_voice_script(self, text_widget):
         filename = filedialog.askopenfilename(
             title="选择要导入的文稿",
             initialdir=VOICE_SCRIPT_FOLDER,
@@ -2572,7 +2572,7 @@ def _import_voice_script(self, text_widget):
         if count > 0: self.update_task_list(); self.save_tasks(); self.log(f"已{status} {count} 个节目")
 
 #第8部分
-def _set_tasks_status_by_type(self, task_type, status):
+    def _set_tasks_status_by_type(self, task_type, status):
         if not self.tasks: return
 
         type_name_map = {'audio': '音频', 'voice': '语音', 'video': '视频'}
@@ -2788,7 +2788,7 @@ def _set_tasks_status_by_type(self, task_type, status):
         self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
 
 #第9部分
-def show_daterange_settings_dialog(self, date_range_entry):
+    def show_daterange_settings_dialog(self, date_range_entry):
         dialog = ttk.Toplevel(self.root)
         dialog.title("日期范围")
         dialog.resizable(False, False)
@@ -3107,7 +3107,7 @@ def show_daterange_settings_dialog(self, date_range_entry):
                     except queue.Empty: break
 
 #第10部分
-def _execute_broadcast(self, task, trigger_time):
+    def _execute_broadcast(self, task, trigger_time):
         self.update_playing_text(f"[{task['name']}] 正在准备播放...")
         self.status_labels[2].config(text="播放状态: 播放中")
 
@@ -3956,7 +3956,7 @@ def _execute_broadcast(self, task, trigger_time):
             self.holidays = []
 
 #第11部分
-def update_holiday_list(self):
+    def update_holiday_list(self):
         if not hasattr(self, 'holiday_tree') or not self.holiday_tree.winfo_exists(): return
         selection = self.holiday_tree.selection()
         self.holiday_tree.delete(*self.holiday_tree.get_children())
@@ -4968,5 +4968,3 @@ if __name__ == "__main__":
             print("错误: psutil 库未安装，无法显示图形化错误消息。")
         sys.exit(1)
     main()
-
-#第12部分
