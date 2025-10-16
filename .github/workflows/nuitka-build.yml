@@ -45,7 +45,6 @@ jobs:
         with:
           path: ~\AppData\Local\pip\Cache
           key: ${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements.txt') }}
-          # 缓存键也加上 nuitka 标识，避免与 PyInstaller 缓存冲突
           restore-keys: |
             ${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
 
@@ -70,9 +69,9 @@ jobs:
             --company-name="创翔" `
             --enable-plugin=tk-inter `
             --include-package-data=pygame `
-            --include-data-files="icon.ico=." `
-            --include-data-dirs="${{ matrix.vlc-folder }}=${{ matrix.vlc-folder }}" `
-            --include-data-dirs="ttkbootstrap/themes=ttkbootstrap/themes" `
+            --include-data-file="icon.ico=." `
+            --include-data-file="${{ matrix.vlc-folder }}/*=${{ matrix.vlc-folder }}/" `
+            --include-data-file="ttkbootstrap/themes/*=ttkbootstrap/themes/" `
             boyin.py
         shell: pwsh
 
