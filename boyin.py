@@ -449,6 +449,7 @@ class TimedBroadcastApp:
         style = ttk.Style.get_instance()
         style.configure('lg.TButton', font=self.font_12_bold)
 
+
         info_text = "请将您的机器码发送给软件提供商以获取注册码。\n注册码分为月度授权和永久授权两种。"
         ttk.Label(main_content_frame, text=info_text, font=self.font_10, bootstyle="secondary").pack(pady=10)
 
@@ -700,7 +701,7 @@ class TimedBroadcastApp:
         elif entered_password is not None:
             messagebox.showerror("验证失败", "密码错误！", parent=self.root)
             self.log("尝试卸载软件失败：密码错误。")
-
+#标记
     def _perform_uninstall(self):
         if not messagebox.askyesno(
             "！！！最终警告！！！",
@@ -819,7 +820,7 @@ class TimedBroadcastApp:
 
         except Exception as e:
             self.log(f"还原失败: {e}"); messagebox.showerror("还原失败", f"发生错误: {e}")
-#标记
+
     def _refresh_settings_ui(self):
         if "设置" not in self.pages or not hasattr(self, 'autostart_var'):
             return
@@ -1304,7 +1305,7 @@ class TimedBroadcastApp:
                 self.settings['time_chime_enabled'] = False
                 self.root.after(0, self.time_chime_enabled_var.set, False)
                 self.save_settings()
-#标记
+
     def _delete_chime_files_worker(self):
         self.log("正在禁用整点报时功能，开始删除缓存文件...")
         try:
@@ -1427,7 +1428,7 @@ class TimedBroadcastApp:
         ttk.Button(btn_frame, text="清除密码", command=clear_password_action).pack(side=LEFT, padx=5)
         ttk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=5)
         dialog.bind('<Return>', lambda event: confirm())
-
+#标记
     def _perform_password_clear_logic(self):
         if self._save_to_registry("LockPasswordB64", ""):
             self.lock_password_b64 = ""
@@ -2328,7 +2329,7 @@ class TimedBroadcastApp:
     def select_file_for_entry(self, initial_dir, string_var):
         filename = filedialog.askopenfilename(title="选择文件", initialdir=initial_dir, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")])
         if filename: string_var.set(os.path.basename(filename))
-#标记
+
     def delete_task(self):
         selections = self.task_tree.selection()
         if not selections: messagebox.showwarning("警告", "请先选择要删除的节目"); return
