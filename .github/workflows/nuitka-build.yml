@@ -66,6 +66,7 @@ jobs:
               "--onefile",
               "--windows-console-mode=disable",
               "--lto=yes",
+              "--assume-yes-for-downloads", # <--- 关键修复：自动同意下载所需的依赖工具
               "--output-filename=$exeName",
               "--windows-icon-from-ico=icon.ico",
               "--product-name=创翔多功能定时播音旗舰版",
@@ -75,7 +76,6 @@ jobs:
               "--include-package-data=pygame",
               "--include-package-data=ttkbootstrap",
               "--include-data-file=icon.ico=icon.ico",
-              # --- 关键修复：使用 --include-data-dir 来包含整个 VLC 库文件夹 ---
               "--include-data-dir=${{ matrix.vlc-folder }}=${{ matrix.vlc-folder }}",
               "boyin.py"
           )
@@ -89,3 +89,6 @@ jobs:
         with:
           name: ${{ matrix.artifact-name }}
           path: "创翔多功能定时播音旗舰版_${{ matrix.exe-name-suffix }}.exe"
+这个选项是专门为在 CI/CD 环境（如 GitHub Actions）中运行 Nuitka 而设计的。加入它之后，Nuitka 就会自动下载所需的 `depends.exe`，构建流程将不再被中断。
+
+这次我们真的离成功只有一步之遥了！祝您构建顺利！
