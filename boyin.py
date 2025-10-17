@@ -288,6 +288,9 @@ class TimedBroadcastApp:
         self.nav_frame.pack_propagate(False)
 
         self.page_container = ttk.Frame(self.root)
+        style = ttk.Style.get_instance()
+        style.configure("Yellow.TFrame", background='yellow')
+        self.page_container.configure(style="Yellow.TFrame")
         self.page_container.pack(side=LEFT, fill=BOTH, expand=True)
 
         nav_button_titles = ["定时广播", "节假日", "待办事项", "高级功能", "设置", "注册软件", "超级管理"]
@@ -334,73 +337,42 @@ class TimedBroadcastApp:
             self.status_labels.append(label)
 
     def switch_page(self, page_name):
-        if self.is_app_locked_down and page_name not in ["注册软件", "超级管理"]:
-            self.log("软件授权已过期，请先注册。")
-            if self.current_page_name != "注册软件":
-                self.root.after(10, lambda: self.switch_page("注册软件"))
-            return
+        # 暂时禁用所有锁定逻辑
+        # if self.is_app_locked_down ...
+        # if self.is_locked ...
 
-        if self.is_locked and page_name not in ["超级管理", "注册软件"]:
-            self.log("界面已锁定，请先解锁。")
-            return
+        # 获取样式对象
+        style = ttk.Style.get_instance()
 
-        if self.current_page and self.current_page.winfo_exists():
-            self.current_page.pack_forget()
+        # 定义颜色样式
+        style.configure("Green.TFrame", background='green')
+        style.configure("Red.TFrame", background='red')
+        style.configure("Blue.TFrame", background='blue')
+        style.configure("Orange.TFrame", background='orange')
+        style.configure("Yellow.TFrame", background='yellow')
 
-        for title, btn in self.nav_buttons.items():
-            btn.config(bootstyle="light")
 
-        target_frame = None
-        
-        # --- 核心修改：明确处理“高级功能”的创建和缓存 ---
-        
-        # 我们检查 self.pages 字典中是否已经存在这个页面
-        if page_name in self.pages and self.pages[page_name].winfo_exists():
-            # 如果存在，直接使用
-            target_frame = self.pages[page_name]
+        self.log(f"--- 诊断模式：点击了 '{page_name}' ---")
+
+        if page_name == "定时广播":
+            self.page_container.configure(style="Green.TFrame")
+            self.log("诊断：尝试将 page_container 变为绿色。")
+        elif page_name == "节假日":
+            self.page_container.configure(style="Blue.TFrame")
+            self.log("诊断：尝试将 page_container 变为蓝色。")
+        elif page_name == "待办事项":
+            self.page_container.configure(style="Orange.TFrame")
+            self.log("诊断：尝试将 page_container 变为橙色。")
+        elif page_name == "高级功能":
+            self.page_container.configure(style="Red.TFrame")
+            self.log("诊断：尝试将 page_container 变为红色。")
         else:
-            # 如果不存在，或者因为某些原因被销毁了，就根据页面名称重新创建它
-            if page_name == "定时广播":
-                # 定时广播页面是预先创建的，所以理论上总是在 self.pages 中
-                target_frame = self.pages.get("定时广播", self.main_frame)
-            elif page_name == "节假日":
-                target_frame = self.create_holiday_page()
-                self.pages[page_name] = target_frame # 创建后存入字典
-            elif page_name == "待办事项":
-                target_frame = self.create_todo_page()
-                self.pages[page_name] = target_frame
-            elif page_name == "高级功能":
-                # 【关键】在这里调用创建函数
-                target_frame = self.create_advanced_features_page()
-                # 【关键】创建完成后，立即将它存入 self.pages 字典中，以便下次直接使用
-                self.pages[page_name] = target_frame
-            elif page_name == "设置":
-                target_frame = self.create_settings_page()
-                self.pages[page_name] = target_frame
-                self._refresh_settings_ui() # 这句移到创建之后更合理
-            elif page_name == "注册软件":
-                target_frame = self.create_registration_page()
-                self.pages[page_name] = target_frame
-            elif page_name == "超级管理":
-                target_frame = self.create_super_admin_page()
-                self.pages[page_name] = target_frame
-            else:
-                self.log(f"功能开发中: {page_name}")
-                target_frame = self.pages["定时广播"]
-                page_name = "定时广播"
-
-        # 确保我们有一个有效的 Frame 可以显示
-        if target_frame:
-            target_frame.pack(in_=self.page_container, fill=BOTH, expand=True)
-            self.current_page = target_frame
-            self.current_page_name = page_name
-        else:
-            self.log(f"错误：无法为 '{page_name}' 创建或找到目标页面！")
-
-
-        selected_btn = self.nav_buttons.get(page_name)
-        if selected_btn:
-            selected_btn.config(bootstyle="primary")
+            # 对于其他按钮，恢复初始的黄色
+            self.page_container.configure(style="Yellow.TFrame")
+            self.log(f"诊断：为 '{page_name}' 恢复为黄色。")
+        
+        # 强制UI刷新，确保颜色变化能被看到
+        self.root.update_idletasks()
 
     def _prompt_for_super_admin_password(self):
         if self.auth_info['status'] != 'Permanent':
