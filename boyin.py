@@ -3569,7 +3569,7 @@ class TimedBroadcastApp:
                 threading.Thread(target=self._execute_program_task, args=(task, trigger_time), daemon=True).start()
     
     # 找到 _execute_screenshot_task 函数并替换为以下内容：
-    def _execute_screenshot_task(self, task, trigger_time):  # <--- 修正：已添加4个空格的缩进
+    def _execute_screenshot_task(self, task, trigger_time):
         if not IMAGE_AVAILABLE:
             self.log(f"错误：Pillow库未安装，无法执行截屏任务 '{task['name']}'。")
             return
@@ -3586,21 +3586,22 @@ class TimedBroadcastApp:
                     if current_time_str >= stop_time_str:
                         self.log(f"任务 '{task['name']}' 已到达停止时间 '{stop_time_str}'，提前中止截屏。")
                         break # 退出循环
+                # --- 修复结束 ---
 
-            screenshot = ImageGrab.grab()
-            filename = f"Screenshot_{task['name']}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]}.png"
-            save_path = os.path.join(SCREENSHOT_FOLDER, filename)
-            screenshot.save(save_path)
-            self.log(f"任务 '{task['name']}' 已成功截屏 ({i+1}/{repeat_count})，保存至: {filename}")
+                screenshot = ImageGrab.grab()
+                filename = f"Screenshot_{task['name']}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]}.png"
+                save_path = os.path.join(SCREENSHOT_FOLDER, filename)
+                screenshot.save(save_path)
+                self.log(f"任务 '{task['name']}' 已成功截屏 ({i+1}/{repeat_count})，保存至: {filename}")
 
-            if i < repeat_count - 1:
-                time.sleep(interval_seconds)
-        
-        task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
-        self.save_screenshot_tasks()
+                if i < repeat_count - 1:
+                    time.sleep(interval_seconds)
+            
+            task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
+            self.save_screenshot_tasks()
 
-        except Exception as e:
-        self.log(f"执行截屏任务 '{task['name']}' 失败: {e}")
+        except Exception as e: # <--- 修正：已将 except 块正确地配对到 try 之后
+            self.log(f"执行截屏任务 '{task['name']}' 失败: {e}")
 
     def _execute_program_task(self, task, trigger_time):
         target_path = task.get('target_path')
