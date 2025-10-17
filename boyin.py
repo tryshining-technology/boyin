@@ -1,9 +1,5 @@
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
-from ttkbootstrap.scrolled import ScrolledText
-from tkinter import messagebox, filedialog, simpledialog, font
-import tkinter as tk # 修复10：添加缺失的核心 tkinter 库导入
-
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext, filedialog, simpledialog, font
 import json
 import threading
 import time
@@ -16,40 +12,6 @@ import base64
 import queue
 import shutil
 import re
-import ctypes
-
-# --- 全局修复：启用高DPI感知 ---
-try:
-    # 告诉Windows，程序自己处理DPI缩放，Windows 8.1+
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)
-except Exception:
-    try:
-        # 兼容旧版Windows (Vista+)
-        ctypes.windll.user32.SetProcessDPIAware(True)
-    except Exception:
-        print("警告: 无法设置DPI感知，在高分屏下布局可能出现问题。")
-# --- DPI修复结束 ---
-
-# --- Nuitka/PyInstaller 打包 VLC 的关键修复 ---
-# 检查程序是否被打包成单文件
-if getattr(sys, 'frozen', False):
-    # 如果是，则手动设置VLC库的搜索路径
-    # application_path 是我们之前定义的程序所在目录
-    # 我们需要同时考虑32位和64位的情况
-    if sys.maxsize > 2**32:
-        vlc_lib_folder = "vlc_lib_x64"
-    else:
-        vlc_lib_folder = "vlc_lib_x86"
-    
-    vlc_dll_path = os.path.join(os.path.dirname(sys.executable), vlc_lib_folder)
-    
-    # 告诉 python-vlc 核心库(dll)在哪里
-    if os.path.isdir(vlc_dll_path):
-        os.environ['PYTHON_VLC_LIB_PATH'] = vlc_dll_path
-        # 告诉 python-vlc 插件(plugins目录)在哪里
-        os.environ['PYTHON_VLC_PLUGIN_PATH'] = os.path.join(vlc_dll_path, 'plugins')
-# --- 修复结束 ---
-
 
 # 尝试导入所需库
 TRAY_AVAILABLE = False
@@ -71,6 +33,7 @@ try:
     import winreg
     import win32gui
     import win32con
+    import ctypes
     WIN32_AVAILABLE = True
 except ImportError:
     print("警告: pywin32 未安装，语音、开机启动、任务栏闪烁和密码持久化/注册功能将受限。")
@@ -94,7 +57,7 @@ try:
 except ImportError:
     print("警告: psutil 未安装，无法获取机器码，注册功能不可用。")
 
-# --- 导入 VLC 库 ---
+# --- 新增: 导入 VLC 库 ---
 VLC_AVAILABLE = False
 try:
     import vlc
@@ -140,10 +103,8 @@ class TimedBroadcastApp:
     def __init__(self, root):
         self.root = root
         self.root.title(" 创翔多功能定时播音旗舰版")
-        # 修复1：设置一个更合理的默认启动尺寸
-        self.root.geometry("1280x720")
-        # 同时设置一个最小尺寸，防止窗口过小
-        self.root.minsize(1024, 600)
+        self.root.geometry("1400x800")
+        self.root.configure(bg='#E8F4F8')
 
         if os.path.exists(ICON_FILE):
             try:
@@ -174,7 +135,6 @@ class TimedBroadcastApp:
         self.pages = {}
         self.nav_buttons = {}
         self.current_page = None
-        self.current_page_name = ""
 
         self.last_chime_hour = -1
 
@@ -245,7 +205,7 @@ class TimedBroadcastApp:
         self.root.option_add("*Font", self.font_11)
 
         # 2. 对 ttk 控件使用 Style
-        style = ttk.Style.get_instance()
+        style = ttk.Style()
         style.configure("TButton", font=self.font_11)
         style.configure("TLabel", font=self.font_11)
         style.configure("TCheckbutton", font=self.font_11)
@@ -254,10 +214,7 @@ class TimedBroadcastApp:
         style.configure("TEntry", font=self.font_11)
 
         # 3. 对 Treeview 单独设置
-        # 动态计算rowheight以适应字体
-        font_obj = font.Font(font=self.font_11)
-        row_height = font_obj.metrics("linespace") + 10 # 增加一些padding
-        style.configure("Treeview", font=self.font_11, rowheight=row_height)
+        style.configure("Treeview", font=self.font_11, rowheight=28)
         style.configure("Treeview.Heading", font=self.font_11_bold)
 
         # 4. 对 LabelFrame 单独设置
@@ -296,32 +253,37 @@ class TimedBroadcastApp:
                 os.makedirs(folder)
 
     def create_widgets(self):
-        # 修复2：移除固定的 height=30，让状态栏高度自适应
-        self.status_frame = ttk.Frame(self.root, style='secondary.TFrame')
-        self.status_frame.pack(side=BOTTOM, fill=X)
+        self.status_frame = tk.Frame(self.root, bg='#E8F4F8', height=30)
+        self.status_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        self.status_frame.pack_propagate(False)
         self.create_status_bar_content()
 
-        self.nav_frame = ttk.Frame(self.root, width=160, style='light.TFrame')
-        self.nav_frame.pack(side=LEFT, fill=Y)
+        self.nav_frame = tk.Frame(self.root, bg='white', width=160)
+        self.nav_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.nav_frame.pack_propagate(False)
 
-        self.page_container = ttk.Frame(self.root)
-        self.page_container.pack(side=LEFT, fill=BOTH, expand=True)
+        self.page_container = tk.Frame(self.root)
+        self.page_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         nav_button_titles = ["定时广播", "节假日", "待办事项", "设置", "注册软件", "超级管理"]
 
         for i, title in enumerate(nav_button_titles):
-            btn = ttk.Button(self.nav_frame, text=title, bootstyle="light",
-                           style='Link.TButton',
-                           command=lambda t=title: self.switch_page(t) if t != "超级管理" else self._prompt_for_super_admin_password())
-            btn.pack(fill=X, pady=1, ipady=8, padx=5)
+            btn_frame = tk.Frame(self.nav_frame, bg='white')
+            btn_frame.pack(fill=tk.X, pady=1)
+
+            cmd = None
+            if title == "超级管理":
+                cmd = self._prompt_for_super_admin_password
+            else:
+                cmd = lambda t=title: self.switch_page(t)
+
+            btn = tk.Button(btn_frame, text=title, bg='white',
+                          fg='black', font=self.font_22_bold,
+                          bd=0, padx=10, pady=8, anchor='w', command=cmd)
+            btn.pack(fill=tk.X)
             self.nav_buttons[title] = btn
-            
-        style = ttk.Style.get_instance()
-        style.configure('Link.TButton', font=self.font_13_bold, anchor='w')
 
-
-        self.main_frame = ttk.Frame(self.page_container)
+        self.main_frame = tk.Frame(self.page_container, bg='white')
         self.pages["定时广播"] = self.main_frame
         self.create_scheduled_broadcast_page()
 
@@ -335,26 +297,24 @@ class TimedBroadcastApp:
         self.status_labels = []
         status_texts = ["当前时间", "系统状态", "播放状态", "任务数量", "待办事项"]
 
-        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技", font=self.font_11,
-                                    bootstyle=(SECONDARY, INVERSE), padding=(15, 0))
-        copyright_label.pack(side=RIGHT, padx=2)
+        copyright_label = tk.Label(self.status_frame, text="© 创翔科技", font=self.font_11,
+                                   bg='#5DADE2', fg='white', padx=15)
+        copyright_label.pack(side=tk.RIGHT, padx=2)
 
-        self.statusbar_unlock_button = ttk.Button(self.status_frame, text="🔓 解锁",
-                                                  bootstyle="success",
-                                                  command=self._prompt_for_password_unlock)
-        # 修复4：按钮先创建但不显示，在锁定后才pack
+        self.statusbar_unlock_button = tk.Button(self.status_frame, text="🔓 解锁", font=self.font_11,
+                                                 bg='#2ECC71', fg='white', bd=0, padx=15, cursor='hand2',
+                                                 command=self._prompt_for_password_unlock)
 
         for i, text in enumerate(status_texts):
-            label = ttk.Label(self.status_frame, text=f"{text}: --", font=self.font_11,
-                              bootstyle=(PRIMARY, INVERSE) if i % 2 == 0 else (SECONDARY, INVERSE),
-                              padding=(15, 5))
-            label.pack(side=LEFT, padx=2, fill=Y)
+            label = tk.Label(self.status_frame, text=f"{text}: --", font=self.font_11,
+                           bg='#5DADE2' if i % 2 == 0 else '#7EC8E3', fg='white', padx=15, pady=5)
+            label.pack(side=tk.LEFT, padx=2)
             self.status_labels.append(label)
 
     def switch_page(self, page_name):
         if self.is_app_locked_down and page_name not in ["注册软件", "超级管理"]:
             self.log("软件授权已过期，请先注册。")
-            if self.current_page_name != "注册软件":
+            if self.current_page != self.pages.get("注册软件"):
                 self.root.after(10, lambda: self.switch_page("注册软件"))
             return
 
@@ -366,7 +326,8 @@ class TimedBroadcastApp:
             self.current_page.pack_forget()
 
         for title, btn in self.nav_buttons.items():
-            btn.config(bootstyle="light")
+            btn.config(bg='white', fg='black')
+            btn.master.config(bg='white')
 
         target_frame = None
         if page_name == "定时广播":
@@ -397,13 +358,12 @@ class TimedBroadcastApp:
             target_frame = self.pages["定时广播"]
             page_name = "定时广播"
 
-        target_frame.pack(in_=self.page_container, fill=BOTH, expand=True)
+        target_frame.pack(in_=self.page_container, fill=tk.BOTH, expand=True)
         self.current_page = target_frame
-        self.current_page_name = page_name
 
-        selected_btn = self.nav_buttons.get(page_name)
-        if selected_btn:
-            selected_btn.config(bootstyle="primary")
+        selected_btn = self.nav_buttons[page_name]
+        selected_btn.config(bg='#5DADE2', fg='white')
+        selected_btn.master.config(bg='#5DADE2')
 
     def _prompt_for_super_admin_password(self):
         if self.auth_info['status'] != 'Permanent':
@@ -411,17 +371,19 @@ class TimedBroadcastApp:
             self.log("非永久授权用户尝试进入超级管理模块被阻止。")
             return
 
-        dialog = ttk.Toplevel(self.root)
+        dialog = tk.Toplevel(self.root)
         dialog.title("身份验证")
+        dialog.geometry("350x180")
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
+        self.center_window(dialog, 350, 180)
 
         result = [None]
 
-        ttk.Label(dialog, text="请输入超级管理员密码:", font=self.font_11).pack(pady=20, padx=20)
-        password_entry = ttk.Entry(dialog, show='*', font=self.font_11, width=25)
-        password_entry.pack(pady=5, padx=20)
+        tk.Label(dialog, text="请输入超级管理员密码:", font=self.font_11).pack(pady=20)
+        password_entry = tk.Entry(dialog, show='*', font=self.font_11, width=25)
+        password_entry.pack(pady=5)
         password_entry.focus_set()
 
         def on_confirm():
@@ -431,16 +393,13 @@ class TimedBroadcastApp:
         def on_cancel():
             dialog.destroy()
 
-        btn_frame = ttk.Frame(dialog)
+        btn_frame = tk.Frame(dialog)
         btn_frame.pack(pady=20)
-        ttk.Button(btn_frame, text="确定", command=on_confirm, bootstyle="primary", width=8).pack(side=LEFT, padx=10)
-        ttk.Button(btn_frame, text="取消", command=on_cancel, width=8).pack(side=LEFT, padx=10)
+        tk.Button(btn_frame, text="确定", command=on_confirm, width=8).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="取消", command=on_cancel, width=8).pack(side=tk.LEFT, padx=10)
         dialog.bind('<Return>', lambda event: on_confirm())
 
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
         self.root.wait_window(dialog)
-        
         entered_password = result[0]
 
         correct_password = datetime.now().strftime('%Y%m%d')
@@ -452,47 +411,42 @@ class TimedBroadcastApp:
             messagebox.showerror("验证失败", "密码错误！")
             self.log("尝试进入超级管理模块失败：密码错误。")
 
-#第1部分
     def create_registration_page(self):
-        page_frame = ttk.Frame(self.page_container, padding=20)
-        title_label = ttk.Label(page_frame, text="注册软件", font=self.font_14_bold, bootstyle="primary")
-        title_label.pack(anchor=W)
+        page_frame = tk.Frame(self.page_container, bg='white')
+        title_label = tk.Label(page_frame, text="注册软件", font=self.font_14_bold, bg='white', fg='#2980B9')
+        title_label.pack(anchor='w', padx=20, pady=20)
 
-        main_content_frame = ttk.Frame(page_frame)
-        main_content_frame.pack(pady=10, fill=X, expand=True)
+        main_content_frame = tk.Frame(page_frame, bg='white')
+        main_content_frame.pack(padx=20, pady=10)
 
-        machine_code_frame = ttk.Frame(main_content_frame)
-        machine_code_frame.pack(fill=X, pady=10)
-        ttk.Label(machine_code_frame, text="机器码:", font=self.font_12).pack(side=LEFT)
+        machine_code_frame = tk.Frame(main_content_frame, bg='white')
+        machine_code_frame.pack(fill=tk.X, pady=10)
+        tk.Label(machine_code_frame, text="机器码:", font=self.font_12, bg='white').pack(side=tk.LEFT)
         machine_code_val = self.get_machine_code()
-        machine_code_entry = ttk.Entry(machine_code_frame, font=self.font_12, bootstyle="danger")
-        machine_code_entry.pack(side=LEFT, padx=10, fill=X, expand=True)
+        machine_code_entry = tk.Entry(machine_code_frame, font=self.font_12, width=30, fg='red')
+        machine_code_entry.pack(side=tk.LEFT, padx=10)
         machine_code_entry.insert(0, machine_code_val)
         machine_code_entry.config(state='readonly')
 
-        reg_code_frame = ttk.Frame(main_content_frame)
-        reg_code_frame.pack(fill=X, pady=10)
-        ttk.Label(reg_code_frame, text="注册码:", font=self.font_12).pack(side=LEFT)
-        self.reg_code_entry = ttk.Entry(reg_code_frame, font=self.font_12)
-        self.reg_code_entry.pack(side=LEFT, padx=10, fill=X, expand=True)
+        reg_code_frame = tk.Frame(main_content_frame, bg='white')
+        reg_code_frame.pack(fill=tk.X, pady=10)
+        tk.Label(reg_code_frame, text="注册码:", font=self.font_12, bg='white').pack(side=tk.LEFT)
+        self.reg_code_entry = tk.Entry(reg_code_frame, font=self.font_12, width=30)
+        self.reg_code_entry.pack(side=tk.LEFT, padx=10)
 
-        btn_container = ttk.Frame(main_content_frame)
+        btn_container = tk.Frame(main_content_frame, bg='white')
         btn_container.pack(pady=20)
 
-        register_btn = ttk.Button(btn_container, text="注 册",
-                                 bootstyle="success", style='lg.TButton', command=self.attempt_registration)
-        register_btn.pack(pady=5, fill=X)
+        register_btn = tk.Button(btn_container, text="注 册", font=self.font_12_bold,
+                                 bg='#27AE60', fg='white', width=15, pady=5, command=self.attempt_registration)
+        register_btn.pack(pady=5)
 
-        cancel_reg_btn = ttk.Button(btn_container, text="取消注册",
-                                   bootstyle="danger", style='lg.TButton', command=self.cancel_registration)
-        cancel_reg_btn.pack(pady=5, fill=X)
-        
-        style = ttk.Style.get_instance()
-        style.configure('lg.TButton', font=self.font_12_bold)
-
+        cancel_reg_btn = tk.Button(btn_container, text="取消注册", font=self.font_12_bold,
+                                   bg='#E74C3C', fg='white', width=15, pady=5, command=self.cancel_registration)
+        cancel_reg_btn.pack(pady=5)
 
         info_text = "请将您的机器码发送给软件提供商以获取注册码。\n注册码分为月度授权和永久授权两种。"
-        ttk.Label(main_content_frame, text=info_text, font=self.font_10, bootstyle="secondary").pack(pady=10)
+        tk.Label(main_content_frame, text=info_text, font=self.font_10, bg='white', fg='grey').pack(pady=10)
 
         return page_frame
 
@@ -682,38 +636,44 @@ class TimedBroadcastApp:
         self.root.title(f" 创翔多功能定时播音旗舰版 ({self.auth_info['message']})")
 
     def create_super_admin_page(self):
-        page_frame = ttk.Frame(self.page_container, padding=20)
-        title_label = ttk.Label(page_frame, text="超级管理", font=self.font_14_bold, bootstyle="danger")
-        title_label.pack(anchor='w', pady=(0, 10))
-        desc_label = ttk.Label(page_frame, text="警告：此处的任何操作都可能导致数据丢失或配置重置，请谨慎操作。\n(此功能仅对“永久授权”用户开放)",
-                               font=self.font_11, bootstyle="danger", wraplength=700)
-        desc_label.pack(anchor='w', pady=(0, 20))
+        page_frame = tk.Frame(self.page_container, bg='white')
+        title_label = tk.Label(page_frame, text="超级管理", font=self.font_14_bold, bg='white', fg='#C0392B')
+        title_label.pack(anchor='w', padx=20, pady=20)
+        desc_label = tk.Label(page_frame, text="警告：此处的任何操作都可能导致数据丢失或配置重置，请谨慎操作。\n(此功能仅对“永久授权”用户开放)",
+                              font=self.font_11, bg='white', fg='red', wraplength=700)
+        desc_label.pack(anchor='w', padx=20, pady=(0, 20))
 
-        btn_frame = ttk.Frame(page_frame)
-        btn_frame.pack(pady=10, fill=X)
+        btn_frame = tk.Frame(page_frame, bg='white')
+        btn_frame.pack(padx=20, pady=10, fill=tk.X)
 
-        btn_width = 20
-        btn_padding = 10
+        btn_width = 20; btn_pady = 10
 
-        ttk.Button(btn_frame, text="备份所有设置", command=self._backup_all_settings, bootstyle="primary", width=btn_width).pack(pady=btn_padding, fill=X, ipady=5)
-        ttk.Button(btn_frame, text="还原所有设置", command=self._restore_all_settings, bootstyle="success", width=btn_width).pack(pady=btn_padding, fill=X, ipady=5)
-        ttk.Button(btn_frame, text="重置软件", command=self._reset_software, bootstyle="danger", width=btn_width).pack(pady=btn_padding, fill=X, ipady=5)
-        ttk.Button(btn_frame, text="卸载软件", command=self._prompt_for_uninstall, bootstyle="secondary", width=btn_width).pack(pady=btn_padding, fill=X, ipady=5)
+        tk.Button(btn_frame, text="备份所有设置", command=self._backup_all_settings,
+                  font=self.font_12_bold, width=btn_width, pady=btn_pady, bg='#2980B9', fg='white').pack(pady=10)
+        tk.Button(btn_frame, text="还原所有设置", command=self._restore_all_settings,
+                  font=self.font_12_bold, width=btn_width, pady=btn_pady, bg='#27AE60', fg='white').pack(pady=10)
+        tk.Button(btn_frame, text="重置软件", command=self._reset_software,
+                  font=self.font_12_bold, width=btn_width, pady=btn_pady, bg='#E74C3C', fg='white').pack(pady=10)
+
+        tk.Button(btn_frame, text="卸载软件", command=self._prompt_for_uninstall,
+                  font=self.font_12_bold, width=btn_width, pady=btn_pady, bg='#34495E', fg='white').pack(pady=10)
 
         return page_frame
 
     def _prompt_for_uninstall(self):
-        dialog = ttk.Toplevel(self.root)
+        dialog = tk.Toplevel(self.root)
         dialog.title("卸载软件 - 身份验证")
+        dialog.geometry("350x180")
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
+        self.center_window(dialog, 350, 180)
 
         result = [None]
 
-        ttk.Label(dialog, text="请输入卸载密码:", font=self.font_11).pack(pady=20, padx=20)
-        password_entry = ttk.Entry(dialog, show='*', font=self.font_11, width=25)
-        password_entry.pack(pady=5, padx=20)
+        tk.Label(dialog, text="请输入卸载密码:", font=self.font_11).pack(pady=20)
+        password_entry = tk.Entry(dialog, show='*', font=self.font_11, width=25)
+        password_entry.pack(pady=5)
         password_entry.focus_set()
 
         def on_confirm():
@@ -723,16 +683,13 @@ class TimedBroadcastApp:
         def on_cancel():
             dialog.destroy()
 
-        btn_frame = ttk.Frame(dialog)
+        btn_frame = tk.Frame(dialog)
         btn_frame.pack(pady=20)
-        ttk.Button(btn_frame, text="确定", command=on_confirm, bootstyle="primary", width=8).pack(side=LEFT, padx=10)
-        ttk.Button(btn_frame, text="取消", command=on_cancel, width=8).pack(side=LEFT, padx=10)
+        tk.Button(btn_frame, text="确定", command=on_confirm, width=8).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="取消", command=on_cancel, width=8).pack(side=tk.LEFT, padx=10)
         dialog.bind('<Return>', lambda event: on_confirm())
-        
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
-        self.root.wait_window(dialog)
 
+        self.root.wait_window(dialog)
         entered_password = result[0]
 
         correct_password = datetime.now().strftime('%Y%m%d')[::-1]
@@ -864,7 +821,6 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"还原失败: {e}"); messagebox.showerror("还原失败", f"发生错误: {e}")
 
-#第2部分
     def _refresh_settings_ui(self):
         if "设置" not in self.pages or not hasattr(self, 'autostart_var'):
             return
@@ -890,9 +846,9 @@ class TimedBroadcastApp:
         self.bg_image_interval_var.set(str(self.settings.get("bg_image_interval", 6)))
 
         if self.lock_password_b64 and WIN32_AVAILABLE:
-            self.clear_password_btn.config(state=NORMAL)
+            self.clear_password_btn.config(state=tk.NORMAL)
         else:
-            self.clear_password_btn.config(state=DISABLED)
+            self.clear_password_btn.config(state=tk.DISABLED)
 
     def _reset_software(self):
         if not messagebox.askyesno(
@@ -937,265 +893,239 @@ class TimedBroadcastApp:
     def create_scheduled_broadcast_page(self):
         page_frame = self.pages["定时广播"]
 
-        top_frame = ttk.Frame(page_frame, padding=(10, 10))
-        top_frame.pack(fill=X)
-        title_label = ttk.Label(top_frame, text="定时广播", font=self.font_14_bold)
-        title_label.pack(side=LEFT)
+        top_frame = tk.Frame(page_frame, bg='white')
+        top_frame.pack(fill=tk.X, padx=10, pady=10)
+        title_label = tk.Label(top_frame, text="定时广播", font=self.font_14_bold,
+                              bg='white', fg='#2C5F7C')
+        title_label.pack(side=tk.LEFT)
 
-        add_btn = ttk.Button(top_frame, text="添加节目", command=self.add_task, bootstyle="primary")
-        add_btn.pack(side=LEFT, padx=10)
+        add_btn = tk.Button(top_frame, text="添加节目", command=self.add_task, bg='#3498DB', fg='white',
+                              font=self.font_11, bd=0, padx=12, pady=5, cursor='hand2')
+        add_btn.pack(side=tk.LEFT, padx=10)
 
-        self.top_right_btn_frame = ttk.Frame(top_frame)
-        self.top_right_btn_frame.pack(side=RIGHT)
+        self.top_right_btn_frame = tk.Frame(top_frame, bg='white')
+        self.top_right_btn_frame.pack(side=tk.RIGHT)
 
         batch_buttons = [
-            ("全部启用", self.enable_all_tasks, 'success'),
-            ("全部禁用", self.disable_all_tasks, 'warning'),
-            ("禁音频节目", lambda: self._set_tasks_status_by_type('audio', '禁用'), 'warning-outline'),
-            ("禁语音节目", lambda: self._set_tasks_status_by_type('voice', '禁用'), 'warning-outline'),
-            ("禁视频节目", lambda: self._set_tasks_status_by_type('video', '禁用'), 'warning-outline'),
-            ("统一音量", self.set_uniform_volume, 'info'),
-            ("清空节目", self.clear_all_tasks, 'danger')
+            ("全部启用", self.enable_all_tasks, '#27AE60'),
+            ("全部禁用", self.disable_all_tasks, '#F39C12'),
+            ("禁音频节目", lambda: self._set_tasks_status_by_type('audio', '禁用'), '#E67E22'),
+            ("禁语音节目", lambda: self._set_tasks_status_by_type('voice', '禁用'), '#D35400'),
+            ("禁视频节目", lambda: self._set_tasks_status_by_type('video', '禁用'), '#2980B9'),
+            ("统一音量", self.set_uniform_volume, '#8E44AD'),
+            ("清空节目", self.clear_all_tasks, '#C0392B')
         ]
-        for text, cmd, style in batch_buttons:
-            btn = ttk.Button(self.top_right_btn_frame, text=text, command=cmd, bootstyle=style)
-            btn.pack(side=LEFT, padx=3)
+        for text, cmd, color in batch_buttons:
+            btn = tk.Button(self.top_right_btn_frame, text=text, command=cmd, bg=color, fg='white',
+                          font=self.font_11, bd=0, padx=12, pady=5, cursor='hand2')
+            btn.pack(side=tk.LEFT, padx=3)
 
-        self.lock_button = ttk.Button(self.top_right_btn_frame, text="锁定", command=self.toggle_lock_state, bootstyle='danger')
-        self.lock_button.pack(side=LEFT, padx=3)
+        self.lock_button = tk.Button(self.top_right_btn_frame, text="锁定", command=self.toggle_lock_state, bg='#E74C3C', fg='white',
+                                     font=self.font_11, bd=0, padx=12, pady=5, cursor='hand2')
+        self.lock_button.pack(side=tk.LEFT, padx=3)
         if not WIN32_AVAILABLE:
-            self.lock_button.config(state=DISABLED, text="锁定(Win)")
+            self.lock_button.config(state=tk.DISABLED, text="锁定(Win)")
 
-        io_buttons = [("导入节目单", self.import_tasks, 'info-outline'), ("导出节目单", self.export_tasks, 'info-outline')]
-        for text, cmd, style in io_buttons:
-            btn = ttk.Button(self.top_right_btn_frame, text=text, command=cmd, bootstyle=style)
-            btn.pack(side=LEFT, padx=3)
+        io_buttons = [("导入节目单", self.import_tasks, '#1ABC9C'), ("导出节目单", self.export_tasks, '#1ABC9C')]
+        for text, cmd, color in io_buttons:
+            btn = tk.Button(self.top_right_btn_frame, text=text, command=cmd, bg=color, fg='white',
+                          font=self.font_11, bd=0, padx=12, pady=5, cursor='hand2')
+            btn.pack(side=tk.LEFT, padx=3)
 
-        stats_frame = ttk.Frame(page_frame, padding=(10, 5))
-        stats_frame.pack(fill=X)
-        self.stats_label = ttk.Label(stats_frame, text="节目单：0", font=self.font_11, bootstyle="secondary")
-        self.stats_label.pack(side=LEFT, fill=X, expand=True)
+        stats_frame = tk.Frame(page_frame, bg='#F0F8FF')
+        stats_frame.pack(fill=tk.X, padx=10, pady=5)
+        self.stats_label = tk.Label(stats_frame, text="节目单：0", font=self.font_11,
+                                   bg='#F0F8FF', fg='#2C5F7C', anchor='w', padx=10)
+        self.stats_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        table_frame = ttk.Frame(page_frame, padding=(10, 5))
-        table_frame.pack(fill=BOTH, expand=True)
+        table_frame = tk.Frame(page_frame, bg='white')
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         columns = ('节目名称', '状态', '开始时间', '模式', '文件或内容', '音量', '周几/几号', '日期范围')
-        self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12, selectmode='extended', bootstyle="primary")
+        self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12, selectmode='extended')
 
         self.task_tree.heading('节目名称', text='节目名称')
         self.task_tree.column('节目名称', width=200, anchor='w')
         self.task_tree.heading('状态', text='状态')
-        self.task_tree.column('状态', width=70, anchor='center', stretch=NO)
+        self.task_tree.column('状态', width=70, anchor='center', stretch=tk.NO)
         self.task_tree.heading('开始时间', text='开始时间')
-        self.task_tree.column('开始时间', width=100, anchor='center', stretch=NO)
+        self.task_tree.column('开始时间', width=100, anchor='center', stretch=tk.NO)
         self.task_tree.heading('模式', text='模式')
-        self.task_tree.column('模式', width=70, anchor='center', stretch=NO)
+        self.task_tree.column('模式', width=70, anchor='center', stretch=tk.NO)
         self.task_tree.heading('文件或内容', text='文件或内容')
         self.task_tree.column('文件或内容', width=300, anchor='w')
         self.task_tree.heading('音量', text='音量')
-        self.task_tree.column('音量', width=70, anchor='center', stretch=NO)
+        self.task_tree.column('音量', width=70, anchor='center', stretch=tk.NO)
         self.task_tree.heading('周几/几号', text='周几/几号')
         self.task_tree.column('周几/几号', width=100, anchor='center')
         self.task_tree.heading('日期范围', text='日期范围')
         self.task_tree.column('日期范围', width=120, anchor='center')
 
-        self.task_tree.pack(side=LEFT, fill=BOTH, expand=True)
-        scrollbar = ttk.Scrollbar(table_frame, orient=VERTICAL, command=self.task_tree.yview, bootstyle="round")
-        scrollbar.pack(side=RIGHT, fill=Y)
+        self.task_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.task_tree.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.task_tree.configure(yscrollcommand=scrollbar.set)
 
         self.task_tree.bind("<Button-3>", self.show_context_menu)
         self.task_tree.bind("<Double-1>", self.on_double_click_edit)
         self._enable_drag_selection(self.task_tree)
 
-        playing_frame = ttk.LabelFrame(page_frame, text="正在播：", padding=(10, 5))
-        playing_frame.pack(fill=X, padx=10, pady=5)
-        self.playing_label = ttk.Label(playing_frame, text="等待播放...", font=self.font_11,
-                                       anchor=W, justify=LEFT, padding=5, bootstyle="warning")
-        self.playing_label.pack(fill=X, expand=True, ipady=4)
+        playing_frame = tk.LabelFrame(page_frame, text="正在播：", font=self.font_11,
+                                     bg='white', fg='#2C5F7C', padx=10, pady=2)
+        playing_frame.pack(fill=tk.X, padx=10, pady=5)
+        self.playing_label = tk.Label(playing_frame, text="等待播放...", font=self.font_11,
+                                      bg='#FFFEF0', anchor='w', justify=tk.LEFT, padx=5)
+        self.playing_label.pack(fill=tk.X, expand=True, ipady=4)
         self.update_playing_text("等待播放...")
 
-        log_frame = ttk.LabelFrame(page_frame, text="", padding=(10, 5))
-        log_frame.pack(fill=BOTH, expand=True, padx=10, pady=5)
+        log_frame = tk.LabelFrame(page_frame, text="", font=self.font_11,
+                                 bg='white', fg='#2C5F7C', padx=10, pady=5)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        log_header_frame = ttk.Frame(log_frame)
-        log_header_frame.pack(fill=X)
-        log_label = ttk.Label(log_header_frame, text="日志：", font=self.font_11_bold)
-        log_label.pack(side=LEFT)
-        self.clear_log_btn = ttk.Button(log_header_frame, text="清除日志", command=self.clear_log,
-                                        bootstyle="light-outline")
-        self.clear_log_btn.pack(side=LEFT, padx=10)
+        log_header_frame = tk.Frame(log_frame, bg='white')
+        log_header_frame.pack(fill=tk.X)
+        log_label = tk.Label(log_header_frame, text="日志：", font=self.font_11_bold,
+                             bg='white', fg='#2C5F7C')
+        log_label.pack(side=tk.LEFT)
+        self.clear_log_btn = tk.Button(log_header_frame, text="清除日志", command=self.clear_log,
+                                       font=self.font_8, bd=0, bg='#EAEAEA',
+                                       fg='#333', cursor='hand2', padx=5, pady=0)
+        self.clear_log_btn.pack(side=tk.LEFT, padx=10)
 
-        self.log_text = ScrolledText(log_frame, height=6, font=self.font_11,
-                                                  wrap=WORD, state='disabled')
-        self.log_text.pack(fill=BOTH, expand=True)
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=6, font=self.font_11,
+                                                 bg='#F9F9F9', wrap=tk.WORD, state='disabled')
+        self.log_text.pack(fill=tk.BOTH, expand=True)
 
     def create_settings_page(self):
-        settings_frame = ttk.Frame(self.page_container, padding=20)
+        settings_frame = tk.Frame(self.page_container, bg='white')
 
-        title_label = ttk.Label(settings_frame, text="系统设置", font=self.font_14_bold, bootstyle="primary")
-        title_label.pack(anchor=W, pady=(0, 10))
+        title_label = tk.Label(settings_frame, text="系统设置", font=self.font_14_bold, bg='white', fg='#2C5F7C')
+        title_label.pack(anchor='w', padx=20, pady=20)
 
-        general_frame = ttk.LabelFrame(settings_frame, text="通用设置", padding=(15, 10))
-        general_frame.pack(fill=X, pady=10)
+        general_frame = tk.LabelFrame(settings_frame, text="通用设置", font=self.font_12_bold, bg='white', padx=15, pady=10)
+        general_frame.pack(fill=tk.X, padx=20, pady=10)
 
-        self.autostart_var = ttk.BooleanVar()
-        self.start_minimized_var = ttk.BooleanVar()
-        self.lock_on_start_var = ttk.BooleanVar()
-        self.bg_image_interval_var = ttk.StringVar()
+        self.autostart_var = tk.BooleanVar()
+        self.start_minimized_var = tk.BooleanVar()
+        self.lock_on_start_var = tk.BooleanVar()
+        self.bg_image_interval_var = tk.StringVar()
 
-        ttk.Checkbutton(general_frame, text="登录windows后自动启动", variable=self.autostart_var, bootstyle="round-toggle", command=self._handle_autostart_setting).pack(fill=X, pady=5)
-        ttk.Checkbutton(general_frame, text="启动后最小化到系统托盘", variable=self.start_minimized_var, bootstyle="round-toggle", command=self.save_settings).pack(fill=X, pady=5)
+        tk.Checkbutton(general_frame, text="登录windows后自动启动", variable=self.autostart_var, font=self.font_11, bg='white', anchor='w', command=self._handle_autostart_setting).pack(fill=tk.X, pady=5)
+        tk.Checkbutton(general_frame, text="启动后最小化到系统托盘", variable=self.start_minimized_var, font=self.font_11, bg='white', anchor='w', command=self.save_settings).pack(fill=tk.X, pady=5)
 
-        lock_and_buttons_frame = ttk.Frame(general_frame)
-        lock_and_buttons_frame.pack(fill=X, pady=5)
+        lock_and_buttons_frame = tk.Frame(general_frame, bg='white')
+        lock_and_buttons_frame.pack(fill=tk.X, pady=5)
 
-        self.lock_on_start_cb = ttk.Checkbutton(lock_and_buttons_frame, text="启动软件后立即锁定", variable=self.lock_on_start_var, bootstyle="round-toggle", command=self._handle_lock_on_start_toggle)
+        self.lock_on_start_cb = tk.Checkbutton(lock_and_buttons_frame, text="启动软件后立即锁定", variable=self.lock_on_start_var, font=self.font_11, bg='white', anchor='w', command=self._handle_lock_on_start_toggle)
         self.lock_on_start_cb.grid(row=0, column=0, sticky='w')
         if not WIN32_AVAILABLE:
-            self.lock_on_start_cb.config(state=DISABLED)
+            self.lock_on_start_cb.config(state=tk.DISABLED)
 
-        ttk.Label(lock_and_buttons_frame, text="(请先在主界面设置锁定密码)", font=self.font_9, bootstyle="secondary").grid(row=1, column=0, sticky='w', padx=20)
+        tk.Label(lock_and_buttons_frame, text="(请先在主界面设置锁定密码)", font=self.font_9, bg='white', fg='grey').grid(row=1, column=0, sticky='w', padx=20)
 
-        self.clear_password_btn = ttk.Button(lock_and_buttons_frame, text="清除锁定密码", command=self.clear_lock_password, bootstyle="warning-outline")
+        self.clear_password_btn = tk.Button(lock_and_buttons_frame, text="清除锁定密码", font=self.font_11, command=self.clear_lock_password)
         self.clear_password_btn.grid(row=0, column=1, padx=20)
 
-        action_buttons_frame = ttk.Frame(general_frame)
-        action_buttons_frame.pack(fill=X, pady=8)
+        self.cancel_bg_images_btn = tk.Button(lock_and_buttons_frame, text="取消所有节目背景图片", font=self.font_11, command=self._cancel_all_background_images)
+        self.cancel_bg_images_btn.grid(row=0, column=2, padx=10)
 
-        self.cancel_bg_images_btn = ttk.Button(action_buttons_frame, text="取消所有节目背景图片", command=self._cancel_all_background_images, bootstyle="info-outline")
-        self.cancel_bg_images_btn.pack(side=LEFT, padx=5)
-        
-        self.restore_video_speed_btn = ttk.Button(action_buttons_frame, text="恢复所有视频节目播放速度", command=self._restore_all_video_speeds, bootstyle="info-outline")
-        self.restore_video_speed_btn.pack(side=LEFT, padx=5)
+        bg_interval_frame = tk.Frame(general_frame, bg='white')
+        bg_interval_frame.pack(fill=tk.X, pady=8)
+        tk.Label(bg_interval_frame, text="背景图片切换间隔:", font=self.font_11, bg='white').pack(side=tk.LEFT)
+        interval_entry = tk.Entry(bg_interval_frame, textvariable=self.bg_image_interval_var, font=self.font_11, width=5)
+        interval_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(bg_interval_frame, text="秒 (范围: 5-60)", font=self.font_10, bg='white', fg='grey').pack(side=tk.LEFT)
+        interval_entry.bind("<FocusOut>", self._validate_bg_interval)
+        interval_entry.bind("<Return>", self._validate_bg_interval)
 
-        bg_interval_frame = ttk.Frame(general_frame)
-        bg_interval_frame.pack(fill=X, pady=8)
-        ttk.Label(bg_interval_frame, text="背景图片切换间隔:").pack(side=LEFT)
-        interval_entry = ttk.Entry(bg_interval_frame, textvariable=self.bg_image_interval_var, font=self.font_11, width=5)
-        interval_entry.pack(side=LEFT, padx=5)
-        ttk.Label(bg_interval_frame, text="秒 (范围: 5-60)", font=self.font_10, bootstyle="secondary").pack(side=LEFT)
-        ttk.Button(bg_interval_frame, text="确定", command=self._validate_bg_interval, bootstyle="primary-outline").pack(side=LEFT, padx=10)
+        # --- 新增: 字体设置UI ---
+        font_frame = tk.Frame(general_frame, bg='white')
+        font_frame.pack(fill=tk.X, pady=8)
 
-        font_frame = ttk.Frame(general_frame)
-        font_frame.pack(fill=X, pady=8)
-
-        ttk.Label(font_frame, text="软件字体:").pack(side=LEFT)
+        tk.Label(font_frame, text="软件字体:", font=self.font_11, bg='white').pack(side=tk.LEFT)
 
         try:
             available_fonts = sorted(list(font.families()))
         except:
             available_fonts = ["Microsoft YaHei"]
 
-        self.font_var = ttk.StringVar()
+        self.font_var = tk.StringVar()
 
         font_combo = ttk.Combobox(font_frame, textvariable=self.font_var, values=available_fonts, font=self.font_10, width=25, state='readonly')
-        font_combo.pack(side=LEFT, padx=10)
+        font_combo.pack(side=tk.LEFT, padx=10)
         font_combo.bind("<<ComboboxSelected>>", self._on_font_selected)
 
-        restore_font_btn = ttk.Button(font_frame, text="恢复默认字体", command=self._restore_default_font, bootstyle="secondary-outline")
-        restore_font_btn.pack(side=LEFT, padx=10)
+        restore_font_btn = tk.Button(font_frame, text="恢复默认字体", font=self.font_10, command=self._restore_default_font)
+        restore_font_btn.pack(side=tk.LEFT, padx=10)
 
-        time_chime_frame = ttk.LabelFrame(settings_frame, text="整点报时", padding=(15, 10))
-        time_chime_frame.pack(fill=X, pady=10)
+        time_chime_frame = tk.LabelFrame(settings_frame, text="整点报时", font=self.font_12_bold, bg='white', padx=15, pady=10)
+        time_chime_frame.pack(fill=tk.X, padx=20, pady=10)
 
-        self.time_chime_enabled_var = ttk.BooleanVar()
-        self.time_chime_voice_var = ttk.StringVar()
-        self.time_chime_speed_var = ttk.StringVar()
-        self.time_chime_pitch_var = ttk.StringVar()
+        self.time_chime_enabled_var = tk.BooleanVar()
+        self.time_chime_voice_var = tk.StringVar()
+        self.time_chime_speed_var = tk.StringVar()
+        self.time_chime_pitch_var = tk.StringVar()
 
-        chime_control_frame = ttk.Frame(time_chime_frame)
-        chime_control_frame.pack(fill=X, pady=5)
-        chime_control_frame.columnconfigure(1, weight=1) # 让Combobox扩展
+        chime_control_frame = tk.Frame(time_chime_frame, bg='white')
+        chime_control_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Checkbutton(chime_control_frame, text="启用整点报时功能", variable=self.time_chime_enabled_var, bootstyle="round-toggle", command=self._handle_time_chime_toggle).pack(side=LEFT)
+        tk.Checkbutton(chime_control_frame, text="启用整点报时功能", variable=self.time_chime_enabled_var, font=self.font_11, bg='white', anchor='w', command=self._handle_time_chime_toggle).pack(side=tk.LEFT)
 
         available_voices = self.get_available_voices()
-        # 修复8：移除固定width，让其填充
-        self.chime_voice_combo = ttk.Combobox(chime_control_frame, textvariable=self.time_chime_voice_var, values=available_voices, font=self.font_10, state='readonly')
-        self.chime_voice_combo.pack(side=LEFT, padx=10, fill=X, expand=True)
+        self.chime_voice_combo = ttk.Combobox(chime_control_frame, textvariable=self.time_chime_voice_var, values=available_voices, font=self.font_10, width=35, state='readonly')
+        self.chime_voice_combo.pack(side=tk.LEFT, padx=10)
         self.chime_voice_combo.bind("<<ComboboxSelected>>", lambda e: self._on_chime_params_changed(is_voice_change=True))
 
-        params_frame = ttk.Frame(chime_control_frame)
-        params_frame.pack(side=LEFT, padx=10)
-        ttk.Label(params_frame, text="语速(-10~10):", font=self.font_10).pack(side=LEFT)
-        speed_entry = ttk.Entry(params_frame, textvariable=self.time_chime_speed_var, font=self.font_10, width=5)
-        speed_entry.pack(side=LEFT, padx=(0, 10))
-        ttk.Label(params_frame, text="音调(-10~10):", font=self.font_10).pack(side=LEFT)
-        pitch_entry = ttk.Entry(params_frame, textvariable=self.time_chime_pitch_var, font=self.font_10, width=5)
-        pitch_entry.pack(side=LEFT)
+        params_frame = tk.Frame(chime_control_frame, bg='white')
+        params_frame.pack(side=tk.LEFT, padx=10)
+        tk.Label(params_frame, text="语速(-10~10):", font=self.font_10, bg='white').pack(side=tk.LEFT)
+        speed_entry = tk.Entry(params_frame, textvariable=self.time_chime_speed_var, font=self.font_10, width=5)
+        speed_entry.pack(side=tk.LEFT, padx=(0, 10))
+        tk.Label(params_frame, text="音调(-10~10):", font=self.font_10, bg='white').pack(side=tk.LEFT)
+        pitch_entry = tk.Entry(params_frame, textvariable=self.time_chime_pitch_var, font=self.font_10, width=5)
+        pitch_entry.pack(side=tk.LEFT)
 
         speed_entry.bind("<FocusOut>", self._on_chime_params_changed)
         pitch_entry.bind("<FocusOut>", self._on_chime_params_changed)
 
-        power_frame = ttk.LabelFrame(settings_frame, text="电源管理", padding=(15, 10))
-        power_frame.pack(fill=X, pady=10)
+        power_frame = tk.LabelFrame(settings_frame, text="电源管理", font=self.font_12_bold, bg='white', padx=15, pady=10)
+        power_frame.pack(fill=tk.X, padx=20, pady=10)
 
-        self.daily_shutdown_enabled_var = ttk.BooleanVar()
-        self.daily_shutdown_time_var = ttk.StringVar()
-        self.weekly_shutdown_enabled_var = ttk.BooleanVar()
-        self.weekly_shutdown_time_var = ttk.StringVar()
-        self.weekly_shutdown_days_var = ttk.StringVar()
-        self.weekly_reboot_enabled_var = ttk.BooleanVar()
-        self.weekly_reboot_time_var = ttk.StringVar()
-        self.weekly_reboot_days_var = ttk.StringVar()
+        self.daily_shutdown_enabled_var = tk.BooleanVar()
+        self.daily_shutdown_time_var = tk.StringVar()
+        self.weekly_shutdown_enabled_var = tk.BooleanVar()
+        self.weekly_shutdown_time_var = tk.StringVar()
+        self.weekly_shutdown_days_var = tk.StringVar()
+        self.weekly_reboot_enabled_var = tk.BooleanVar()
+        self.weekly_reboot_time_var = tk.StringVar()
+        self.weekly_reboot_days_var = tk.StringVar()
 
-        # 修复9：使用 grid 布局替换 pack
-        # 每日关机
-        daily_frame = ttk.Frame(power_frame)
-        daily_frame.pack(fill=X, pady=4)
-        daily_frame.columnconfigure(1, weight=1)
-        ttk.Checkbutton(daily_frame, text="每天关机    ", variable=self.daily_shutdown_enabled_var, bootstyle="round-toggle", command=self.save_settings).grid(row=0, column=0, sticky='w')
-        daily_time_entry = ttk.Entry(daily_frame, textvariable=self.daily_shutdown_time_var, font=self.font_11)
-        daily_time_entry.grid(row=0, column=1, sticky='we', padx=5)
+        daily_frame = tk.Frame(power_frame, bg='white')
+        daily_frame.pack(fill=tk.X, pady=4)
+        tk.Checkbutton(daily_frame, text="每天关机", variable=self.daily_shutdown_enabled_var, font=self.font_11, bg='white', command=self.save_settings).pack(side=tk.LEFT)
+        daily_time_entry = tk.Entry(daily_frame, textvariable=self.daily_shutdown_time_var, font=self.font_11, width=15)
+        daily_time_entry.pack(side=tk.LEFT, padx=10)
         self._bind_mousewheel_to_entry(daily_time_entry, self._handle_time_scroll)
-        ttk.Button(daily_frame, text="设置", bootstyle="primary-outline", command=lambda: self.show_single_time_dialog(self.daily_shutdown_time_var)).grid(row=0, column=2, sticky='e', padx=5)
+        tk.Button(daily_frame, text="设置", font=self.font_11, command=lambda: self.show_single_time_dialog(self.daily_shutdown_time_var)).pack(side=tk.LEFT)
 
-        # 每周关机
-        weekly_frame = ttk.Frame(power_frame)
-        weekly_frame.pack(fill=X, pady=4)
-        weekly_frame.columnconfigure(1, weight=1)
-        ttk.Checkbutton(weekly_frame, text="每周关机    ", variable=self.weekly_shutdown_enabled_var, bootstyle="round-toggle", command=self.save_settings).grid(row=0, column=0, sticky='w')
-        weekly_days_entry = ttk.Entry(weekly_frame, textvariable=self.weekly_shutdown_days_var, font=self.font_11)
-        weekly_days_entry.grid(row=0, column=1, sticky='we', padx=5)
-        weekly_shutdown_time_entry = ttk.Entry(weekly_frame, textvariable=self.weekly_shutdown_time_var, font=self.font_11, width=15)
-        weekly_shutdown_time_entry.grid(row=0, column=2, sticky='we', padx=5)
+        weekly_frame = tk.Frame(power_frame, bg='white')
+        weekly_frame.pack(fill=tk.X, pady=4)
+        tk.Checkbutton(weekly_frame, text="每周关机", variable=self.weekly_shutdown_enabled_var, font=self.font_11, bg='white', command=self.save_settings).pack(side=tk.LEFT)
+        tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_days_var, font=self.font_11, width=20).pack(side=tk.LEFT, padx=(10,5))
+        weekly_shutdown_time_entry = tk.Entry(weekly_frame, textvariable=self.weekly_shutdown_time_var, font=self.font_11, width=15)
+        weekly_shutdown_time_entry.pack(side=tk.LEFT, padx=5)
         self._bind_mousewheel_to_entry(weekly_shutdown_time_entry, self._handle_time_scroll)
-        ttk.Button(weekly_frame, text="设置", bootstyle="primary-outline", command=lambda: self.show_power_week_time_dialog("设置每周关机", self.weekly_shutdown_days_var, self.weekly_shutdown_time_var)).grid(row=0, column=3, sticky='e', padx=5)
+        tk.Button(weekly_frame, text="设置", font=self.font_11, command=lambda: self.show_power_week_time_dialog("设置每周关机", self.weekly_shutdown_days_var, self.weekly_shutdown_time_var)).pack(side=tk.LEFT)
 
-        # 每周重启
-        reboot_frame = ttk.Frame(power_frame)
-        reboot_frame.pack(fill=X, pady=4)
-        reboot_frame.columnconfigure(1, weight=1)
-        ttk.Checkbutton(reboot_frame, text="每周重启    ", variable=self.weekly_reboot_enabled_var, bootstyle="round-toggle", command=self.save_settings).grid(row=0, column=0, sticky='w')
-        ttk.Entry(reboot_frame, textvariable=self.weekly_reboot_days_var, font=self.font_11).grid(row=0, column=1, sticky='we', padx=5)
-        weekly_reboot_time_entry = ttk.Entry(reboot_frame, textvariable=self.weekly_reboot_time_var, font=self.font_11, width=15)
-        weekly_reboot_time_entry.grid(row=0, column=2, sticky='we', padx=5)
+        reboot_frame = tk.Frame(power_frame, bg='white')
+        reboot_frame.pack(fill=tk.X, pady=4)
+        tk.Checkbutton(reboot_frame, text="每周重启", variable=self.weekly_reboot_enabled_var, font=self.font_11, bg='white', command=self.save_settings).pack(side=tk.LEFT)
+        tk.Entry(reboot_frame, textvariable=self.weekly_reboot_days_var, font=self.font_11, width=20).pack(side=tk.LEFT, padx=(10,5))
+        weekly_reboot_time_entry = tk.Entry(reboot_frame, textvariable=self.weekly_reboot_time_var, font=self.font_11, width=15)
+        weekly_reboot_time_entry.pack(side=tk.LEFT, padx=5)
         self._bind_mousewheel_to_entry(weekly_reboot_time_entry, self._handle_time_scroll)
-        ttk.Button(reboot_frame, text="设置", bootstyle="primary-outline", command=lambda: self.show_power_week_time_dialog("设置每周重启", self.weekly_reboot_days_var, self.weekly_reboot_time_var)).grid(row=0, column=3, sticky='e', padx=5)
-
+        tk.Button(reboot_frame, text="设置", font=self.font_11, command=lambda: self.show_power_week_time_dialog("设置每周重启", self.weekly_reboot_days_var, self.weekly_reboot_time_var)).pack(side=tk.LEFT)
 
         return settings_frame
-
-#第3部分
-    def _restore_all_video_speeds(self):
-        """恢复所有视频节目的播放速度为1.0x"""
-        if not self.tasks:
-            messagebox.showinfo("提示", "当前没有节目，无需操作。")
-            return
-
-        count = 0
-        for task in self.tasks:
-            if task.get('type') == 'video':
-                if task.get('playback_rate') != '1.0x (正常)':
-                    task['playback_rate'] = '1.0x (正常)'
-                    count += 1
-        
-        if count > 0:
-            self.save_tasks()
-            self.log(f"已成功将 {count} 个视频节目的播放速度恢复为1.0x。")
-            messagebox.showinfo("操作成功", f"已成功将 {count} 个视频节目的播放速度恢复为默认值(1.0x)。")
-        else:
-            messagebox.showinfo("提示", "所有视频节目已经是默认播放速度，无需恢复。")
 
     def _on_font_selected(self, event):
         """当用户从下拉列表中选择一个新字体时调用"""
@@ -1204,7 +1134,6 @@ class TimedBroadcastApp:
             self.settings["app_font"] = new_font
             self.save_settings()
             self.log(f"字体已更改为 '{new_font}'。")
-            self._apply_global_font()
             messagebox.showinfo("设置已保存", "字体设置已保存。\n请重启软件以使新字体完全生效。")
 
     def _restore_default_font(self):
@@ -1215,7 +1144,6 @@ class TimedBroadcastApp:
             self.save_settings()
             self.font_var.set(default_font) # 更新UI显示
             self.log("字体已恢复为默认。")
-            self._apply_global_font()
             messagebox.showinfo("设置已保存", "字体已恢复为默认设置。\n请重启软件以生效。")
         else:
             messagebox.showinfo("提示", "当前已是默认字体，无需恢复。")
@@ -1225,10 +1153,8 @@ class TimedBroadcastApp:
             value = int(self.bg_image_interval_var.get())
             if not (5 <= value <= 60):
                 raise ValueError("超出范围")
-            self.settings['bg_image_interval'] = value
             self.save_settings()
             self.log(f"背景图片切换间隔已更新为 {value} 秒。")
-            messagebox.showinfo("保存成功", f"背景图片切换间隔已设置为 {value} 秒。", parent=self.root)
         except (ValueError, TypeError):
             last_saved_value = str(self.settings.get("bg_image_interval", 6))
             messagebox.showerror("输入无效", "请输入一个介于 5 和 60 之间的整数。", parent=self.root)
@@ -1290,17 +1216,16 @@ class TimedBroadcastApp:
             self.save_settings()
             self.log("准备启用/更新整点报时功能，开始生成语音文件...")
 
-            progress_dialog = ttk.Toplevel(self.root)
+            progress_dialog = tk.Toplevel(self.root)
             progress_dialog.title("请稍候")
+            progress_dialog.geometry("350x120")
             progress_dialog.resizable(False, False)
             progress_dialog.transient(self.root); progress_dialog.grab_set()
+            self.center_window(progress_dialog, 350, 120)
 
-            ttk.Label(progress_dialog, text="正在生成整点报时文件 (0/24)...", font=self.font_11).pack(pady=10, padx=20)
-            progress_label = ttk.Label(progress_dialog, text="", font=self.font_10)
-            progress_label.pack(pady=5, padx=20)
-            
-            progress_dialog.update_idletasks()
-            self.center_window(progress_dialog, progress_dialog.winfo_reqwidth(), progress_dialog.winfo_reqheight())
+            tk.Label(progress_dialog, text="正在生成整点报时文件 (0/24)...", font=self.font_11).pack(pady=10)
+            progress_label = tk.Label(progress_dialog, text="", font=self.font_10)
+            progress_label.pack(pady=5)
 
             threading.Thread(target=self._generate_chime_files_worker,
                              args=(selected_voice, progress_dialog, progress_label), daemon=True).start()
@@ -1385,15 +1310,15 @@ class TimedBroadcastApp:
 
     def _apply_lock(self):
         self.is_locked = True
-        self.lock_button.config(text="解锁", bootstyle='success')
-        self._set_ui_lock_state(DISABLED)
-        self.statusbar_unlock_button.pack(side=RIGHT, padx=5)
+        self.lock_button.config(text="解锁", bg='#2ECC71')
+        self._set_ui_lock_state(tk.DISABLED)
+        self.statusbar_unlock_button.pack(side=tk.RIGHT, padx=5)
         self.log("界面已锁定。")
 
     def _apply_unlock(self):
         self.is_locked = False
-        self.lock_button.config(text="锁定", bootstyle='danger')
-        self._set_ui_lock_state(NORMAL)
+        self.lock_button.config(text="锁定", bg='#E74C3C')
+        self._set_ui_lock_state(tk.NORMAL)
         self.statusbar_unlock_button.pack_forget()
         self.log("界面已解锁。")
 
@@ -1402,20 +1327,21 @@ class TimedBroadcastApp:
         self._apply_lock()
 
     def _prompt_for_password_set(self):
-        dialog = ttk.Toplevel(self.root)
+        dialog = tk.Toplevel(self.root)
         dialog.title("首次锁定，请设置密码")
-        dialog.resizable(False, False)
+        dialog.geometry("350x250"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
+        self.center_window(dialog, 350, 250)
 
-        ttk.Label(dialog, text="请设置一个锁定密码 (最多6位)", font=self.font_11).pack(pady=10, padx=20)
+        tk.Label(dialog, text="请设置一个锁定密码 (最多6位)", font=self.font_11).pack(pady=10)
 
-        ttk.Label(dialog, text="输入密码:", font=self.font_11).pack(pady=(5,0))
-        pass_entry1 = ttk.Entry(dialog, show='*', width=25, font=self.font_11)
-        pass_entry1.pack(padx=20)
+        tk.Label(dialog, text="输入密码:", font=self.font_11).pack(pady=(5,0))
+        pass_entry1 = tk.Entry(dialog, show='*', width=25, font=self.font_11)
+        pass_entry1.pack()
 
-        ttk.Label(dialog, text="确认密码:", font=self.font_11).pack(pady=(10,0))
-        pass_entry2 = ttk.Entry(dialog, show='*', width=25, font=self.font_11)
-        pass_entry2.pack(padx=20)
+        tk.Label(dialog, text="确认密码:", font=self.font_11).pack(pady=(10,0))
+        pass_entry2 = tk.Entry(dialog, show='*', width=25, font=self.font_11)
+        pass_entry2.pack()
 
         def confirm():
             p1 = pass_entry1.get()
@@ -1428,30 +1354,28 @@ class TimedBroadcastApp:
             if self._save_to_registry("LockPasswordB64", encoded_pass):
                 self.lock_password_b64 = encoded_pass
                 if "设置" in self.pages and hasattr(self, 'clear_password_btn'):
-                    self.clear_password_btn.config(state=NORMAL)
+                    self.clear_password_btn.config(state=tk.NORMAL)
                 messagebox.showinfo("成功", "密码设置成功，界面即将锁定。", parent=dialog)
                 dialog.destroy()
                 self._apply_lock()
             else:
                 messagebox.showerror("功能受限", "无法保存密码。\n此功能仅在Windows系统上支持且需要pywin32库。", parent=dialog)
 
-        btn_frame = ttk.Frame(dialog); btn_frame.pack(pady=20)
-        ttk.Button(btn_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=10)
-        ttk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10)
-        
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
+        btn_frame = tk.Frame(dialog); btn_frame.pack(pady=20)
+        tk.Button(btn_frame, text="确定", command=confirm, font=self.font_11).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="取消", command=dialog.destroy, font=self.font_11).pack(side=tk.LEFT, padx=10)
 
     def _prompt_for_password_unlock(self):
-        dialog = ttk.Toplevel(self.root)
+        dialog = tk.Toplevel(self.root)
         dialog.title("解锁界面")
-        dialog.resizable(False, False)
+        dialog.geometry("400x180"); dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
+        self.center_window(dialog, 400, 180)
 
-        ttk.Label(dialog, text="请输入密码以解锁", font=self.font_11).pack(pady=10, padx=20)
+        tk.Label(dialog, text="请输入密码以解锁", font=self.font_11).pack(pady=10)
 
-        pass_entry = ttk.Entry(dialog, show='*', width=25, font=self.font_11)
-        pass_entry.pack(pady=5, padx=20)
+        pass_entry = tk.Entry(dialog, show='*', width=25, font=self.font_11)
+        pass_entry.pack(pady=5)
         pass_entry.focus_set()
 
         def is_password_correct():
@@ -1477,16 +1401,11 @@ class TimedBroadcastApp:
                 self.root.after(50, self._apply_unlock)
                 self.root.after(100, lambda: messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root))
 
-        # 修复3：让按钮自适应
-        btn_frame = ttk.Frame(dialog); btn_frame.pack(pady=20, padx=10, fill=X, expand=True)
-        btn_frame.columnconfigure((0, 1, 2), weight=1)
-        ttk.Button(btn_frame, text="确定", command=confirm, bootstyle="primary").grid(row=0, column=0, padx=5, sticky='ew')
-        ttk.Button(btn_frame, text="清除密码", command=clear_password_action, bootstyle="warning").grid(row=0, column=1, padx=5, sticky='ew')
-        ttk.Button(btn_frame, text="取消", command=dialog.destroy).grid(row=0, column=2, padx=5, sticky='ew')
+        btn_frame = tk.Frame(dialog); btn_frame.pack(pady=10)
+        tk.Button(btn_frame, text="确定", command=confirm, font=self.font_11).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="清除密码", command=clear_password_action, font=self.font_11).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="取消", command=dialog.destroy, font=self.font_11).pack(side=tk.LEFT, padx=5)
         dialog.bind('<Return>', lambda event: confirm())
-        
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_reqwidth() + 40, dialog.winfo_reqheight())
 
     def _perform_password_clear_logic(self):
         if self._save_to_registry("LockPasswordB64", ""):
@@ -1499,7 +1418,7 @@ class TimedBroadcastApp:
             self.save_settings()
 
             if hasattr(self, 'clear_password_btn'):
-                self.clear_password_btn.config(state=DISABLED)
+                self.clear_password_btn.config(state=tk.DISABLED)
             self.log("锁定密码已清除。")
 
     def clear_lock_password(self):
@@ -1507,7 +1426,6 @@ class TimedBroadcastApp:
             self._perform_password_clear_logic()
             messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root)
 
-#第4部分
     def _handle_lock_on_start_toggle(self):
         if not self.lock_password_b64:
             if self.lock_on_start_var.get():
@@ -1532,21 +1450,16 @@ class TimedBroadcastApp:
                 self._set_widget_state_recursively(page_frame, state)
 
     def _set_widget_state_recursively(self, parent_widget, state):
-        # 确保 Treeview 滚动条在锁定时仍然可用
-        special_widgets = (ttk.Scrollbar, )
-        
         for child in parent_widget.winfo_children():
             if child == self.lock_button:
                 continue
 
-            # 不禁用滚动条
-            if isinstance(child, special_widgets):
-                continue
-                
             try:
-                child.config(state=state)
+                if isinstance(child, (ttk.Widget, ttk.Treeview)):
+                    child.state(['disabled'] if state == tk.DISABLED else ['!disabled'])
+                else:
+                    child.config(state=state)
             except tk.TclError:
-                # 某些控件如 Frame 没有 state 属性，会抛出 TclError，直接忽略
                 pass
 
             if child.winfo_children():
@@ -1555,7 +1468,7 @@ class TimedBroadcastApp:
     def clear_log(self):
         if messagebox.askyesno("确认操作", "您确定要清空所有日志记录吗？\n此操作不可恢复。"):
             self.log_text.config(state='normal')
-            self.log_text.delete('1.0', END)
+            self.log_text.delete('1.0', tk.END)
             self.log_text.config(state='disabled')
             self.log("日志已清空。")
 
@@ -1609,168 +1522,154 @@ class TimedBroadcastApp:
         self.playback_command_queue.put(('STOP', None))
 
     def add_task(self):
-        choice_dialog = ttk.Toplevel(self.root)
+        choice_dialog = tk.Toplevel(self.root)
         choice_dialog.title("选择节目类型")
+        choice_dialog.geometry("350x350")
         choice_dialog.resizable(False, False)
         choice_dialog.transient(self.root); choice_dialog.grab_set()
-        
-        main_frame = ttk.Frame(choice_dialog, padding=20)
-        main_frame.pack(fill=BOTH, expand=True)
-        title_label = ttk.Label(main_frame, text="请选择要添加的节目类型",
-                              font=self.font_13_bold, bootstyle="primary")
+        self.center_window(choice_dialog, 350, 350)
+        main_frame = tk.Frame(choice_dialog, padx=20, pady=20, bg='#F0F0F0')
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        title_label = tk.Label(main_frame, text="请选择要添加的节目类型",
+                              font=self.font_13_bold, fg='#2C5F7C', bg='#F0F0F0')
         title_label.pack(pady=15)
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(expand=True, fill=X)
+        btn_frame = tk.Frame(main_frame, bg='#F0F0F0')
+        btn_frame.pack(expand=True)
 
-        audio_btn = ttk.Button(btn_frame, text="🎵 音频节目",
-                             bootstyle="primary", width=20, command=lambda: self.open_audio_dialog(choice_dialog))
-        audio_btn.pack(pady=8, ipady=8, fill=X)
+        audio_btn = tk.Button(btn_frame, text="🎵 音频节目",
+                             bg='#5DADE2', fg='white', font=self.font_12_bold,
+                             bd=0, padx=30, pady=12, cursor='hand2', width=15, command=lambda: self.open_audio_dialog(choice_dialog))
+        audio_btn.pack(pady=8)
 
-        voice_btn = ttk.Button(btn_frame, text="🎙️ 语音节目",
-                             bootstyle="info", width=20, command=lambda: self.open_voice_dialog(choice_dialog))
-        voice_btn.pack(pady=8, ipady=8, fill=X)
+        voice_btn = tk.Button(btn_frame, text="🎙️ 语音节目",
+                             bg='#3498DB', fg='white', font=self.font_12_bold,
+                             bd=0, padx=30, pady=12, cursor='hand2', width=15, command=lambda: self.open_voice_dialog(choice_dialog))
+        voice_btn.pack(pady=8)
 
-        # 修复5：让按钮内容正常显示
-        video_btn = ttk.Button(btn_frame, text="🎬 视频节目",
-                             bootstyle="success", width=20, command=lambda: self.open_video_dialog(choice_dialog))
-        video_btn.pack(pady=8, ipady=8, fill=X)
+        video_btn = tk.Button(btn_frame, text="🎬 视频节目",
+                             bg='#9B59B6', fg='white', font=self.font_12_bold,
+                             bd=0, padx=30, pady=12, cursor='hand2', width=15, command=lambda: self.open_video_dialog(choice_dialog))
+        video_btn.pack(pady=8)
         if not VLC_AVAILABLE:
-            video_btn.config(state=DISABLED, text="🎬 视频节目 (VLC未安装)")
-
-        choice_dialog.update_idletasks()
-        self.center_window(choice_dialog, choice_dialog.winfo_reqwidth(), choice_dialog.winfo_reqheight())
+            video_btn.config(state=tk.DISABLED, text="🎬 视频节目 (VLC未安装)")
 
     def open_audio_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
-        dialog = ttk.Toplevel(self.root)
+        dialog = tk.Toplevel(self.root)
         dialog.title("修改音频节目" if is_edit_mode else "添加音频节目")
-        # 修复6：移除固定尺寸
-        dialog.resizable(True, True) # 允许调整大小
-        dialog.minsize(800, 600)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.geometry("950x750")
+        dialog.resizable(False, False)
+        dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#E8E8E8')
 
-        main_frame = ttk.Frame(dialog, padding=15)
-        main_frame.pack(fill=BOTH, expand=True)
+        main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
-        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
+        content_frame = tk.LabelFrame(main_frame, text="内容", font=self.font_12_bold,
+                                     bg='#E8E8E8', padx=10, pady=5)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
-        content_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
-        name_entry = ttk.Entry(content_frame, font=self.font_11)
+        tk.Label(content_frame, text="节目名称:", font=self.font_11, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        name_entry = tk.Entry(content_frame, font=self.font_11, width=55)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         audio_type_var = tk.StringVar(value="single")
-        ttk.Label(content_frame, text="音频文件").grid(row=1, column=0, sticky='e', padx=5, pady=2)
-        audio_single_frame = ttk.Frame(content_frame)
+        tk.Label(content_frame, text="音频文件", font=self.font_11, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=2)
+        audio_single_frame = tk.Frame(content_frame, bg='#E8E8E8')
         audio_single_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        audio_single_frame.columnconfigure(1, weight=1)
-        ttk.Radiobutton(audio_single_frame, text="", variable=audio_type_var, value="single").grid(row=0, column=0, sticky='w')
-        audio_single_entry = ttk.Entry(audio_single_frame, font=self.font_11)
-        audio_single_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        ttk.Label(audio_single_frame, text="00:00").grid(row=0, column=2, padx=10)
+        tk.Radiobutton(audio_single_frame, text="", variable=audio_type_var, value="single", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT)
+        audio_single_entry = tk.Entry(audio_single_frame, font=self.font_11, width=35)
+        audio_single_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(audio_single_frame, text="00:00", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT, padx=10)
         def select_single_audio():
             filename = filedialog.askopenfilename(title="选择音频文件", initialdir=AUDIO_FOLDER, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")])
-            if filename: audio_single_entry.delete(0, END); audio_single_entry.insert(0, filename)
-        ttk.Button(audio_single_frame, text="选取...", command=select_single_audio, bootstyle="outline").grid(row=0, column=3, padx=5)
-        
-        ttk.Label(content_frame, text="音频文件夹").grid(row=2, column=0, sticky='e', padx=5, pady=2)
-        audio_folder_frame = ttk.Frame(content_frame)
+            if filename: audio_single_entry.delete(0, tk.END); audio_single_entry.insert(0, filename)
+        tk.Button(audio_single_frame, text="选取...", command=select_single_audio, bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).pack(side=tk.LEFT, padx=5)
+        tk.Label(content_frame, text="音频文件夹", font=self.font_11, bg='#E8E8E8').grid(row=2, column=0, sticky='e', padx=5, pady=2)
+        audio_folder_frame = tk.Frame(content_frame, bg='#E8E8E8')
         audio_folder_frame.grid(row=2, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        audio_folder_frame.columnconfigure(1, weight=1)
-        ttk.Radiobutton(audio_folder_frame, text="", variable=audio_type_var, value="folder").grid(row=0, column=0, sticky='w')
-        audio_folder_entry = ttk.Entry(audio_folder_frame, font=self.font_11)
-        audio_folder_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        tk.Radiobutton(audio_folder_frame, text="", variable=audio_type_var, value="folder", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT)
+        audio_folder_entry = tk.Entry(audio_folder_frame, font=self.font_11, width=50)
+        audio_folder_entry.pack(side=tk.LEFT, padx=5)
         def select_folder(entry_widget):
             foldername = filedialog.askdirectory(title="选择文件夹", initialdir=application_path)
-            if foldername: entry_widget.delete(0, END); entry_widget.insert(0, foldername)
-        ttk.Button(audio_folder_frame, text="选取...", command=lambda: select_folder(audio_folder_entry), bootstyle="outline").grid(row=0, column=2, padx=5)
-        
-        play_order_frame = ttk.Frame(content_frame)
+            if foldername: entry_widget.delete(0, tk.END); entry_widget.insert(0, foldername)
+        tk.Button(audio_folder_frame, text="选取...", command=lambda: select_folder(audio_folder_entry), bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).pack(side=tk.LEFT, padx=5)
+        play_order_frame = tk.Frame(content_frame, bg='#E8E8E8')
         play_order_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=2)
         play_order_var = tk.StringVar(value="sequential")
-        ttk.Radiobutton(play_order_frame, text="顺序播", variable=play_order_var, value="sequential").pack(side=LEFT, padx=10)
-        ttk.Radiobutton(play_order_frame, text="随机播", variable=play_order_var, value="random").pack(side=LEFT, padx=10)
+        tk.Radiobutton(play_order_frame, text="顺序播", variable=play_order_var, value="sequential", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT, padx=10)
+        tk.Radiobutton(play_order_frame, text="随机播", variable=play_order_var, value="random", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT, padx=10)
 
         bg_image_var = tk.IntVar(value=0)
         bg_image_path_var = tk.StringVar()
         bg_image_order_var = tk.StringVar(value="sequential")
 
-        bg_image_frame = ttk.Frame(content_frame)
+        bg_image_frame = tk.Frame(content_frame, bg='#E8E8E8')
         bg_image_frame.grid(row=4, column=0, columnspan=4, sticky='w', padx=5, pady=5)
-        bg_image_frame.columnconfigure(1, weight=1)
-        bg_image_cb = ttk.Checkbutton(bg_image_frame, text="背景图片:", variable=bg_image_var, bootstyle="round-toggle")
-        bg_image_cb.grid(row=0, column=0)
-        if not IMAGE_AVAILABLE: bg_image_cb.config(state=DISABLED, text="背景图片(Pillow未安装):")
 
-        bg_image_entry = ttk.Entry(bg_image_frame, textvariable=bg_image_path_var, font=self.font_11)
-        bg_image_entry.grid(row=0, column=1, sticky='ew', padx=(5,5))
+        bg_image_cb = tk.Checkbutton(bg_image_frame, text="背景图片:", variable=bg_image_var, bg='#E8E8E8', font=self.font_11)
+        bg_image_cb.pack(side=tk.LEFT)
+        if not IMAGE_AVAILABLE: bg_image_cb.config(state=tk.DISABLED, text="背景图片(Pillow未安装):")
 
-        bg_image_btn_frame = ttk.Frame(bg_image_frame)
-        bg_image_btn_frame.grid(row=0, column=2)
-        ttk.Button(bg_image_btn_frame, text="选取...", command=lambda: select_folder(bg_image_entry), bootstyle="outline").pack(side=LEFT)
-        ttk.Radiobutton(bg_image_btn_frame, text="顺序", variable=bg_image_order_var, value="sequential").pack(side=LEFT, padx=(10,0))
-        ttk.Radiobutton(bg_image_btn_frame, text="随机", variable=bg_image_order_var, value="random").pack(side=LEFT)
+        bg_image_entry = tk.Entry(bg_image_frame, textvariable=bg_image_path_var, font=self.font_11, width=42)
+        bg_image_entry.pack(side=tk.LEFT, padx=(0, 5))
 
-        volume_frame = ttk.Frame(content_frame)
+        tk.Button(bg_image_frame, text="选取...", command=lambda: select_folder(bg_image_entry), bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).pack(side=tk.LEFT, padx=5)
+
+        tk.Radiobutton(bg_image_frame, text="顺序", variable=bg_image_order_var, value="sequential", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT, padx=(10,0))
+        tk.Radiobutton(bg_image_frame, text="随机", variable=bg_image_order_var, value="random", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT)
+
+        volume_frame = tk.Frame(content_frame, bg='#E8E8E8')
         volume_frame.grid(row=5, column=1, columnspan=3, sticky='w', padx=5, pady=3)
-        ttk.Label(volume_frame, text="音量:").pack(side=LEFT)
-        volume_entry = ttk.Entry(volume_frame, font=self.font_11, width=10)
-        volume_entry.pack(side=LEFT, padx=5)
-        ttk.Label(volume_frame, text="0-100").pack(side=LEFT, padx=5)
+        tk.Label(volume_frame, text="音量:", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT)
+        volume_entry = tk.Entry(volume_frame, font=self.font_11, width=10)
+        volume_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(volume_frame, text="0-100", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
+        time_frame = tk.LabelFrame(main_frame, text="时间", font=self.font_12_bold, bg='#E8E8E8', padx=15, pady=10)
         time_frame.grid(row=1, column=0, sticky='ew', pady=4)
-        time_frame.columnconfigure(1, weight=1)
-        
-        ttk.Label(time_frame, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
-        start_time_entry = ttk.Entry(time_frame, font=self.font_11)
+        tk.Label(time_frame, text="开始时间:", font=self.font_11, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        start_time_entry = tk.Entry(time_frame, font=self.font_11, width=50)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
-        ttk.Label(time_frame, text="《可多个,用英文逗号,隔开》").grid(row=0, column=2, sticky='w', padx=5)
-        ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
-        
+        tk.Label(time_frame, text="《可多个,用英文逗号,隔开》", font=self.font_11, bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).grid(row=0, column=3, padx=5)
         interval_var = tk.StringVar(value="first")
-        ttk.Label(time_frame, text="间隔播报:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
-        interval_frame1 = ttk.Frame(time_frame)
+        interval_frame1 = tk.Frame(time_frame, bg='#E8E8E8')
         interval_frame1.grid(row=1, column=1, columnspan=2, sticky='w', padx=5, pady=2)
-        ttk.Radiobutton(interval_frame1, text="播 n 首", variable=interval_var, value="first").pack(side=LEFT)
-        interval_first_entry = ttk.Entry(interval_frame1, font=self.font_11, width=15)
-        interval_first_entry.pack(side=LEFT, padx=5)
-        ttk.Label(interval_frame1, text="(单曲时,指 n 遍)").pack(side=LEFT, padx=5)
-        
-        interval_frame2 = ttk.Frame(time_frame)
+        tk.Label(time_frame, text="间隔播报:", font=self.font_11, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=2)
+        tk.Radiobutton(interval_frame1, text="播 n 首", variable=interval_var, value="first", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT)
+        interval_first_entry = tk.Entry(interval_frame1, font=self.font_11, width=15)
+        interval_first_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(interval_frame1, text="(单曲时,指 n 遍)", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
+        interval_frame2 = tk.Frame(time_frame, bg='#E8E8E8')
         interval_frame2.grid(row=2, column=1, columnspan=2, sticky='w', padx=5, pady=2)
-        ttk.Radiobutton(interval_frame2, text="播 n 秒", variable=interval_var, value="seconds").pack(side=LEFT)
-        interval_seconds_entry = ttk.Entry(interval_frame2, font=self.font_11, width=15)
-        interval_seconds_entry.pack(side=LEFT, padx=5)
-        ttk.Label(interval_frame2, text="(3600秒 = 1小时)").pack(side=LEFT, padx=5)
-        
-        ttk.Label(time_frame, text="周几/几号:").grid(row=3, column=0, sticky='e', padx=5, pady=3)
-        weekday_entry = ttk.Entry(time_frame, font=self.font_11)
+        tk.Radiobutton(interval_frame2, text="播 n 秒", variable=interval_var, value="seconds", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT)
+        interval_seconds_entry = tk.Entry(interval_frame2, font=self.font_11, width=15)
+        interval_seconds_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(interval_frame2, text="(3600秒 = 1小时)", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
+        tk.Label(time_frame, text="周几/几号:", font=self.font_11, bg='#E8E8E8').grid(row=3, column=0, sticky='e', padx=5, pady=3)
+        weekday_entry = tk.Entry(time_frame, font=self.font_11, width=50)
         weekday_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=3)
-        ttk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bootstyle="outline").grid(row=3, column=3, padx=5)
-        
-        ttk.Label(time_frame, text="日期范围:").grid(row=4, column=0, sticky='e', padx=5, pady=3)
-        date_range_entry = ttk.Entry(time_frame, font=self.font_11)
+        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).grid(row=3, column=3, padx=5)
+        tk.Label(time_frame, text="日期范围:", font=self.font_11, bg='#E8E8E8').grid(row=4, column=0, sticky='e', padx=5, pady=3)
+        date_range_entry = tk.Entry(time_frame, font=self.font_11, width=50)
         date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=3)
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
-        ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=4, column=3, padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).grid(row=4, column=3, padx=5)
 
-        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=10)
+        other_frame = tk.LabelFrame(main_frame, text="其它", font=self.font_12_bold, bg='#E8E8E8', padx=10, pady=10)
         other_frame.grid(row=2, column=0, sticky='ew', pady=5)
-        other_frame.columnconfigure(1, weight=1)
-        
         delay_var = tk.StringVar(value="ontime")
-        ttk.Label(other_frame, text="模式:").grid(row=0, column=0, sticky='nw', padx=5, pady=2)
-        delay_frame = ttk.Frame(other_frame)
+        tk.Label(other_frame, text="模式:", font=self.font_11, bg='#E8E8E8').grid(row=0, column=0, sticky='nw', padx=5, pady=2)
+        delay_frame = tk.Frame(other_frame, bg='#E8E8E8')
         delay_frame.grid(row=0, column=1, sticky='w', padx=5, pady=2)
-        ttk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们（默认）", variable=delay_var, value="ontime").pack(anchor='w')
-        ttk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候", variable=delay_var, value="delay").pack(anchor='w')
-        ttk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate").pack(anchor='w')
-        
-        dialog_button_frame = ttk.Frame(other_frame)
-        dialog_button_frame.grid(row=0, column=2, sticky='se', padx=20, pady=10)
+        tk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们（默认）", variable=delay_var, value="ontime", bg='#E8E8E8', font=self.font_11).pack(anchor='w')
+        tk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候", variable=delay_var, value="delay", bg='#E8E8E8', font=self.font_11).pack(anchor='w')
+        tk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate", bg='#E8E8E8', font=self.font_11).pack(anchor='w')
+        dialog_button_frame = tk.Frame(other_frame, bg='#E8E8E8')
+        dialog_button_frame.grid(row=0, column=2, sticky='e', padx=20)
+        other_frame.grid_columnconfigure(1, weight=1)
 
         if is_edit_mode:
             task = task_to_edit
@@ -1829,80 +1728,81 @@ class TimedBroadcastApp:
                 self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
 
         button_text = "保存修改" if is_edit_mode else "添加"
-        ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
-        ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
+        tk.Button(dialog_button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=self.font_11_bold, bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(dialog_button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=self.font_11, bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
 
+        content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
 
-#第5部分
     def open_video_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
-        dialog = ttk.Toplevel(self.root)
+        dialog = tk.Toplevel(self.root)
         dialog.title("修改视频节目" if is_edit_mode else "添加视频节目")
-        # 修复6：移除固定尺寸
-        dialog.resizable(True, True)
-        dialog.minsize(800, 700)
+        dialog.geometry("950x750")
+        dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
+        dialog.configure(bg='#E8E8E8')
 
-        main_frame = ttk.Frame(dialog, padding=15)
-        main_frame.pack(fill=BOTH, expand=True)
+        main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
-        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
+        content_frame = tk.LabelFrame(main_frame, text="内容", font=self.font_12_bold,
+                                     bg='#E8E8E8', padx=10, pady=5)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
-        content_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
-        name_entry = ttk.Entry(content_frame, font=self.font_11)
+        tk.Label(content_frame, text="节目名称:", font=self.font_11, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        name_entry = tk.Entry(content_frame, font=self.font_11, width=55)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
 
         video_type_var = tk.StringVar(value="single")
 
-        ttk.Label(content_frame, text="视频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
-        video_single_frame = ttk.Frame(content_frame)
+        tk.Label(content_frame, text="视频文件:", font=self.font_11, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=2)
+        video_single_frame = tk.Frame(content_frame, bg='#E8E8E8')
         video_single_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        video_single_frame.columnconfigure(1, weight=1)
-        ttk.Radiobutton(video_single_frame, text="", variable=video_type_var, value="single").grid(row=0, column=0, sticky='w')
-        video_single_entry = ttk.Entry(video_single_frame, font=self.font_11)
-        video_single_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        tk.Radiobutton(video_single_frame, text="", variable=video_type_var, value="single", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT)
+        video_single_entry = tk.Entry(video_single_frame, font=self.font_11, width=50)
+        video_single_entry.pack(side=tk.LEFT, padx=5)
 
         def select_single_video():
             ftypes = [("视频文件", "*.mp4 *.mkv *.avi *.mov *.wmv *.flv"), ("所有文件", "*.*")]
             filename = filedialog.askopenfilename(title="选择视频文件", filetypes=ftypes)
             if filename:
-                video_single_entry.delete(0, END)
+                video_single_entry.delete(0, tk.END)
                 video_single_entry.insert(0, filename)
-        ttk.Button(video_single_frame, text="选取...", command=select_single_video, bootstyle="outline").grid(row=0, column=2, padx=5)
+        tk.Button(video_single_frame, text="选取...", command=select_single_video, bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).pack(side=tk.LEFT, padx=5)
 
-        ttk.Label(content_frame, text="视频文件夹:").grid(row=2, column=0, sticky='e', padx=5, pady=2)
-        video_folder_frame = ttk.Frame(content_frame)
+        tk.Label(content_frame, text="视频文件夹:", font=self.font_11, bg='#E8E8E8').grid(row=2, column=0, sticky='e', padx=5, pady=2)
+        video_folder_frame = tk.Frame(content_frame, bg='#E8E8E8')
         video_folder_frame.grid(row=2, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        video_folder_frame.columnconfigure(1, weight=1)
-        ttk.Radiobutton(video_folder_frame, text="", variable=video_type_var, value="folder").grid(row=0, column=0, sticky='w')
-        video_folder_entry = ttk.Entry(video_folder_frame, font=self.font_11)
-        video_folder_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        tk.Radiobutton(video_folder_frame, text="", variable=video_type_var, value="folder", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT)
+        video_folder_entry = tk.Entry(video_folder_frame, font=self.font_11, width=50)
+        video_folder_entry.pack(side=tk.LEFT, padx=5)
 
         def select_folder(entry_widget):
             foldername = filedialog.askdirectory(title="选择文件夹", initialdir=application_path)
             if foldername:
-                entry_widget.delete(0, END)
+                entry_widget.delete(0, tk.END)
                 entry_widget.insert(0, foldername)
-        ttk.Button(video_folder_frame, text="选取...", command=lambda: select_folder(video_folder_entry), bootstyle="outline").grid(row=0, column=2, padx=5)
+        tk.Button(video_folder_frame, text="选取...", command=lambda: select_folder(video_folder_entry), bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).pack(side=tk.LEFT, padx=5)
 
-        play_order_frame = ttk.Frame(content_frame)
+        play_order_frame = tk.Frame(content_frame, bg='#E8E8E8')
         play_order_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=2)
         play_order_var = tk.StringVar(value="sequential")
-        ttk.Radiobutton(play_order_frame, text="顺序播", variable=play_order_var, value="sequential").pack(side=LEFT, padx=10)
-        ttk.Radiobutton(play_order_frame, text="随机播", variable=play_order_var, value="random").pack(side=LEFT, padx=10)
+        tk.Radiobutton(play_order_frame, text="顺序播", variable=play_order_var, value="sequential", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT, padx=10)
+        tk.Radiobutton(play_order_frame, text="随机播", variable=play_order_var, value="random", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT, padx=10)
 
-        volume_frame = ttk.Frame(content_frame)
+        volume_frame = tk.Frame(content_frame, bg='#E8E8E8')
         volume_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=3)
-        ttk.Label(volume_frame, text="音量:").pack(side=LEFT)
-        volume_entry = ttk.Entry(volume_frame, font=self.font_11, width=10)
-        volume_entry.pack(side=LEFT, padx=5)
-        ttk.Label(volume_frame, text="0-100").pack(side=LEFT, padx=5)
+        tk.Label(volume_frame, text="音量:", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT)
+        volume_entry = tk.Entry(volume_frame, font=self.font_11, width=10)
+        volume_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(volume_frame, text="0-100", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
 
-        playback_frame = ttk.LabelFrame(main_frame, text="播放选项", padding=10)
+        content_frame.columnconfigure(1, weight=1)
+
+        playback_frame = tk.LabelFrame(main_frame, text="播放选项", font=self.font_12_bold,
+                                     bg='#E8E8E8', padx=10, pady=10)
         playback_frame.grid(row=1, column=0, sticky='ew', pady=4)
 
         playback_mode_var = tk.StringVar(value="fullscreen")
@@ -1912,7 +1812,7 @@ class TimedBroadcastApp:
         playback_rates = ['0.5x', '0.75x', '1.0x (正常)', '1.25x', '1.5x', '2.0x']
         playback_rate_var = tk.StringVar(value='1.0x (正常)')
 
-        mode_frame = ttk.Frame(playback_frame)
+        mode_frame = tk.Frame(playback_frame, bg='#E8E8E8')
         mode_frame.grid(row=0, column=0, columnspan=3, sticky='w')
 
         resolution_combo = ttk.Combobox(mode_frame, textvariable=resolution_var, values=resolutions, font=self.font_11, width=15, state='readonly')
@@ -1923,71 +1823,72 @@ class TimedBroadcastApp:
             else:
                 resolution_combo.config(state='disabled')
 
-        ttk.Radiobutton(mode_frame, text="无边框全屏", variable=playback_mode_var, value="fullscreen", command=toggle_resolution_combo).pack(side=LEFT, padx=5)
-        ttk.Radiobutton(mode_frame, text="非全屏", variable=playback_mode_var, value="windowed", command=toggle_resolution_combo).pack(side=LEFT, padx=5)
-        resolution_combo.pack(side=LEFT, padx=10)
+        tk.Radiobutton(mode_frame, text="无边框全屏", variable=playback_mode_var, value="fullscreen", bg='#E8E8E8', font=self.font_11, command=toggle_resolution_combo).pack(side=tk.LEFT, padx=5)
+        tk.Radiobutton(mode_frame, text="非全屏", variable=playback_mode_var, value="windowed", bg='#E8E8E8', font=self.font_11, command=toggle_resolution_combo).pack(side=tk.LEFT, padx=5)
+        resolution_combo.pack(side=tk.LEFT, padx=10)
 
-        rate_frame = ttk.Frame(playback_frame)
+        rate_frame = tk.Frame(playback_frame, bg='#E8E8E8')
         rate_frame.grid(row=1, column=0, columnspan=3, sticky='w', pady=5)
-        ttk.Label(rate_frame, text="播放倍速:").pack(side=LEFT, padx=5)
+        tk.Label(rate_frame, text="播放倍速:", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
         rate_combo = ttk.Combobox(rate_frame, textvariable=playback_rate_var, values=playback_rates, font=self.font_11, width=15)
-        rate_combo.pack(side=LEFT)
-        ttk.Label(rate_frame, text="(可手动输入0.25-4.0之间的值)", font=self.font_9, bootstyle="secondary").pack(side=LEFT, padx=5)
+        rate_combo.pack(side=tk.LEFT)
+        tk.Label(rate_frame, text="(可手动输入0.25-4.0之间的值)", font=self.font_9, fg='grey', bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
 
         toggle_resolution_combo()
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
+        time_frame = tk.LabelFrame(main_frame, text="时间", font=self.font_12_bold, bg='#E8E8E8', padx=15, pady=10)
         time_frame.grid(row=2, column=0, sticky='ew', pady=4)
-        time_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(time_frame, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
-        start_time_entry = ttk.Entry(time_frame, font=self.font_11)
+        tk.Label(time_frame, text="开始时间:", font=self.font_11, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        start_time_entry = tk.Entry(time_frame, font=self.font_11, width=50)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
-        ttk.Label(time_frame, text="《可多个,用英文逗号,隔开》").grid(row=0, column=2, sticky='w', padx=5)
-        ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
+        tk.Label(time_frame, text="《可多个,用英文逗号,隔开》", font=self.font_11, bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).grid(row=0, column=3, padx=5)
 
         interval_var = tk.StringVar(value="first")
-        ttk.Label(time_frame, text="间隔播报:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
-        interval_frame1 = ttk.Frame(time_frame)
+        interval_frame1 = tk.Frame(time_frame, bg='#E8E8E8')
         interval_frame1.grid(row=1, column=1, columnspan=2, sticky='w', padx=5, pady=2)
-        ttk.Radiobutton(interval_frame1, text="播 n 首", variable=interval_var, value="first").pack(side=LEFT)
-        interval_first_entry = ttk.Entry(interval_frame1, font=self.font_11, width=15)
-        interval_first_entry.pack(side=LEFT, padx=5)
-        ttk.Label(interval_frame1, text="(单视频时,指 n 遍)").pack(side=LEFT, padx=5)
+        tk.Label(time_frame, text="间隔播报:", font=self.font_11, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=2)
+        tk.Radiobutton(interval_frame1, text="播 n 首", variable=interval_var, value="first", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT)
+        interval_first_entry = tk.Entry(interval_frame1, font=self.font_11, width=15)
+        interval_first_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(interval_frame1, text="(单视频时,指 n 遍)", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
 
-        interval_frame2 = ttk.Frame(time_frame)
+        interval_frame2 = tk.Frame(time_frame, bg='#E8E8E8')
         interval_frame2.grid(row=2, column=1, columnspan=2, sticky='w', padx=5, pady=2)
-        ttk.Radiobutton(interval_frame2, text="播 n 秒", variable=interval_var, value="seconds").pack(side=LEFT)
-        interval_seconds_entry = ttk.Entry(interval_frame2, font=self.font_11, width=15)
-        interval_seconds_entry.pack(side=LEFT, padx=5)
-        ttk.Label(interval_frame2, text="(3600秒 = 1小时)").pack(side=LEFT, padx=5)
+        tk.Radiobutton(interval_frame2, text="播 n 秒", variable=interval_var, value="seconds", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT)
+        interval_seconds_entry = tk.Entry(interval_frame2, font=self.font_11, width=15)
+        interval_seconds_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(interval_frame2, text="(3600秒 = 1小时)", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT, padx=5)
 
-        ttk.Label(time_frame, text="周几/几号:").grid(row=3, column=0, sticky='e', padx=5, pady=3)
-        weekday_entry = ttk.Entry(time_frame, font=self.font_11)
+        tk.Label(time_frame, text="周几/几号:", font=self.font_11, bg='#E8E8E8').grid(row=3, column=0, sticky='e', padx=5, pady=3)
+        weekday_entry = tk.Entry(time_frame, font=self.font_11, width=50)
         weekday_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=3)
-        ttk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bootstyle="outline").grid(row=3, column=3, padx=5)
+        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).grid(row=3, column=3, padx=5)
 
-        ttk.Label(time_frame, text="日期范围:").grid(row=4, column=0, sticky='e', padx=5, pady=3)
-        date_range_entry = ttk.Entry(time_frame, font=self.font_11)
+        tk.Label(time_frame, text="日期范围:", font=self.font_11, bg='#E8E8E8').grid(row=4, column=0, sticky='e', padx=5, pady=3)
+        date_range_entry = tk.Entry(time_frame, font=self.font_11, width=50)
         date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=3)
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
-        ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=4, column=3, padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).grid(row=4, column=3, padx=5)
 
-        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=10)
+        time_frame.columnconfigure(1, weight=1)
+
+        other_frame = tk.LabelFrame(main_frame, text="其它", font=self.font_12_bold, bg='#E8E8E8', padx=10, pady=10)
         other_frame.grid(row=3, column=0, sticky='ew', pady=5)
-        other_frame.columnconfigure(1, weight=1)
 
         delay_var = tk.StringVar(value="ontime")
-        ttk.Label(other_frame, text="模式:").grid(row=0, column=0, sticky='nw', padx=5, pady=2)
-        delay_frame = ttk.Frame(other_frame)
+        tk.Label(other_frame, text="模式:", font=self.font_11, bg='#E8E8E8').grid(row=0, column=0, sticky='nw', padx=5, pady=2)
+        delay_frame = tk.Frame(other_frame, bg='#E8E8E8')
         delay_frame.grid(row=0, column=1, sticky='w', padx=5, pady=2)
-        ttk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们（默认）", variable=delay_var, value="ontime").pack(anchor='w')
-        ttk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候", variable=delay_var, value="delay").pack(anchor='w')
-        ttk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate").pack(anchor='w')
+        tk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们（默认）", variable=delay_var, value="ontime", bg='#E8E8E8', font=self.font_11).pack(anchor='w')
+        tk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候", variable=delay_var, value="delay", bg='#E8E8E8', font=self.font_11).pack(anchor='w')
+        tk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate", bg='#E8E8E8', font=self.font_11).pack(anchor='w')
 
-        dialog_button_frame = ttk.Frame(other_frame)
-        dialog_button_frame.grid(row=0, column=2, sticky='se', padx=20, pady=10)
+        dialog_button_frame = tk.Frame(other_frame, bg='#E8E8E8')
+        dialog_button_frame.grid(row=0, column=2, sticky='e', padx=20)
+        other_frame.grid_columnconfigure(1, weight=1)
 
         if is_edit_mode:
             task = task_to_edit
@@ -2087,149 +1988,120 @@ class TimedBroadcastApp:
                 self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
 
         button_text = "保存修改" if is_edit_mode else "添加"
-        ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
-        ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
+        tk.Button(dialog_button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=self.font_11_bold, bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(dialog_button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=self.font_11, bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
 
-#第6部分
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
-        dialog = ttk.Toplevel(self.root)
+        dialog = tk.Toplevel(self.root)
         dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
-        # 修复6：移除固定尺寸
-        dialog.resizable(True, True)
-        dialog.minsize(800, 700)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.geometry("950x750")
+        dialog.resizable(False, False)
+        dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#E8E8E8')
 
-        main_frame = ttk.Frame(dialog, padding=15)
-        main_frame.pack(fill=BOTH, expand=True)
-        main_frame.columnconfigure(0, weight=1)
+        main_frame = tk.Frame(dialog, bg='#E8E8E8', padx=15, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
-        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
+        content_frame = tk.LabelFrame(main_frame, text="内容", font=self.font_12_bold, bg='#E8E8E8', padx=10, pady=5)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
-        content_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
-        name_entry = ttk.Entry(content_frame, font=self.font_11)
+        tk.Label(content_frame, text="节目名称:", font=self.font_11, bg='#E8E8E8').grid(row=0, column=0, sticky='w', padx=5, pady=2)
+        name_entry = tk.Entry(content_frame, font=self.font_11, width=65)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        ttk.Label(content_frame, text="播音文字:").grid(row=1, column=0, sticky='nw', padx=5, pady=2)
-        text_frame = ttk.Frame(content_frame)
+        tk.Label(content_frame, text="播音文字:", font=self.font_11, bg='#E8E8E8').grid(row=1, column=0, sticky='nw', padx=5, pady=2)
+        text_frame = tk.Frame(content_frame, bg='#E8E8E8')
         text_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        text_frame.columnconfigure(0, weight=1)
-        text_frame.rowconfigure(0, weight=1)
-        content_text = ScrolledText(text_frame, height=5, font=self.font_11, wrap=WORD)
-        content_text.grid(row=0, column=0, sticky='nsew')
-        
-        script_btn_frame = ttk.Frame(content_frame)
+        content_text = scrolledtext.ScrolledText(text_frame, height=5, font=self.font_11, width=65, wrap=tk.WORD)
+        content_text.pack(fill=tk.BOTH, expand=True)
+        script_btn_frame = tk.Frame(content_frame, bg='#E8E8E8')
         script_btn_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=(0, 2))
-        ttk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text), bootstyle="outline").pack(side=LEFT)
-        ttk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text, name_entry), bootstyle="outline").pack(side=LEFT, padx=10)
-        
-        ttk.Label(content_frame, text="播音员:").grid(row=3, column=0, sticky='w', padx=5, pady=3)
-        voice_frame = ttk.Frame(content_frame)
-        voice_frame.grid(row=3, column=1, columnspan=3, sticky='ew', padx=5, pady=3)
-        voice_frame.columnconfigure(0, weight=1)
+        tk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text), font=self.font_10).pack(side=tk.LEFT)
+        tk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text, name_entry), font=self.font_10).pack(side=tk.LEFT, padx=10)
+        tk.Label(content_frame, text="播音员:", font=self.font_11, bg='#E8E8E8').grid(row=3, column=0, sticky='w', padx=5, pady=3)
+        voice_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        voice_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=3)
         available_voices = self.get_available_voices()
         voice_var = tk.StringVar()
-        # 修复8：移除固定width，让其填充
-        voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, values=available_voices, font=self.font_11, state='readonly')
-        voice_combo.grid(row=0, column=0, sticky='ew')
-        
-        speech_params_frame = ttk.Frame(content_frame)
+        voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, values=available_voices, font=self.font_11, width=50, state='readonly')
+        voice_combo.pack(side=tk.LEFT)
+        speech_params_frame = tk.Frame(content_frame, bg='#E8E8E8')
         speech_params_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=2)
-        ttk.Label(speech_params_frame, text="语速(-10~10):").pack(side=LEFT, padx=(0,5))
-        speed_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=8); speed_entry.pack(side=LEFT, padx=5)
-        ttk.Label(speech_params_frame, text="音调(-10~10):").pack(side=LEFT, padx=(10,5))
-        pitch_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=8); pitch_entry.pack(side=LEFT, padx=5)
-        ttk.Label(speech_params_frame, text="音量(0-100):").pack(side=LEFT, padx=(10,5))
-        volume_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=8); volume_entry.pack(side=LEFT, padx=5)
-        
-        prompt_var = tk.IntVar(); prompt_frame = ttk.Frame(content_frame)
-        prompt_frame.grid(row=5, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        prompt_frame.columnconfigure(1, weight=1)
-        ttk.Checkbutton(prompt_frame, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
+        tk.Label(speech_params_frame, text="语速(-10~10):", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT, padx=(0,5))
+        speed_entry = tk.Entry(speech_params_frame, font=self.font_11, width=8); speed_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(speech_params_frame, text="音调(-10~10):", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
+        pitch_entry = tk.Entry(speech_params_frame, font=self.font_11, width=8); pitch_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(speech_params_frame, text="音量(0-100):", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
+        volume_entry = tk.Entry(speech_params_frame, font=self.font_11, width=8); volume_entry.pack(side=tk.LEFT, padx=5)
+        prompt_var = tk.IntVar(); prompt_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        prompt_frame.grid(row=5, column=1, columnspan=3, sticky='w', padx=5, pady=2)
+        tk.Checkbutton(prompt_frame, text="提示音:", variable=prompt_var, bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT)
         prompt_file_var, prompt_volume_var = tk.StringVar(), tk.StringVar()
-        prompt_file_entry = ttk.Entry(prompt_frame, textvariable=prompt_file_var, font=self.font_11); prompt_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        ttk.Button(prompt_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var), bootstyle="outline", width=2).grid(row=0, column=2)
-        
-        prompt_vol_frame = ttk.Frame(prompt_frame)
-        prompt_vol_frame.grid(row=0, column=3, sticky='e')
-        ttk.Label(prompt_vol_frame, text="音量(0-100):").pack(side=LEFT, padx=(10,5))
-        ttk.Entry(prompt_vol_frame, textvariable=prompt_volume_var, font=self.font_11, width=8).pack(side=LEFT, padx=5)
-        
-        bgm_var = tk.IntVar(); bgm_frame = ttk.Frame(content_frame)
-        bgm_frame.grid(row=6, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        bgm_frame.columnconfigure(1, weight=1)
-        ttk.Checkbutton(bgm_frame, text="背景音乐:", variable=bgm_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
+        prompt_file_entry = tk.Entry(prompt_frame, textvariable=prompt_file_var, font=self.font_11, width=20); prompt_file_entry.pack(side=tk.LEFT, padx=5)
+        tk.Button(prompt_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var)).pack(side=tk.LEFT)
+        tk.Label(prompt_frame, text="音量(0-100):", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
+        tk.Entry(prompt_frame, textvariable=prompt_volume_var, font=self.font_11, width=8).pack(side=tk.LEFT, padx=5)
+        bgm_var = tk.IntVar(); bgm_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        bgm_frame.grid(row=6, column=1, columnspan=3, sticky='w', padx=5, pady=2)
+        tk.Checkbutton(bgm_frame, text="背景音乐:", variable=bgm_var, bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT)
         bgm_file_var, bgm_volume_var = tk.StringVar(), tk.StringVar()
-        bgm_file_entry = ttk.Entry(bgm_frame, textvariable=bgm_file_var, font=self.font_11); bgm_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        ttk.Button(bgm_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var), bootstyle="outline", width=2).grid(row=0, column=2)
-        
-        bgm_vol_frame = ttk.Frame(bgm_frame)
-        bgm_vol_frame.grid(row=0, column=3, sticky='e')
-        ttk.Label(bgm_vol_frame, text="音量(0-100):").pack(side=LEFT, padx=(10,5))
-        ttk.Entry(bgm_vol_frame, textvariable=bgm_volume_var, font=self.font_11, width=8).pack(side=LEFT, padx=5)
+        bgm_file_entry = tk.Entry(bgm_frame, textvariable=bgm_file_var, font=self.font_11, width=20); bgm_file_entry.pack(side=tk.LEFT, padx=5)
+        tk.Button(bgm_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var)).pack(side=tk.LEFT)
+        tk.Label(bgm_frame, text="音量(0-100):", font=self.font_11, bg='#E8E8E8').pack(side=tk.LEFT, padx=(10,5))
+        tk.Entry(bgm_frame, textvariable=bgm_volume_var, font=self.font_11, width=8).pack(side=tk.LEFT, padx=5)
 
         bg_image_var = tk.IntVar(value=0)
         bg_image_path_var = tk.StringVar()
         bg_image_order_var = tk.StringVar(value="sequential")
 
-        bg_image_frame = ttk.Frame(content_frame)
-        bg_image_frame.grid(row=7, column=1, columnspan=3, sticky='ew', padx=5, pady=5)
-        bg_image_frame.columnconfigure(1, weight=1)
-        bg_image_cb = ttk.Checkbutton(bg_image_frame, text="背景图片:", variable=bg_image_var, bootstyle="round-toggle")
-        bg_image_cb.grid(row=0, column=0, sticky='w')
-        if not IMAGE_AVAILABLE: bg_image_cb.config(state=DISABLED, text="背景图片(Pillow未安装):")
+        bg_image_frame = tk.Frame(content_frame, bg='#E8E8E8')
+        bg_image_frame.grid(row=7, column=1, columnspan=3, sticky='w', padx=5, pady=5)
 
-        bg_image_entry = ttk.Entry(bg_image_frame, textvariable=bg_image_path_var, font=self.font_11)
-        bg_image_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        
-        bg_image_btn_frame = ttk.Frame(bg_image_frame)
-        bg_image_btn_frame.grid(row=0, column=2, sticky='e')
-        ttk.Button(bg_image_btn_frame, text="选取...", command=lambda: select_folder(bg_image_entry), bootstyle="outline").pack(side=LEFT, padx=5)
-        ttk.Radiobutton(bg_image_btn_frame, text="顺序", variable=bg_image_order_var, value="sequential").pack(side=LEFT, padx=(10,0))
-        ttk.Radiobutton(bg_image_btn_frame, text="随机", variable=bg_image_order_var, value="random").pack(side=LEFT)
+        bg_image_cb = tk.Checkbutton(bg_image_frame, text="背景图片:", variable=bg_image_var, bg='#E8E8E8', font=self.font_11)
+        bg_image_cb.pack(side=tk.LEFT)
+        if not IMAGE_AVAILABLE: bg_image_cb.config(state=tk.DISABLED, text="背景图片(Pillow未安装):")
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=10)
+        bg_image_entry = tk.Entry(bg_image_frame, textvariable=bg_image_path_var, font=self.font_11, width=32)
+        bg_image_entry.pack(side=tk.LEFT, padx=(0, 5))
+
+        tk.Button(bg_image_frame, text="选取...", command=lambda: select_folder(bg_image_entry), bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).pack(side=tk.LEFT, padx=5)
+
+        tk.Radiobutton(bg_image_frame, text="顺序", variable=bg_image_order_var, value="sequential", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT, padx=(10,0))
+        tk.Radiobutton(bg_image_frame, text="随机", variable=bg_image_order_var, value="random", bg='#E8E8E8', font=self.font_11).pack(side=tk.LEFT)
+
+        time_frame = tk.LabelFrame(main_frame, text="时间", font=self.font_12_bold, bg='#E8E8E8', padx=10, pady=5)
         time_frame.grid(row=1, column=0, sticky='ew', pady=2)
-        time_frame.columnconfigure(1, weight=1)
-        
-        ttk.Label(time_frame, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
-        start_time_entry = ttk.Entry(time_frame, font=self.font_11)
+        tk.Label(time_frame, text="开始时间:", font=self.font_11, bg='#E8E8E8').grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        start_time_entry = tk.Entry(time_frame, font=self.font_11, width=50)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
-        ttk.Label(time_frame, text="《可多个,用英文逗号,隔开》").grid(row=0, column=2, sticky='w', padx=5)
-        ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
-        
-        ttk.Label(time_frame, text="播 n 遍:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
-        repeat_entry = ttk.Entry(time_frame, font=self.font_11, width=12)
+        tk.Label(time_frame, text="《可多个,用英文逗号,隔开》", font=self.font_11, bg='#E8E8E8').grid(row=0, column=2, sticky='w', padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).grid(row=0, column=3, padx=5)
+        tk.Label(time_frame, text="播 n 遍:", font=self.font_11, bg='#E8E8E8').grid(row=1, column=0, sticky='e', padx=5, pady=2)
+        repeat_entry = tk.Entry(time_frame, font=self.font_11, width=12)
         repeat_entry.grid(row=1, column=1, sticky='w', padx=5, pady=2)
-        
-        ttk.Label(time_frame, text="周几/几号:").grid(row=2, column=0, sticky='e', padx=5, pady=2)
-        weekday_entry = ttk.Entry(time_frame, font=self.font_11)
+        tk.Label(time_frame, text="周几/几号:", font=self.font_11, bg='#E8E8E8').grid(row=2, column=0, sticky='e', padx=5, pady=2)
+        weekday_entry = tk.Entry(time_frame, font=self.font_11, width=50)
         weekday_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=2)
-        ttk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bootstyle="outline").grid(row=2, column=3, padx=5)
-        
-        ttk.Label(time_frame, text="日期范围:").grid(row=3, column=0, sticky='e', padx=5, pady=2)
-        date_range_entry = ttk.Entry(time_frame, font=self.font_11)
+        tk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).grid(row=2, column=3, padx=5)
+        tk.Label(time_frame, text="日期范围:", font=self.font_11, bg='#E8E8E8').grid(row=3, column=0, sticky='e', padx=5, pady=2)
+        date_range_entry = tk.Entry(time_frame, font=self.font_11, width=50)
         date_range_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=2)
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
-        ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=3, column=3, padx=5)
+        tk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bg='#D0D0D0', font=self.font_11, bd=1, padx=22, pady=1).grid(row=3, column=3, padx=5)
 
-        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=15)
+        other_frame = tk.LabelFrame(main_frame, text="其它", font=self.font_12_bold, bg='#E8E8E8', padx=15, pady=10)
         other_frame.grid(row=2, column=0, sticky='ew', pady=4)
-        other_frame.columnconfigure(1, weight=1)
-        
         delay_var = tk.StringVar(value="delay")
-        ttk.Label(other_frame, text="模式:").grid(row=0, column=0, sticky='nw', padx=5, pady=2)
-        delay_frame = ttk.Frame(other_frame)
+        tk.Label(other_frame, text="模式:", font=self.font_11, bg='#E8E8E8').grid(row=0, column=0, sticky='nw', padx=5, pady=2)
+        delay_frame = tk.Frame(other_frame, bg='#E8E8E8')
         delay_frame.grid(row=0, column=1, sticky='w', padx=5, pady=2)
-        ttk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们", variable=delay_var, value="ontime").pack(anchor='w', pady=1)
-        ttk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候（默认）", variable=delay_var, value="delay").pack(anchor='w', pady=1)
-        ttk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate").pack(anchor='w', pady=1)
-        
-        dialog_button_frame = ttk.Frame(other_frame)
-        dialog_button_frame.grid(row=0, column=2, sticky='se', padx=20, pady=10)
+        tk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们", variable=delay_var, value="ontime", bg='#E8E8E8', font=self.font_11).pack(anchor='w', pady=1)
+        tk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候（默认）", variable=delay_var, value="delay", bg='#E8E8E8', font=self.font_11).pack(anchor='w', pady=1)
+        tk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate", bg='#E8E8E8', font=self.font_11).pack(anchor='w', pady=1)
+        dialog_button_frame = tk.Frame(other_frame, bg='#E8E8E8')
+        dialog_button_frame.grid(row=0, column=2, sticky='e', padx=20)
+        other_frame.grid_columnconfigure(1, weight=1)
 
         if is_edit_mode:
             task = task_to_edit
@@ -2255,7 +2127,7 @@ class TimedBroadcastApp:
             repeat_entry.insert(0, "1"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
 
         def save_task():
-            text_content = content_text.get('1.0', END).strip()
+            text_content = content_text.get('1.0', tk.END).strip()
             if not text_content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
             if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
@@ -2298,12 +2170,10 @@ class TimedBroadcastApp:
                 if play_now_flag: self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
                 return
 
-            progress_dialog = ttk.Toplevel(dialog); progress_dialog.title("请稍候")
+            progress_dialog = tk.Toplevel(dialog); progress_dialog.title("请稍候"); progress_dialog.geometry("300x100")
             progress_dialog.resizable(False, False); progress_dialog.transient(dialog); progress_dialog.grab_set()
-            ttk.Label(progress_dialog, text="语音文件生成中，请稍后...", font=self.font_11).pack(expand=True, padx=20, pady=20)
-            progress_dialog.update_idletasks()
-            self.center_window(progress_dialog, progress_dialog.winfo_reqwidth(), progress_dialog.winfo_reqheight())
-            
+            tk.Label(progress_dialog, text="语音文件生成中，请稍后...", font=self.font_11).pack(expand=True)
+            self.center_window(progress_dialog, 300, 100); dialog.update_idletasks()
             new_wav_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.wav"
             output_path = os.path.join(AUDIO_FOLDER, new_wav_filename)
             voice_params = {'voice': voice_var.get(), 'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0", 'volume': volume_entry.get().strip() or "80"}
@@ -2325,11 +2195,11 @@ class TimedBroadcastApp:
             synthesis_thread.daemon = True; synthesis_thread.start()
 
         button_text = "保存修改" if is_edit_mode else "添加"
-        ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
-        ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
+        tk.Button(dialog_button_frame, text=button_text, command=save_task, bg='#5DADE2', fg='white', font=self.font_11_bold, bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+        tk.Button(dialog_button_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=self.font_11, bd=1, padx=40, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
 
+        content_frame.columnconfigure(1, weight=1); time_frame.columnconfigure(1, weight=1)
 
-#第7部分
     def _import_voice_script(self, text_widget):
         filename = filedialog.askopenfilename(
             title="选择要导入的文稿",
@@ -2342,7 +2212,7 @@ class TimedBroadcastApp:
         try:
             with open(filename, 'r', encoding='utf-8') as f:
                 content = f.read()
-            text_widget.delete('1.0', END)
+            text_widget.delete('1.0', tk.END)
             text_widget.insert('1.0', content)
             self.log(f"已从 {os.path.basename(filename)} 成功导入文稿。")
         except Exception as e:
@@ -2350,7 +2220,7 @@ class TimedBroadcastApp:
             self.log(f"导入文稿失败: {e}")
 
     def _export_voice_script(self, text_widget, name_widget):
-        content = text_widget.get('1.0', END).strip()
+        content = text_widget.get('1.0', tk.END).strip()
         if not content:
             messagebox.showwarning("无法导出", "播音文字内容为空，无需导出。")
             return
@@ -2435,6 +2305,7 @@ class TimedBroadcastApp:
 
     def select_file_for_entry(self, initial_dir, string_var):
         filename = filedialog.askopenfilename(title="选择文件", initialdir=initial_dir, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")])
+ # ↓↓↓ 修改下面这一行，直接设置完整路径，而不是只有文件名 ↓↓↓
         if filename: string_var.set(filename)
 
     def delete_task(self):
@@ -2458,7 +2329,7 @@ class TimedBroadcastApp:
         if len(selection) > 1: messagebox.showwarning("警告", "一次只能修改一个节目"); return
         index = self.task_tree.index(selection[0])
         task = self.tasks[index]
-        dummy_parent = ttk.Toplevel(self.root); dummy_parent.withdraw()
+        dummy_parent = tk.Toplevel(self.root); dummy_parent.withdraw()
 
         task_type = task.get('type')
         if task_type == 'audio':
@@ -2571,7 +2442,6 @@ class TimedBroadcastApp:
         for i in selection: self.tasks[self.task_tree.index(i)]['status'] = status
         if count > 0: self.update_task_list(); self.save_tasks(); self.log(f"已{status} {count} 个节目")
 
-#第8部分
     def _set_tasks_status_by_type(self, task_type, status):
         if not self.tasks: return
 
@@ -2616,17 +2486,19 @@ class TimedBroadcastApp:
             self.log(f"已将全部节目音量统一设置为 {volume}。")
 
     def _create_custom_input_dialog(self, title, prompt, minvalue=None, maxvalue=None):
-        dialog = ttk.Toplevel(self.root)
+        dialog = tk.Toplevel(self.root)
         dialog.title(title)
+        dialog.geometry("350x150")
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
+        self.center_window(dialog, 350, 150)
 
         result = [None]
 
-        ttk.Label(dialog, text=prompt, font=self.font_11).pack(pady=10, padx=20)
-        entry = ttk.Entry(dialog, font=self.font_11, width=15, justify='center')
-        entry.pack(pady=5, padx=20)
+        tk.Label(dialog, text=prompt, font=self.font_11).pack(pady=10)
+        entry = tk.Entry(dialog, font=self.font_11, width=15, justify='center')
+        entry.pack(pady=5)
         entry.focus_set()
 
         def on_confirm():
@@ -2644,16 +2516,14 @@ class TimedBroadcastApp:
         def on_cancel():
             dialog.destroy()
 
-        btn_frame = ttk.Frame(dialog)
+        btn_frame = tk.Frame(dialog)
         btn_frame.pack(pady=15)
 
-        ttk.Button(btn_frame, text="确定", command=on_confirm, bootstyle="primary", width=8).pack(side=LEFT, padx=10)
-        ttk.Button(btn_frame, text="取消", command=on_cancel, width=8).pack(side=LEFT, padx=10)
+        tk.Button(btn_frame, text="确定", command=on_confirm, width=8).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="取消", command=on_cancel, width=8).pack(side=tk.LEFT, padx=10)
 
         dialog.bind('<Return>', lambda event: on_confirm())
 
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
         self.root.wait_window(dialog)
         return result[0]
 
@@ -2690,83 +2560,78 @@ class TimedBroadcastApp:
                         self.log(f"删除语音文件失败: {e}")
 
     def show_time_settings_dialog(self, time_entry):
-        dialog = ttk.Toplevel(self.root)
-        dialog.title("开始时间设置")
-        dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
-
-        main_frame = ttk.Frame(dialog, padding=15)
-        main_frame.pack(fill=BOTH, expand=True)
-        ttk.Label(main_frame, text="24小时制 HH:MM:SS", font=self.font_11_bold).pack(anchor='w', pady=5)
-        list_frame = ttk.LabelFrame(main_frame, text="时间列表", padding=5)
-        list_frame.pack(fill=BOTH, expand=True, pady=5)
-        box_frame = ttk.Frame(list_frame); box_frame.pack(side=LEFT, fill=BOTH, expand=True)
+        dialog = tk.Toplevel(self.root)
+        dialog.title("开始时间设置"); dialog.geometry("480x450"); dialog.resizable(False, False)
+        dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
+        self.center_window(dialog, 480, 450)
+        main_frame = tk.Frame(dialog, bg='#D7F3F5', padx=15, pady=15)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        tk.Label(main_frame, text="24小时制 HH:MM:SS", font=self.font_11_bold, bg='#D7F3F5').pack(anchor='w', pady=5)
+        list_frame = tk.LabelFrame(main_frame, text="时间列表", bg='#D7F3F5', padx=5, pady=5, font=self.font_11)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        box_frame = tk.Frame(list_frame); box_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         listbox = tk.Listbox(box_frame, font=self.font_11, height=10)
-        listbox.pack(side=LEFT, fill=BOTH, expand=True)
-        scrollbar = ttk.Scrollbar(box_frame, orient=VERTICAL, command=listbox.yview, bootstyle="round")
-        scrollbar.pack(side=RIGHT, fill=Y); listbox.configure(yscrollcommand=scrollbar.set)
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar = tk.Scrollbar(box_frame, orient=tk.VERTICAL, command=listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y); listbox.configure(yscrollcommand=scrollbar.set)
 
         current_times_str = ""
-        if isinstance(time_entry, ttk.Entry):
+        if isinstance(time_entry, tk.Entry):
             current_times_str = time_entry.get()
 
         for t in [t.strip() for t in current_times_str.split(',') if t.strip()]:
-            listbox.insert(END, t)
+            listbox.insert(tk.END, t)
 
-        btn_frame = ttk.Frame(list_frame)
-        btn_frame.pack(side=RIGHT, padx=10, fill=Y)
-        new_entry = ttk.Entry(btn_frame, font=self.font_11, width=12)
+        btn_frame = tk.Frame(list_frame, bg='#D7F3F5')
+        btn_frame.pack(side=tk.RIGHT, padx=10, fill=tk.Y)
+        new_entry = tk.Entry(btn_frame, font=self.font_11, width=12)
         new_entry.insert(0, datetime.now().strftime("%H:%M:%S")); new_entry.pack(pady=3)
         self._bind_mousewheel_to_entry(new_entry, self._handle_time_scroll)
         def add_time():
             val = new_entry.get().strip()
             normalized_time = self._normalize_time_string(val)
             if normalized_time:
-                if normalized_time not in listbox.get(0, END):
-                    listbox.insert(END, normalized_time)
-                    new_entry.delete(0, END)
+                if normalized_time not in listbox.get(0, tk.END):
+                    listbox.insert(tk.END, normalized_time)
+                    new_entry.delete(0, tk.END)
                     new_entry.insert(0, datetime.now().strftime("%H:%M:%S"))
             else:
                 messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog)
         def del_time():
             if listbox.curselection(): listbox.delete(listbox.curselection()[0])
-        ttk.Button(btn_frame, text="添加 ↑", command=add_time).pack(pady=3, fill=X)
-        ttk.Button(btn_frame, text="删除", command=del_time).pack(pady=3, fill=X)
-        ttk.Button(btn_frame, text="清空", command=lambda: listbox.delete(0, END)).pack(pady=3, fill=X)
-        
-        bottom_frame = ttk.Frame(main_frame); bottom_frame.pack(pady=10)
+        tk.Button(btn_frame, text="添加 ↑", command=add_time, font=self.font_11).pack(pady=3, fill=tk.X)
+        tk.Button(btn_frame, text="删除", command=del_time, font=self.font_11).pack(pady=3, fill=tk.X)
+        tk.Button(btn_frame, text="清空", command=lambda: listbox.delete(0, tk.END), font=self.font_11).pack(pady=3, fill=tk.X)
+        bottom_frame = tk.Frame(main_frame, bg='#D7F3F5'); bottom_frame.pack(pady=10)
         def confirm():
-            result = ", ".join(list(listbox.get(0, END)))
-            if isinstance(time_entry, ttk.Entry):
-                time_entry.delete(0, END)
+            result = ", ".join(list(listbox.get(0, tk.END)))
+            if isinstance(time_entry, tk.Entry):
+                time_entry.delete(0, tk.END)
                 time_entry.insert(0, result)
             dialog.destroy()
-        ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=5, ipady=5)
-        ttk.Button(bottom_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=5, ipady=5)
-        
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
+        tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=self.font_11_bold, bd=1, padx=25, pady=5).pack(side=tk.LEFT, padx=5)
+        tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=self.font_11, bd=1, padx=25, pady=5).pack(side=tk.LEFT, padx=5)
 
     def show_weekday_settings_dialog(self, weekday_entry):
-        dialog = ttk.Toplevel(self.root); dialog.title("周几或几号")
-        dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
-
-        main_frame = ttk.Frame(dialog, padding=20)
-        main_frame.pack(fill=BOTH, expand=True)
+        dialog = tk.Toplevel(self.root); dialog.title("周几或几号")
+        dialog.geometry("550x550"); dialog.resizable(False, False)
+        dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
+        self.center_window(dialog, 550, 550)
+        main_frame = tk.Frame(dialog, bg='#D7F3F5', padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
         week_type_var = tk.StringVar(value="week")
-        week_frame = ttk.LabelFrame(main_frame, text="按周", padding=10)
-        week_frame.pack(fill=X, pady=5)
-        ttk.Radiobutton(week_frame, text="每周", variable=week_type_var, value="week").grid(row=0, column=0, sticky='w')
+        week_frame = tk.LabelFrame(main_frame, text="按周", font=self.font_11_bold, bg='#D7F3F5', padx=10, pady=10)
+        week_frame.pack(fill=tk.X, pady=5)
+        tk.Radiobutton(week_frame, text="每周", variable=week_type_var, value="week", bg='#D7F3F5', font=self.font_11).grid(row=0, column=0, sticky='w')
         weekdays = [("周一", 1), ("周二", 2), ("周三", 3), ("周四", 4), ("周五", 5), ("周六", 6), ("周日", 7)]
         week_vars = {num: tk.IntVar(value=1) for day, num in weekdays}
-        for i, (day, num) in enumerate(weekdays): ttk.Checkbutton(week_frame, text=day, variable=week_vars[num]).grid(row=(i // 4) + 1, column=i % 4, sticky='w', padx=10, pady=3)
-        day_frame = ttk.LabelFrame(main_frame, text="按月", padding=10)
-        day_frame.pack(fill=BOTH, expand=True, pady=5)
-        ttk.Radiobutton(day_frame, text="每月", variable=week_type_var, value="day").grid(row=0, column=0, sticky='w')
+        for i, (day, num) in enumerate(weekdays): tk.Checkbutton(week_frame, text=day, variable=week_vars[num], bg='#D7F3F5', font=self.font_11).grid(row=(i // 4) + 1, column=i % 4, sticky='w', padx=10, pady=3)
+        day_frame = tk.LabelFrame(main_frame, text="按月", font=self.font_11_bold, bg='#D7F3F5', padx=10, pady=10)
+        day_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        tk.Radiobutton(day_frame, text="每月", variable=week_type_var, value="day", bg='#D7F3F5', font=self.font_11).grid(row=0, column=0, sticky='w')
         day_vars = {i: tk.IntVar(value=0) for i in range(1, 32)}
-        for i in range(1, 32): ttk.Checkbutton(day_frame, text=f"{i:02d}", variable=day_vars[i]).grid(row=((i - 1) // 7) + 1, column=(i - 1) % 7, sticky='w', padx=8, pady=2)
-        bottom_frame = ttk.Frame(main_frame); bottom_frame.pack(pady=10)
+        for i in range(1, 32): tk.Checkbutton(day_frame, text=f"{i:02d}", variable=day_vars[i], bg='#D7F3F5', font=self.font_11).grid(row=((i - 1) // 7) + 1, column=(i - 1) % 7, sticky='w', padx=8, pady=2)
+        bottom_frame = tk.Frame(main_frame, bg='#D7F3F5'); bottom_frame.pack(pady=10)
         current_val = weekday_entry.get()
         if current_val.startswith("每周:"):
             week_type_var.set("week")
@@ -2779,63 +2644,54 @@ class TimedBroadcastApp:
         def confirm():
             if week_type_var.get() == "week": result = "每周:" + "".join(sorted([str(n) for n, v in week_vars.items() if v.get()]))
             else: result = "每月:" + ",".join(sorted([f"{n:02d}" for n, v in day_vars.items() if v.get()]))
-            if isinstance(weekday_entry, ttk.Entry): weekday_entry.delete(0, END); weekday_entry.insert(0, result)
+            if isinstance(weekday_entry, tk.Entry): weekday_entry.delete(0, tk.END); weekday_entry.insert(0, result)
             dialog.destroy()
-        ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=5, ipady=5)
-        ttk.Button(bottom_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=5, ipady=5)
+        tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=self.font_11_bold, bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
+        tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=self.font_11, bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
 
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
-
-#第9部分
     def show_daterange_settings_dialog(self, date_range_entry):
-        dialog = ttk.Toplevel(self.root)
-        dialog.title("日期范围")
-        dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
-
-        main_frame = ttk.Frame(dialog, padding=20)
-        main_frame.pack(fill=BOTH, expand=True)
-        from_frame = ttk.Frame(main_frame)
+        dialog = tk.Toplevel(self.root)
+        dialog.title("日期范围"); dialog.geometry("450x250"); dialog.resizable(False, False)
+        dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
+        self.center_window(dialog, 450, 250)
+        main_frame = tk.Frame(dialog, bg='#D7F3F5', padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        from_frame = tk.Frame(main_frame, bg='#D7F3F5')
         from_frame.pack(pady=10, anchor='w')
-        ttk.Label(from_frame, text="从", font=self.font_11_bold).pack(side=LEFT, padx=5)
-        from_date_entry = ttk.Entry(from_frame, font=self.font_11, width=18)
-        from_date_entry.pack(side=LEFT, padx=5)
+        tk.Label(from_frame, text="从", font=self.font_11_bold, bg='#D7F3F5').pack(side=tk.LEFT, padx=5)
+        from_date_entry = tk.Entry(from_frame, font=self.font_11, width=18)
+        from_date_entry.pack(side=tk.LEFT, padx=5)
         self._bind_mousewheel_to_entry(from_date_entry, self._handle_date_scroll)
-        to_frame = ttk.Frame(main_frame)
+        to_frame = tk.Frame(main_frame, bg='#D7F3F5')
         to_frame.pack(pady=10, anchor='w')
-        ttk.Label(to_frame, text="到", font=self.font_11_bold).pack(side=LEFT, padx=5)
-        to_date_entry = ttk.Entry(to_frame, font=self.font_11, width=18)
-        to_date_entry.pack(side=LEFT, padx=5)
+        tk.Label(to_frame, text="到", font=self.font_11_bold, bg='#D7F3F5').pack(side=tk.LEFT, padx=5)
+        to_date_entry = tk.Entry(to_frame, font=self.font_11, width=18)
+        to_date_entry.pack(side=tk.LEFT, padx=5)
         self._bind_mousewheel_to_entry(to_date_entry, self._handle_date_scroll)
         try: start, end = date_range_entry.get().split('~'); from_date_entry.insert(0, start.strip()); to_date_entry.insert(0, end.strip())
         except (ValueError, IndexError): from_date_entry.insert(0, "2000-01-01"); to_date_entry.insert(0, "2099-12-31")
-        ttk.Label(main_frame, text="格式: YYYY-MM-DD", font=self.font_11, bootstyle="secondary").pack(pady=10)
-        bottom_frame = ttk.Frame(main_frame); bottom_frame.pack(pady=10)
+        tk.Label(main_frame, text="格式: YYYY-MM-DD", font=self.font_11, bg='#D7F3F5', fg='#666').pack(pady=10)
+        bottom_frame = tk.Frame(main_frame, bg='#D7F3F5'); bottom_frame.pack(pady=10)
         def confirm():
             start, end = from_date_entry.get().strip(), to_date_entry.get().strip()
             norm_start, norm_end = self._normalize_date_string(start), self._normalize_date_string(end)
             if norm_start and norm_end:
-                date_range_entry.delete(0, END)
+                date_range_entry.delete(0, tk.END)
                 date_range_entry.insert(0, f"{norm_start} ~ {norm_end}")
                 dialog.destroy()
             else: messagebox.showerror("格式错误", "日期格式不正确, 应为 YYYY-MM-DD", parent=dialog)
-        ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=5, ipady=5)
-        ttk.Button(bottom_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=5, ipady=5)
-
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
+        tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=self.font_11_bold, bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
+        tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=self.font_11, bd=1, padx=30, pady=6).pack(side=tk.LEFT, padx=5)
 
     def show_single_time_dialog(self, time_var):
-        dialog = ttk.Toplevel(self.root)
-        dialog.title("设置时间")
-        dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
-
-        main_frame = ttk.Frame(dialog, padding=15)
-        main_frame.pack(fill=BOTH, expand=True)
-        ttk.Label(main_frame, text="24小时制 HH:MM:SS", font=self.font_11_bold).pack(pady=5)
-        time_entry = ttk.Entry(main_frame, font=self.font_12, width=15, justify='center')
+        dialog = tk.Toplevel(self.root)
+        dialog.title("设置时间"); dialog.geometry("320x200"); dialog.resizable(False, False)
+        dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
+        self.center_window(dialog, 320, 200)
+        main_frame = tk.Frame(dialog, bg='#D7F3F5', padx=15, pady=15)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        tk.Label(main_frame, text="24小时制 HH:MM:SS", font=self.font_11_bold, bg='#D7F3F5').pack(pady=5)
+        time_entry = tk.Entry(main_frame, font=self.font_12, width=15, justify='center')
         time_entry.insert(0, time_var.get()); time_entry.pack(pady=10)
         self._bind_mousewheel_to_entry(time_entry, self._handle_time_scroll)
         def confirm():
@@ -2846,33 +2702,28 @@ class TimedBroadcastApp:
                 self.save_settings()
                 dialog.destroy()
             else: messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog)
-        bottom_frame = ttk.Frame(main_frame); bottom_frame.pack(pady=10)
-        ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=10)
-        ttk.Button(bottom_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10)
-        
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
+        bottom_frame = tk.Frame(main_frame, bg='#D7F3F5'); bottom_frame.pack(pady=10)
+        tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=self.font_11).pack(side=tk.LEFT, padx=10)
+        tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=self.font_11).pack(side=tk.LEFT, padx=10)
 
     def show_power_week_time_dialog(self, title, days_var, time_var):
-        dialog = ttk.Toplevel(self.root); dialog.title(title)
-        dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
-
-        week_frame = ttk.LabelFrame(dialog, text="选择周几", padding=10)
-        week_frame.pack(fill=X, pady=10, padx=10)
+        dialog = tk.Toplevel(self.root); dialog.title(title)
+        dialog.geometry("580x330"); dialog.resizable(False, False)
+        dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#D7F3F5')
+        self.center_window(dialog, 580, 330)
+        week_frame = tk.LabelFrame(dialog, text="选择周几", font=self.font_11_bold, bg='#D7F3F5', padx=10, pady=10)
+        week_frame.pack(fill=tk.X, pady=10, padx=10)
         weekdays = [("周一", 1), ("周二", 2), ("周三", 3), ("周四", 4), ("周五", 5), ("周六", 6), ("周日", 7)]
         week_vars = {num: tk.IntVar() for day, num in weekdays}
         current_days = days_var.get().replace("每周:", "")
         for day_num_str in current_days: week_vars[int(day_num_str)].set(1)
-        for i, (day, num) in enumerate(weekdays): ttk.Checkbutton(week_frame, text=day, variable=week_vars[num]).grid(row=0, column=i, sticky='w', padx=10, pady=3)
-        
-        time_frame = ttk.LabelFrame(dialog, text="设置时间", padding=10)
-        time_frame.pack(fill=X, pady=10, padx=10)
-        ttk.Label(time_frame, text="时间 (HH:MM:SS):").pack(side=LEFT)
-        time_entry = ttk.Entry(time_frame, font=self.font_11, width=15)
-        time_entry.insert(0, time_var.get()); time_entry.pack(side=LEFT, padx=10)
+        for i, (day, num) in enumerate(weekdays): tk.Checkbutton(week_frame, text=day, variable=week_vars[num], bg='#D7F3F5', font=self.font_11).grid(row=0, column=i, sticky='w', padx=10, pady=3)
+        time_frame = tk.LabelFrame(dialog, text="设置时间", font=self.font_11_bold, bg='#D7F3F5', padx=10, pady=10)
+        time_frame.pack(fill=tk.X, pady=10, padx=10)
+        tk.Label(time_frame, text="时间 (HH:MM:SS):", font=self.font_11, bg='#D7F3F5').pack(side=tk.LEFT)
+        time_entry = tk.Entry(time_frame, font=self.font_11, width=15)
+        time_entry.insert(0, time_var.get()); time_entry.pack(side=tk.LEFT, padx=10)
         self._bind_mousewheel_to_entry(time_entry, self._handle_time_scroll)
-        
         def confirm():
             selected_days = sorted([str(n) for n, v in week_vars.items() if v.get()])
             if not selected_days: messagebox.showwarning("提示", "请至少选择一天", parent=dialog); return
@@ -2882,12 +2733,9 @@ class TimedBroadcastApp:
             time_var.set(normalized_time)
             self.save_settings()
             dialog.destroy()
-        bottom_frame = ttk.Frame(dialog); bottom_frame.pack(pady=15)
-        ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=10)
-        ttk.Button(bottom_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10)
-
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
+        bottom_frame = tk.Frame(dialog, bg='#D7F3F5'); bottom_frame.pack(pady=15)
+        tk.Button(bottom_frame, text="确定", command=confirm, bg='#5DADE2', fg='white', font=self.font_11).pack(side=tk.LEFT, padx=10)
+        tk.Button(bottom_frame, text="取消", command=dialog.destroy, bg='#D0D0D0', font=self.font_11).pack(side=tk.LEFT, padx=10)
 
     def update_task_list(self):
         if not hasattr(self, 'task_tree') or not self.task_tree.winfo_exists(): return
@@ -2907,7 +2755,7 @@ class TimedBroadcastApp:
                 content_preview = os.path.basename(content)
 
             display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
-            self.task_tree.insert('', END, values=(
+            self.task_tree.insert('', tk.END, values=(
                 task.get('name', ''),
                 task.get('status', ''),
                 task.get('time', ''),
@@ -3106,7 +2954,6 @@ class TimedBroadcastApp:
                     try: self.playback_command_queue.get_nowait()
                     except queue.Empty: break
 
-#第10部分
     def _execute_broadcast(self, task, trigger_time):
         self.update_playing_text(f"[{task['name']}] 正在准备播放...")
         self.status_labels[2].config(text="播放状态: 播放中")
@@ -3260,6 +3107,7 @@ class TimedBroadcastApp:
             if self._is_interrupted(): return
             prompt_file_path = task.get('prompt_file', '')
             
+            # --- 路径判断逻辑 ---
             if os.path.isabs(prompt_file_path):
                 prompt_path = prompt_file_path
             else:
@@ -3284,6 +3132,7 @@ class TimedBroadcastApp:
             if self._is_interrupted(): return
             bgm_file_path = task.get('bgm_file', '')
 
+            # --- 路径判断逻辑 ---
             if os.path.isabs(bgm_file_path):
                 bgm_path = bgm_file_path
             else:
@@ -3437,7 +3286,7 @@ class TimedBroadcastApp:
         if self.video_window and self.video_window.winfo_exists():
             self.video_window.destroy()
 
-        self.video_window = ttk.Toplevel(self.root)
+        self.video_window = tk.Toplevel(self.root)
         self.video_window.title(f"正在播放: {task['name']}")
         self.video_window.configure(bg='black')
 
@@ -3560,15 +3409,15 @@ class TimedBroadcastApp:
         if self.fullscreen_window:
             self.fullscreen_window.destroy()
 
-        self.fullscreen_window = ttk.Toplevel(self.root)
+        self.fullscreen_window = tk.Toplevel(self.root)
         self.fullscreen_window.attributes('-fullscreen', True)
         self.fullscreen_window.attributes('-topmost', True)
         self.fullscreen_window.configure(bg='black', cursor='none')
         self.fullscreen_window.protocol("WM_DELETE_WINDOW", lambda: None)
         self.fullscreen_window.bind("<Escape>", self._handle_esc_press)
 
-        self.fullscreen_label = ttk.Label(self.fullscreen_window, background='black')
-        self.fullscreen_label.pack(expand=True, fill=BOTH)
+        self.fullscreen_label = tk.Label(self.fullscreen_window, bg='black')
+        self.fullscreen_label.pack(expand=True, fill=tk.BOTH)
 
     def _handle_esc_press(self, event=None):
         self.log("用户按下ESC，手动退出背景图片显示。")
@@ -3608,7 +3457,7 @@ class TimedBroadcastApp:
             return
 
         def animate_step(step):
-            if not self.fullscreen_window or not hasattr(self, 'fullscreen_window') or not self.fullscreen_window.winfo_exists(): return
+            if not self.fullscreen_window: return
 
             alpha = step / STEPS
             blended_img = Image.blend(img_from_rgba, img_to_rgba, alpha)
@@ -3633,8 +3482,8 @@ class TimedBroadcastApp:
     def _log_threadsafe(self, message):
         if hasattr(self, 'log_text') and self.log_text.winfo_exists():
             self.log_text.config(state='normal')
-            self.log_text.insert(END, f"{datetime.now().strftime('%H:%M:%S')} -> {message}\n")
-            self.log_text.see(END); self.log_text.config(state='disabled')
+            self.log_text.insert(tk.END, f"{datetime.now().strftime('%H:%M:%S')} -> {message}\n")
+            self.log_text.see(tk.END); self.log_text.config(state='disabled')
 
     def update_playing_text(self, message): self.root.after(0, lambda: self._update_playing_text_threadsafe(message))
 
@@ -3697,7 +3546,6 @@ class TimedBroadcastApp:
                 interval = self.settings.get("bg_image_interval", 6)
 
             self.settings.update({
-                "app_font": self.font_var.get(),
                 "autostart": self.autostart_var.get(),
                 "start_minimized": self.start_minimized_var.get(),
                 "lock_on_start": self.lock_on_start_var.get(),
@@ -3788,18 +3636,16 @@ class TimedBroadcastApp:
         except (ValueError, IndexError): return False, "日期范围格式无效，应为 'YYYY-MM-DD ~ YYYY-MM-DD'"
 
     def show_quit_dialog(self):
-        dialog = ttk.Toplevel(self.root)
+        dialog = tk.Toplevel(self.root)
         dialog.title("确认")
+        dialog.geometry("380x170")
         dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
-
-        ttk.Label(dialog, text="您想要如何操作？", font=self.font_12).pack(pady=20, padx=40)
-        btn_frame = ttk.Frame(dialog); btn_frame.pack(pady=10)
-        ttk.Button(btn_frame, text="退出程序", command=lambda: [dialog.destroy(), self.quit_app()], bootstyle="danger").pack(side=LEFT, padx=10)
-        if TRAY_AVAILABLE: ttk.Button(btn_frame, text="最小化到托盘", command=lambda: [dialog.destroy(), self.hide_to_tray()], bootstyle="primary-outline").pack(side=LEFT, padx=10)
-        ttk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10)
-        
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
+        self.center_window(dialog, 380, 170)
+        tk.Label(dialog, text="您想要如何操作？", font=self.font_12, pady=20).pack()
+        btn_frame = tk.Frame(dialog); btn_frame.pack(pady=10)
+        tk.Button(btn_frame, text="退出程序", command=lambda: [dialog.destroy(), self.quit_app()], font=self.font_11).pack(side=tk.LEFT, padx=10)
+        if TRAY_AVAILABLE: tk.Button(btn_frame, text="最小化到托盘", command=lambda: [dialog.destroy(), self.hide_to_tray()], font=self.font_11).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="取消", command=dialog.destroy, font=self.font_11).pack(side=tk.LEFT, padx=10)
 
     def hide_to_tray(self):
         if not TRAY_AVAILABLE: messagebox.showwarning("功能不可用", "pystray 或 Pillow 库未安装，无法最小化到托盘。"); return
@@ -3873,24 +3719,25 @@ class TimedBroadcastApp:
         tree.bind("<ButtonRelease-1>", on_release, True)
 
     def create_holiday_page(self):
-        page_frame = ttk.Frame(self.page_container, padding=10)
-        page_frame.columnconfigure(0, weight=1)
+        page_frame = tk.Frame(self.page_container, bg='white')
 
-        top_frame = ttk.Frame(page_frame)
-        top_frame.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 10))
-        title_label = ttk.Label(top_frame, text="节假日管理", font=self.font_14_bold, bootstyle="primary")
-        title_label.pack(side=LEFT)
+        top_frame = tk.Frame(page_frame, bg='white')
+        top_frame.pack(fill=tk.X, padx=10, pady=10)
+        title_label = tk.Label(top_frame, text="节假日管理", font=self.font_14_bold, bg='white', fg='#2C5F7C')
+        title_label.pack(side=tk.LEFT)
 
-        desc_label = ttk.Label(page_frame, text="在节假日期间，所有“定时广播”、“整点报时”和“待办事项”都将自动暂停，节假日结束后自动恢复。",
-                              font=self.font_11, bootstyle="secondary", wraplength=self.root.winfo_width() - 200)
-        desc_label.grid(row=1, column=0, columnspan=2, sticky='w', pady=(0, 10))
+        desc_label = tk.Label(page_frame, text="在节假日期间，所有“定时广播”、“整点报时”和“待办事项”都将自动暂停，节假日结束后自动恢复。",
+                              font=self.font_11, bg='white', fg='#555')
+        desc_label.pack(anchor='w', padx=10, pady=(0, 10))
 
-        table_frame = ttk.Frame(page_frame)
-        table_frame.grid(row=2, column=0, sticky='nsew')
-        page_frame.rowconfigure(2, weight=1)
+        content_frame = tk.Frame(page_frame, bg='white')
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        table_frame = tk.Frame(content_frame, bg='white')
+        table_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         columns = ('名称', '状态', '开始时间', '结束时间')
-        self.holiday_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended', bootstyle="primary")
+        self.holiday_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended')
 
         self.holiday_tree.heading('名称', text='节假日名称')
         self.holiday_tree.column('名称', width=250, anchor='w')
@@ -3901,36 +3748,32 @@ class TimedBroadcastApp:
         self.holiday_tree.heading('结束时间', text='结束时间')
         self.holiday_tree.column('结束时间', width=200, anchor='center')
 
-        self.holiday_tree.pack(side=LEFT, fill=BOTH, expand=True)
-        scrollbar = ttk.Scrollbar(table_frame, orient=VERTICAL, command=self.holiday_tree.yview, bootstyle="round")
-        scrollbar.pack(side=RIGHT, fill=Y)
+        self.holiday_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.holiday_tree.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.holiday_tree.configure(yscrollcommand=scrollbar.set)
 
         self.holiday_tree.bind("<Double-1>", lambda e: self.edit_holiday())
         self.holiday_tree.bind("<Button-3>", self.show_holiday_context_menu)
         self._enable_drag_selection(self.holiday_tree)
 
-        action_frame = ttk.Frame(page_frame, padding=(10, 0))
-        action_frame.grid(row=2, column=1, sticky='ns')
+        action_frame = tk.Frame(content_frame, bg='white', padx=10)
+        action_frame.pack(side=tk.RIGHT, fill=tk.Y)
 
+        btn_width = 10
         buttons_config = [
-            ("添加", self.add_holiday, "primary"), 
-            ("修改", self.edit_holiday, "info"), 
-            ("删除", self.delete_holiday, "danger"),
-            (None, None, None), # Separator
-            ("全部启用", self.enable_all_holidays, "success-outline"), 
-            ("全部禁用", self.disable_all_holidays, "warning-outline"),
-            (None, None, None),
-            ("导入列表", self.import_holidays, "secondary-outline"), 
-            ("导出列表", self.export_holidays, "secondary-outline"), 
-            ("清空列表", self.clear_all_holidays, "danger-outline")
+            ("添加", self.add_holiday), ("修改", self.edit_holiday), ("删除", self.delete_holiday),
+            (None, None), # Separator
+            ("全部启用", self.enable_all_holidays), ("全部禁用", self.disable_all_holidays),
+            (None, None),
+            ("导入列表", self.import_holidays), ("导出列表", self.export_holidays), ("清空列表", self.clear_all_holidays)
         ]
 
-        for text, cmd, style in buttons_config:
+        for text, cmd in buttons_config:
             if text is None:
-                ttk.Separator(action_frame, orient=HORIZONTAL).pack(fill=X, pady=10)
+                tk.Frame(action_frame, height=20, bg='white').pack() # Spacer
                 continue
-            ttk.Button(action_frame, text=text, command=cmd, bootstyle=style).pack(pady=5, fill=X)
+            tk.Button(action_frame, text=text, command=cmd, font=self.font_11, width=btn_width, pady=5).pack(pady=5)
 
         self.update_holiday_list()
         return page_frame
@@ -3955,13 +3798,12 @@ class TimedBroadcastApp:
             self.log(f"加载节假日失败: {e}")
             self.holidays = []
 
-#第11部分
     def update_holiday_list(self):
         if not hasattr(self, 'holiday_tree') or not self.holiday_tree.winfo_exists(): return
         selection = self.holiday_tree.selection()
         self.holiday_tree.delete(*self.holiday_tree.get_children())
         for holiday in self.holidays:
-            self.holiday_tree.insert('', END, values=(
+            self.holiday_tree.insert('', tk.END, values=(
                 holiday.get('name', ''),
                 holiday.get('status', '启用'),
                 holiday.get('start_datetime', ''),
@@ -4010,38 +3852,37 @@ class TimedBroadcastApp:
         self.save_holidays()
 
     def open_holiday_dialog(self, holiday_to_edit=None, index=None):
-        dialog = ttk.Toplevel(self.root)
+        dialog = tk.Toplevel(self.root)
         dialog.title("修改节假日" if holiday_to_edit else "添加节假日")
-        # 修复7：移除固定尺寸
-        dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.geometry("500x300"); dialog.resizable(False, False)
+        dialog.transient(self.root); dialog.grab_set(); dialog.configure(bg='#F0F8FF')
+        self.center_window(dialog, 500, 300)
 
-        main_frame = ttk.Frame(dialog, padding=20)
-        main_frame.pack(fill=BOTH, expand=True)
-        main_frame.columnconfigure(1, weight=1)
+        main_frame = tk.Frame(dialog, bg='#F0F8FF', padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(main_frame, text="名称:").grid(row=0, column=0, sticky='w', pady=5)
-        name_entry = ttk.Entry(main_frame, font=self.font_11)
+        tk.Label(main_frame, text="名称:", font=self.font_11, bg='#F0F8FF').grid(row=0, column=0, sticky='w', pady=5)
+        name_entry = tk.Entry(main_frame, font=self.font_11, width=40)
         name_entry.grid(row=0, column=1, columnspan=2, sticky='ew', pady=5)
 
-        ttk.Label(main_frame, text="开始时间:").grid(row=1, column=0, sticky='w', pady=5)
-        start_date_entry = ttk.Entry(main_frame, font=self.font_11, width=15)
+        tk.Label(main_frame, text="开始时间:", font=self.font_11, bg='#F0F8FF').grid(row=1, column=0, sticky='w', pady=5)
+        start_date_entry = tk.Entry(main_frame, font=self.font_11, width=15)
         start_date_entry.grid(row=1, column=1, sticky='w', pady=5)
         self._bind_mousewheel_to_entry(start_date_entry, self._handle_date_scroll)
-        start_time_entry = ttk.Entry(main_frame, font=self.font_11, width=15)
+        start_time_entry = tk.Entry(main_frame, font=self.font_11, width=15)
         start_time_entry.grid(row=1, column=2, sticky='w', pady=5, padx=5)
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
 
-        ttk.Label(main_frame, text="结束时间:").grid(row=2, column=0, sticky='w', pady=5)
-        end_date_entry = ttk.Entry(main_frame, font=self.font_11, width=15)
+        tk.Label(main_frame, text="结束时间:", font=self.font_11, bg='#F0F8FF').grid(row=2, column=0, sticky='w', pady=5)
+        end_date_entry = tk.Entry(main_frame, font=self.font_11, width=15)
         end_date_entry.grid(row=2, column=1, sticky='w', pady=5)
         self._bind_mousewheel_to_entry(end_date_entry, self._handle_date_scroll)
-        end_time_entry = ttk.Entry(main_frame, font=self.font_11, width=15)
+        end_time_entry = tk.Entry(main_frame, font=self.font_11, width=15)
         end_time_entry.grid(row=2, column=2, sticky='w', pady=5, padx=5)
         self._bind_mousewheel_to_entry(end_time_entry, self._handle_time_scroll)
 
-        ttk.Label(main_frame, text="格式: YYYY-MM-DD", font=self.font_9, bootstyle="secondary").grid(row=3, column=1, sticky='n')
-        ttk.Label(main_frame, text="格式: HH:MM:SS", font=self.font_9, bootstyle="secondary").grid(row=3, column=2, sticky='n')
+        tk.Label(main_frame, text="格式: YYYY-MM-DD", font=self.font_9, bg='#F0F8FF', fg='grey').grid(row=3, column=1, sticky='n')
+        tk.Label(main_frame, text="格式: HH:MM:SS", font=self.font_9, bg='#F0F8FF', fg='grey').grid(row=3, column=2, sticky='n')
 
         if holiday_to_edit:
             name_entry.insert(0, holiday_to_edit.get('name', ''))
@@ -4101,13 +3942,10 @@ class TimedBroadcastApp:
             self.save_holidays()
             dialog.destroy()
 
-        button_frame = ttk.Frame(main_frame)
+        button_frame = tk.Frame(main_frame, bg='#F0F8FF')
         button_frame.grid(row=4, column=0, columnspan=3, pady=20)
-        ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
-        ttk.Button(button_frame, text="取消", command=dialog.destroy, width=10).pack(side=LEFT, padx=10)
-
-        dialog.update_idletasks()
-        self.center_window(dialog, dialog.winfo_reqwidth(), dialog.winfo_reqheight())
+        tk.Button(button_frame, text="保存", command=save, font=self.font_11, width=10).pack(side=tk.LEFT, padx=10)
+        tk.Button(button_frame, text="取消", command=dialog.destroy, font=self.font_11, width=10).pack(side=tk.LEFT, padx=10)
 
     def show_holiday_context_menu(self, event):
         if self.is_locked: return
@@ -4116,8 +3954,7 @@ class TimedBroadcastApp:
 
         context_menu = tk.Menu(self.root, tearoff=0, font=self.font_11)
 
-        if iid not in self.holiday_tree.selection():
-            self.holiday_tree.selection_set(iid)
+        self.holiday_tree.selection_set(iid)
 
         context_menu.add_command(label="修改", command=self.edit_holiday)
         context_menu.add_command(label="删除", command=self.delete_holiday)
@@ -4221,23 +4058,24 @@ class TimedBroadcastApp:
             self.log("已清空所有节假日。")
 
     def create_todo_page(self):
-        page_frame = ttk.Frame(self.page_container, padding=10)
-        page_frame.columnconfigure(0, weight=1)
+        page_frame = tk.Frame(self.page_container, bg='white')
 
-        top_frame = ttk.Frame(page_frame)
-        top_frame.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 10))
-        title_label = ttk.Label(top_frame, text="待办事项", font=self.font_14_bold, bootstyle="primary")
-        title_label.pack(side=LEFT)
+        top_frame = tk.Frame(page_frame, bg='white')
+        top_frame.pack(fill=tk.X, padx=10, pady=10)
+        title_label = tk.Label(top_frame, text="待办事项", font=self.font_14_bold, bg='white', fg='#2C5F7C')
+        title_label.pack(side=tk.LEFT)
 
-        desc_label = ttk.Label(page_frame, text="到达提醒时间时会弹出窗口并播放提示音。提醒功能受节假日约束。", font=self.font_11, bootstyle="secondary")
-        desc_label.grid(row=1, column=0, columnspan=2, sticky='w', pady=(0, 10))
+        desc_label = tk.Label(page_frame, text="到达提醒时间时会弹出窗口并播放提示音。提醒功能受节假日约束。", font=self.font_11, bg='white', fg='#555')
+        desc_label.pack(anchor='w', padx=10, pady=(0, 10))
 
-        table_frame = ttk.Frame(page_frame)
-        table_frame.grid(row=2, column=0, sticky='nsew')
-        page_frame.rowconfigure(2, weight=1)
+        content_frame = tk.Frame(page_frame, bg='white')
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        table_frame = tk.Frame(content_frame, bg='white')
+        table_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         columns = ('待办事项名称', '状态', '类型', '内容', '提醒规则')
-        self.todo_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended', bootstyle="primary")
+        self.todo_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended')
 
         self.todo_tree.heading('待办事项名称', text='待办事项名称')
         self.todo_tree.column('待办事项名称', width=200, anchor='w')
@@ -4250,36 +4088,32 @@ class TimedBroadcastApp:
         self.todo_tree.heading('提醒规则', text='提醒规则')
         self.todo_tree.column('提醒规则', width=250, anchor='center')
 
-        self.todo_tree.pack(side=LEFT, fill=BOTH, expand=True)
-        scrollbar = ttk.Scrollbar(table_frame, orient=VERTICAL, command=self.todo_tree.yview, bootstyle="round")
-        scrollbar.pack(side=RIGHT, fill=Y)
+        self.todo_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.todo_tree.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.todo_tree.configure(yscrollcommand=scrollbar.set)
 
         self.todo_tree.bind("<Double-1>", lambda e: self.edit_todo())
         self.todo_tree.bind("<Button-3>", self.show_todo_context_menu)
         self._enable_drag_selection(self.todo_tree)
 
-        action_frame = ttk.Frame(page_frame, padding=(10, 0))
-        action_frame.grid(row=2, column=1, sticky='ns')
+        action_frame = tk.Frame(content_frame, bg='white', padx=10)
+        action_frame.pack(side=tk.RIGHT, fill=tk.Y)
 
+        btn_width = 10
         buttons_config = [
-            ("添加", self.add_todo, "primary"), 
-            ("修改", self.edit_todo, "info"), 
-            ("删除", self.delete_todo, "danger"),
-            (None, None, None),
-            ("全部启用", self.enable_all_todos, "success-outline"), 
-            ("全部禁用", self.disable_all_todos, "warning-outline"),
-            (None, None, None),
-            ("导入事项", self.import_todos, "secondary-outline"), 
-            ("导出事项", self.export_todos, "secondary-outline"), 
-            ("清空事项", self.clear_all_todos, "danger-outline")
+            ("添加", self.add_todo), ("修改", self.edit_todo), ("删除", self.delete_todo),
+            (None, None),
+            ("全部启用", self.enable_all_todos), ("全部禁用", self.disable_all_todos),
+            (None, None),
+            ("导入事项", self.import_todos), ("导出事项", self.export_todos), ("清空事项", self.clear_all_todos),
         ]
 
-        for text, cmd, style in buttons_config:
+        for text, cmd in buttons_config:
             if text is None:
-                ttk.Separator(action_frame, orient=HORIZONTAL).pack(fill=X, pady=10)
+                tk.Frame(action_frame, height=20, bg='white').pack()
                 continue
-            ttk.Button(action_frame, text=text, command=cmd, bootstyle=style).pack(pady=5, fill=X)
+            tk.Button(action_frame, text=text, command=cmd, font=self.font_11, width=btn_width, pady=5).pack(pady=5)
 
         self.update_todo_list()
         return page_frame
@@ -4344,7 +4178,7 @@ class TimedBroadcastApp:
                 else:
                     remind_info = times
 
-            self.todo_tree.insert('', END, values=(
+            self.todo_tree.insert('', tk.END, values=(
                 todo.get('name', ''),
                 todo.get('status', '启用'),
                 task_type,
@@ -4400,71 +4234,70 @@ class TimedBroadcastApp:
         self.save_todos()
 
     def open_todo_dialog(self, todo_to_edit=None, index=None):
-        dialog = ttk.Toplevel(self.root)
+        dialog = tk.Toplevel(self.root)
         dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
-        # 修复7：移除固定尺寸
-        dialog.resizable(True, True)
-        dialog.minsize(700, 550)
+        dialog.geometry("750x600")
+        dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
+        dialog.configure(bg='#F0F8FF')
+        self.center_window(dialog, 750, 600)
 
-        main_frame = ttk.Frame(dialog, padding=20)
-        main_frame.pack(fill=BOTH, expand=True)
-        main_frame.columnconfigure(1, weight=1)
+        main_frame = tk.Frame(dialog, bg='#F0F8FF', padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(main_frame, text="名称:").grid(row=0, column=0, sticky='e', pady=5, padx=5)
-        name_entry = ttk.Entry(main_frame, font=self.font_11)
-        name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', pady=5)
+        tk.Label(main_frame, text="名称:", font=self.font_11, bg='#F0F8FF').grid(row=0, column=0, sticky='e', pady=5, padx=5)
+        name_entry = tk.Entry(main_frame, font=self.font_11, width=60)
+        name_entry.grid(row=0, column=1, columnspan=3, sticky='w', pady=5)
 
-        ttk.Label(main_frame, text="内容:").grid(row=1, column=0, sticky='ne', pady=5, padx=5)
-        content_text = ScrolledText(main_frame, height=5, font=self.font_11, wrap=WORD)
-        content_text.grid(row=1, column=1, columnspan=3, sticky='ew', pady=5)
+        tk.Label(main_frame, text="内容:", font=self.font_11, bg='#F0F8FF').grid(row=1, column=0, sticky='ne', pady=5, padx=5)
+        content_text = scrolledtext.ScrolledText(main_frame, height=5, font=self.font_11, width=60, wrap=tk.WORD)
+        content_text.grid(row=1, column=1, columnspan=3, sticky='w', pady=5)
 
         type_var = tk.StringVar(value="onetime")
-        type_frame = ttk.Frame(main_frame)
+        type_frame = tk.Frame(main_frame, bg='#F0F8FF')
         type_frame.grid(row=2, column=1, columnspan=3, sticky='w', pady=10)
 
-        onetime_rb = ttk.Radiobutton(type_frame, text="一次性任务", variable=type_var, value="onetime")
-        onetime_rb.pack(side=LEFT, padx=10)
-        recurring_rb = ttk.Radiobutton(type_frame, text="循环任务", variable=type_var, value="recurring")
-        recurring_rb.pack(side=LEFT, padx=10)
+        onetime_rb = tk.Radiobutton(type_frame, text="一次性任务", variable=type_var, value="onetime", bg='#F0F8FF', font=self.font_11)
+        onetime_rb.pack(side=tk.LEFT, padx=10)
+        recurring_rb = tk.Radiobutton(type_frame, text="循环任务", variable=type_var, value="recurring", bg='#F0F8FF', font=self.font_11)
+        recurring_rb.pack(side=tk.LEFT, padx=10)
 
-        onetime_lf = ttk.LabelFrame(main_frame, text="一次性任务设置", padding=10)
-        recurring_lf = ttk.LabelFrame(main_frame, text="循环任务设置", padding=10)
-        recurring_lf.columnconfigure(1, weight=1)
+        onetime_lf = tk.LabelFrame(main_frame, text="一次性任务设置", font=self.font_11, bg='#F0F8FF', padx=10, pady=10)
+        recurring_lf = tk.LabelFrame(main_frame, text="循环任务设置", font=self.font_11, bg='#F0F8FF', padx=10, pady=10)
 
-        ttk.Label(onetime_lf, text="执行日期:").grid(row=0, column=0, sticky='e', pady=5, padx=5)
-        onetime_date_entry = ttk.Entry(onetime_lf, font=self.font_11, width=20)
+        tk.Label(onetime_lf, text="执行日期:", font=self.font_11, bg='#F0F8FF').grid(row=0, column=0, sticky='e', pady=5, padx=5)
+        onetime_date_entry = tk.Entry(onetime_lf, font=self.font_11, width=20)
         onetime_date_entry.grid(row=0, column=1, sticky='w', pady=5)
         self._bind_mousewheel_to_entry(onetime_date_entry, self._handle_date_scroll)
-        ttk.Label(onetime_lf, text="执行时间:").grid(row=1, column=0, sticky='e', pady=5, padx=5)
-        onetime_time_entry = ttk.Entry(onetime_lf, font=self.font_11, width=20)
+        tk.Label(onetime_lf, text="执行时间:", font=self.font_11, bg='#F0F8FF').grid(row=1, column=0, sticky='e', pady=5, padx=5)
+        onetime_time_entry = tk.Entry(onetime_lf, font=self.font_11, width=20)
         onetime_time_entry.grid(row=1, column=1, sticky='w', pady=5)
         self._bind_mousewheel_to_entry(onetime_time_entry, self._handle_time_scroll)
 
-        ttk.Label(recurring_lf, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
-        recurring_time_entry = ttk.Entry(recurring_lf, font=self.font_11)
-        recurring_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
+        tk.Label(recurring_lf, text="开始时间:", font=self.font_11, bg='#F0F8FF').grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        recurring_time_entry = tk.Entry(recurring_lf, font=self.font_11, width=40)
+        recurring_time_entry.grid(row=0, column=1, sticky='w', padx=5, pady=5)
         self._bind_mousewheel_to_entry(recurring_time_entry, self._handle_time_scroll)
-        ttk.Button(recurring_lf, text="设置...", command=lambda: self.show_time_settings_dialog(recurring_time_entry), bootstyle="outline").grid(row=0, column=2, padx=5)
+        tk.Button(recurring_lf, text="设置...", command=lambda: self.show_time_settings_dialog(recurring_time_entry), bg='#D0D0D0', font=self.font_11).grid(row=0, column=2, padx=5)
 
-        ttk.Label(recurring_lf, text="周几/几号:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
-        recurring_weekday_entry = ttk.Entry(recurring_lf, font=self.font_11)
-        recurring_weekday_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
-        ttk.Button(recurring_lf, text="选取...", command=lambda: self.show_weekday_settings_dialog(recurring_weekday_entry), bootstyle="outline").grid(row=1, column=2, padx=5)
+        tk.Label(recurring_lf, text="周几/几号:", font=self.font_11, bg='#F0F8FF').grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        recurring_weekday_entry = tk.Entry(recurring_lf, font=self.font_11, width=40)
+        recurring_weekday_entry.grid(row=1, column=1, sticky='w', padx=5, pady=5)
+        tk.Button(recurring_lf, text="选取...", command=lambda: self.show_weekday_settings_dialog(recurring_weekday_entry), bg='#D0D0D0', font=self.font_11).grid(row=1, column=2, padx=5)
 
-        ttk.Label(recurring_lf, text="日期范围:").grid(row=2, column=0, sticky='e', padx=5, pady=5)
-        recurring_daterange_entry = ttk.Entry(recurring_lf, font=self.font_11)
-        recurring_daterange_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=5)
+        tk.Label(recurring_lf, text="日期范围:", font=self.font_11, bg='#F0F8FF').grid(row=2, column=0, sticky='e', padx=5, pady=5)
+        recurring_daterange_entry = tk.Entry(recurring_lf, font=self.font_11, width=40)
+        recurring_daterange_entry.grid(row=2, column=1, sticky='w', padx=5, pady=5)
         self._bind_mousewheel_to_entry(recurring_daterange_entry, self._handle_date_scroll)
-        ttk.Button(recurring_lf, text="设置...", command=lambda: self.show_daterange_settings_dialog(recurring_daterange_entry), bootstyle="outline").grid(row=2, column=2, padx=5)
+        tk.Button(recurring_lf, text="设置...", command=lambda: self.show_daterange_settings_dialog(recurring_daterange_entry), bg='#D0D0D0', font=self.font_11).grid(row=2, column=2, padx=5)
 
-        ttk.Label(recurring_lf, text="循环间隔:").grid(row=3, column=0, sticky='e', padx=5, pady=5)
-        interval_frame = ttk.Frame(recurring_lf)
+        tk.Label(recurring_lf, text="循环间隔:", font=self.font_11, bg='#F0F8FF').grid(row=3, column=0, sticky='e', padx=5, pady=5)
+        interval_frame = tk.Frame(recurring_lf, bg='#F0F8FF')
         interval_frame.grid(row=3, column=1, sticky='w', padx=5, pady=5)
-        recurring_interval_entry = ttk.Entry(interval_frame, font=self.font_11, width=8)
-        recurring_interval_entry.pack(side=LEFT)
-        ttk.Label(interval_frame, text="分钟 (0表示仅在'开始时间'提醒)", font=self.font_10).pack(side=LEFT, padx=5)
+        recurring_interval_entry = tk.Entry(interval_frame, font=self.font_11, width=8)
+        recurring_interval_entry.pack(side=tk.LEFT)
+        tk.Label(interval_frame, text="分钟 (0表示仅在'开始时间'提醒)", font=self.font_10, bg='#F0F8FF').pack(side=tk.LEFT, padx=5)
 
         def toggle_frames(*args):
             if type_var.get() == 'onetime':
@@ -4509,7 +4342,7 @@ class TimedBroadcastApp:
 
             new_todo_data = {
                 "name": name,
-                "content": content_text.get('1.0', END).strip(),
+                "content": content_text.get('1.0', tk.END).strip(),
                 "type": type_var.get(),
                 "status": "启用" if not todo_to_edit else todo_to_edit.get('status', '启用'),
                 "last_run": {} if not todo_to_edit else todo_to_edit.get('last_run', {}),
@@ -4552,10 +4385,10 @@ class TimedBroadcastApp:
             self.save_todos()
             dialog.destroy()
 
-        button_frame = ttk.Frame(main_frame)
+        button_frame = tk.Frame(main_frame, bg='#F0F8FF')
         button_frame.grid(row=4, column=0, columnspan=4, pady=20)
-        ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
-        ttk.Button(button_frame, text="取消", command=dialog.destroy, width=10).pack(side=LEFT, padx=10)
+        tk.Button(button_frame, text="保存", command=save, font=self.font_11, width=10).pack(side=tk.LEFT, padx=10)
+        tk.Button(button_frame, text="取消", command=dialog.destroy, font=self.font_11, width=10).pack(side=tk.LEFT, padx=10)
 
     def show_todo_context_menu(self, event):
         if self.is_locked: return
@@ -4563,8 +4396,7 @@ class TimedBroadcastApp:
         if not iid: return
 
         context_menu = tk.Menu(self.root, tearoff=0, font=self.font_11)
-        if iid not in self.todo_tree.selection():
-            self.todo_tree.selection_set(iid)
+        self.todo_tree.selection_set(iid)
 
         context_menu.add_command(label="修改", command=self.edit_todo)
         context_menu.add_command(label="删除", command=self.delete_todo)
@@ -4756,9 +4588,12 @@ class TimedBroadcastApp:
     def show_todo_reminder(self, todo):
         self._play_reminder_sound()
 
-        reminder_win = ttk.Toplevel(self.root)
+        reminder_win = tk.Toplevel(self.root)
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
+        reminder_win.geometry("480x320")
         reminder_win.resizable(False, False)
+        self.center_window(reminder_win, 480, 320)
+        reminder_win.configure(bg='#FFFFE0')
 
         reminder_win.attributes('-topmost', True)
         reminder_win.lift()
@@ -4774,17 +4609,17 @@ class TimedBroadcastApp:
                 task_in_list['status'] = '待处理'
                 self.root.after(0, self.update_todo_list)
 
-        title_label = ttk.Label(reminder_win, text=todo.get('name', '无标题'), font=self.font_14_bold, wraplength=460)
-        title_label.pack(pady=(15, 10), padx=20)
+        title_label = tk.Label(reminder_win, text=todo.get('name', '无标题'), font=self.font_14_bold, bg='#FFFFE0', wraplength=460)
+        title_label.pack(pady=(15, 10))
 
-        btn_frame = ttk.Frame(reminder_win)
-        btn_frame.pack(side=BOTTOM, pady=15, padx=10, fill=X)
+        btn_frame = tk.Frame(reminder_win, bg='#FFFFE0')
+        btn_frame.pack(side=tk.BOTTOM, pady=15)
 
-        content_frame = ttk.Frame(reminder_win, bootstyle="secondary", padding=1)
-        content_frame.pack(fill=BOTH, expand=True, padx=20, pady=5)
+        content_frame = tk.Frame(reminder_win, bg='white', bd=1, relief='solid')
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
 
-        content_text = ScrolledText(content_frame, font=self.font_11, wrap=WORD, bd=0, height=5)
-        content_text.pack(fill=BOTH, expand=True)
+        content_text = scrolledtext.ScrolledText(content_frame, font=self.font_11, wrap=tk.WORD, bd=0, bg='white')
+        content_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         content_text.insert('1.0', todo.get('content', ''))
         content_text.config(state='disabled')
 
@@ -4831,17 +4666,12 @@ class TimedBroadcastApp:
         reminder_win.protocol("WM_DELETE_WINDOW", on_closing_protocol)
 
         if task_type == 'onetime':
-            btn_frame.columnconfigure((0,1,2), weight=1)
-            ttk.Button(btn_frame, text="已完成", bootstyle="success", command=handle_complete).grid(row=0, column=0, padx=5, sticky='ew')
-            ttk.Button(btn_frame, text="稍后提醒", bootstyle="outline", command=handle_snooze).grid(row=0, column=1, padx=5, sticky='ew')
-            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).grid(row=0, column=2, padx=5, sticky='ew')
+            tk.Button(btn_frame, text="已完成", font=self.font_11, bg='#27AE60', fg='white', width=10, command=handle_complete).pack(side=tk.LEFT, padx=10)
+            tk.Button(btn_frame, text="稍后提醒", font=self.font_11, width=10, command=handle_snooze).pack(side=tk.LEFT, padx=10)
+            tk.Button(btn_frame, text="删除任务", font=self.font_11, bg='#E74C3C', fg='white', width=10, command=handle_delete).pack(side=tk.LEFT, padx=10)
         else:
-            btn_frame.columnconfigure((0,1), weight=1)
-            ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=close_and_release).grid(row=0, column=0, padx=5, sticky='ew')
-            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).grid(row=0, column=1, padx=5, sticky='ew')
-
-        reminder_win.update_idletasks()
-        self.center_window(reminder_win, reminder_win.winfo_reqwidth(), reminder_win.winfo_reqheight())
+            tk.Button(btn_frame, text="本次完成", font=self.font_11, bg='#3498DB', fg='white', width=10, command=close_and_release).pack(side=tk.LEFT, padx=10)
+            tk.Button(btn_frame, text="删除任务", font=self.font_11, bg='#E74C3C', fg='white', width=10, command=handle_delete).pack(side=tk.LEFT, padx=10)
 
     def _bind_mousewheel_to_entry(self, entry, handler):
         entry.bind("<MouseWheel>", handler)
@@ -4851,7 +4681,7 @@ class TimedBroadcastApp:
     def _handle_time_scroll(self, event):
         entry = event.widget
         current_val = entry.get()
-        cursor_pos = entry.index(INSERT)
+        cursor_pos = entry.index(tk.INSERT)
 
         try:
             dt = datetime.strptime(current_val, "%H:%M:%S")
@@ -4894,7 +4724,7 @@ class TimedBroadcastApp:
         else:
             new_full_val = new_val_part
 
-        entry.delete(0, END)
+        entry.delete(0, tk.END)
         entry.insert(0, new_full_val)
         entry.icursor(cursor_pos)
         return "break"
@@ -4902,7 +4732,7 @@ class TimedBroadcastApp:
     def _handle_date_scroll(self, event):
         entry = event.widget
         current_val = entry.get().strip()
-        cursor_pos = entry.index(INSERT)
+        cursor_pos = entry.index(tk.INSERT)
 
         parts = [p.strip() for p in current_val.split("~")]
         is_range_start = "~" not in current_val or cursor_pos <= len(parts[0])
@@ -4930,9 +4760,7 @@ class TimedBroadcastApp:
             try:
                 dt = dt.replace(year=new_year, month=new_month)
             except ValueError:
-                # 处理月份天数不同的情况，例如从3月31日跳到2月
-                last_day_of_month = (datetime(new_year, new_month + 1, 1) - timedelta(days=1)).day
-                dt = dt.replace(year=new_year, month=new_month, day=min(dt.day, last_day_of_month))
+                dt = dt.replace(year=new_year, month=new_month, day=28)
         else:
             dt += timedelta(days=delta)
 
@@ -4943,14 +4771,14 @@ class TimedBroadcastApp:
         else:
             new_full_val = new_date_part
 
-        entry.delete(0, END)
+        entry.delete(0, tk.END)
         entry.insert(0, new_full_val)
         entry.icursor(cursor_pos)
         return "break"
 
 
 def main():
-    root = ttk.Window(themename="litera")
+    root = tk.Tk()
     app = TimedBroadcastApp(root)
     root.mainloop()
 
