@@ -312,6 +312,7 @@ class TimedBroadcastApp:
         self.switch_page("定时广播")
 
         self.update_status_bar()
+        ttk.Button(self.nav_frame, text="!!! 运行测试 !!!", command=self._run_diagnostic_test, bootstyle="danger").pack(side=BOTTOM, fill=X, pady=20)
         self.log("创翔多功能定时播音旗舰版软件已启动")
 
     def create_status_bar_content(self):
@@ -5438,6 +5439,36 @@ class TimedBroadcastApp:
         entry.insert(0, new_full_val)
         entry.icursor(cursor_pos)
         return "break"
+
+def _run_diagnostic_test(self):
+        """一个独立的、用于诊断Toplevel窗口布局问题的测试函数"""
+        try:
+            # 1. 创建一个全新的、干净的Toplevel窗口
+            diag_win = ttk.Toplevel(self.root)
+            diag_win.title("诊断测试窗口")
+            diag_win.geometry("300x200")
+            diag_win.transient(self.root) # 确保它在主窗口之上
+            diag_win.grab_set()          # 锁定焦点
+
+            # 2. 创建一个底部容器，并用最稳妥的方式放置它
+            bottom_frame = ttk.Frame(diag_win, padding=10)
+            bottom_frame.pack(side=BOTTOM, fill=X)
+
+            # 3. 创建一个顶部容器，让它填充剩余空间
+            top_frame = ttk.Frame(diag_win, padding=10)
+            top_frame.pack(side=TOP, fill=BOTH, expand=True)
+
+            # 4. 在顶部容器里放一个标签
+            ttk.Label(top_frame, text="这是一个测试标签").pack()
+
+            # 5. 在底部容器里放一个按钮
+            ttk.Button(bottom_frame, text="测试按钮").pack()
+
+            self.log("诊断测试窗口已弹出。")
+
+        except Exception as e:
+            self.log(f"诊断测试时发生错误: {e}")
+            messagebox.showerror("诊断错误", f"无法运行测试: {e}")
 
 
 def main():
