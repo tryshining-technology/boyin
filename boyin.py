@@ -3474,44 +3474,45 @@ class TimedBroadcastApp:
         self.root.after(1000, self._process_reminder_queue)
 
     def _check_running_processes_for_termination(self, now):
-    # 遍历活动进程字典的副本，因为我们可能会在循环中删除元素
+        # 遍历活动进程字典的副本，因为我们可能会在循环中删除元素
         for task_id in list(self.active_processes.keys()):
-        proc_info = self.active_processes.get(task_id)
-        if not proc_info: continue
+            proc_info = self.active_processes.get(task_id)
+            if not proc_info: continue
 
-        task = proc_info.get('task')
-        process = proc_info.get('process')
-        stop_time_str = task.get('stop_time')
+            task = proc_info.get('task')
+            process = proc_info.get('process')
+            stop_time_str = task.get('stop_time')
 
-        if not stop_time_str: continue # 如果任务没有设置停止时间，则跳过
+            if not stop_time_str: continue  # 如果任务没有设置停止时间，则跳过
 
-        # 检查进程是否还在运行，如果已经自己退出了，就清理掉
-        try:
-            if process.poll() is not None:
+            # 检查进程是否还在运行，如果已经自己退出了，就清理掉
+            try:
+                if process.poll() is not None:
+                    del self.active_processes[task_id]
+                    continue
+            except Exception:  # 捕获所有可能的异常，例如进程不存在
                 del self.active_processes[task_id]
                 continue
-        except Exception: # 捕获所有可能的异常，例如进程不存在
-            del self.active_processes[task_id]
-            continue
 
-        # 核心判断：当前时间是否到达停止时间
-        current_time_str = now.strftime("%H:%M:%S")
-        if current_time_str >= stop_time_str:
-            self.log(f"到达停止时间，正在终止任务 '{task['name']}' (PID: {process.pid})...")
-            try:
-                # 使用 psutil 强制结束进程及其所有子进程
-                parent = psutil.Process(process.pid)
-                for child in parent.children(recursive=True):
-                    child.kill()
-                parent.kill()
-                self.log(f"任务 '{task['name']}' (PID: {process.pid}) 已被强制终止。")
-            except psutil.NoSuchProcess:
-                self.log(f"尝试终止任务 '{task['name']}' 时，进程 (PID: {process.pid}) 已不存在。")
-            except Exception as e:
-                self.log(f"终止任务 '{task['name']}' (PID: {process.pid}) 时发生错误: {e}")
-            finally:
-                # 无论成功与否，都从监控列表中移除
-                del self.active_processes[task_id]
+            # 核心判断：当前时间是否到达停止时间
+            current_time_str = now.strftime("%H:%M:%S")
+            if current_time_str >= stop_time_str:
+                self.log(f"到达停止时间，正在终止任务 '{task['name']}' (PID: {process.pid})...")
+                try:
+                    # 使用 psutil 强制结束进程及其所有子进程
+                    parent = psutil.Process(process.pid)
+                    for child in parent.children(recursive=True):
+                        child.kill()
+                    parent.kill()
+                    self.log(f"任务 '{task['name']}' (PID: {process.pid}) 已被强制终止。")
+                except psutil.NoSuchProcess:
+                    self.log(f"尝试终止任务 '{task['name']}' 时，进程 (PID: {process.pid}) 已不存在。")
+                except Exception as e:
+                    self.log(f"终止任务 '{task['name']}' (PID: {process.pid}) 时发生错误: {e}")
+                finally:
+                    # 无论成功与否，都从监控列表中移除
+                    if task_id in self.active_processes:
+                        del self.active_processes[task_id]
 
     def _scheduler_worker(self):
         while self.running:
