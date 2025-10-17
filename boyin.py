@@ -5440,7 +5440,7 @@ class TimedBroadcastApp:
         entry.icursor(cursor_pos)
         return "break"
 
-def _run_diagnostic_test(self):
+    def _run_diagnostic_test(self):
         """一个独立的、用于诊断Toplevel窗口布局问题的测试函数"""
         try:
             # 1. 创建一个全新的、干净的Toplevel窗口
