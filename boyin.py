@@ -307,6 +307,14 @@ class TimedBroadcastApp:
         self.main_frame = ttk.Frame(self.page_container)
         self.pages["定时广播"] = self.main_frame
         self.create_scheduled_broadcast_page()
+        # vvvvvv 在这里添加下面的代码 vvvvvv
+        # --- 【核心修复】预创建高级功能页面 ---
+        advanced_page = self.create_advanced_features_page()
+        self.pages["高级功能"] = advanced_page
+        # 预创建后立即隐藏它
+        advanced_page.pack_forget()
+        # --- 修复结束 ---
+        # ^^^^^^ 在这里添加上面的代码 ^^^^^^
 
         self.current_page = self.main_frame
         self.switch_page("定时广播")
@@ -344,49 +352,52 @@ class TimedBroadcastApp:
             self.log("界面已锁定，请先解锁。")
             return
 
-        if self.current_page:
+        # 隐藏当前页面
+        if self.current_page and self.current_page.winfo_exists():
             self.current_page.pack_forget()
 
+        # 取消所有按钮的高亮
         for title, btn in self.nav_buttons.items():
             btn.config(bootstyle="light")
 
+        # --- 【核心修复】简化页面切换逻辑 ---
         target_frame = None
-        if page_name == "定时广播":
-            target_frame = self.pages["定时广播"]
-        elif page_name == "节假日":
-            if page_name not in self.pages:
-                self.pages[page_name] = self.create_holiday_page()
-            target_frame = self.pages[page_name]
-        elif page_name == "待办事项":
-            if page_name not in self.pages:
-                self.pages[page_name] = self.create_todo_page()
-            target_frame = self.pages[page_name]
-        elif page_name == "高级功能":
-            if page_name not in self.pages:
-                self.pages[page_name] = self.create_advanced_features_page()
-            target_frame = self.pages[page_name]
-        elif page_name == "设置":
-            if page_name not in self.pages:
-                self.pages[page_name] = self.create_settings_page()
-            self._refresh_settings_ui()
-            target_frame = self.pages[page_name]
-        elif page_name == "注册软件":
-            if page_name not in self.pages:
-                self.pages[page_name] = self.create_registration_page()
-            target_frame = self.pages[page_name]
-        elif page_name == "超级管理":
-            if page_name not in self.pages:
-                self.pages[page_name] = self.create_super_admin_page()
+        # 首先，尝试从已经创建的页面字典中获取
+        if page_name in self.pages and self.pages[page_name].winfo_exists():
             target_frame = self.pages[page_name]
         else:
-            self.log(f"功能开发中: {page_name}")
+            # 如果字典里没有（只应该发生在节假日、设置等页面第一次被点击时），就创建它
+            if page_name == "节假日":
+                target_frame = self.create_holiday_page()
+            elif page_name == "待办事项":
+                target_frame = self.create_todo_page()
+            elif page_name == "设置":
+                target_frame = self.create_settings_page()
+            elif page_name == "注册软件":
+                target_frame = self.create_registration_page()
+            elif page_name == "超级管理":
+                target_frame = self.create_super_admin_page()
+            
+            # 创建后，存入字典以便下次使用
+            if target_frame:
+                self.pages[page_name] = target_frame
+
+        # 如果最终没有找到页面，就回到默认页面
+        if not target_frame:
+            self.log(f"错误或开发中: 无法找到页面 '{page_name}'，返回主页。")
             target_frame = self.pages["定时广播"]
             page_name = "定时广播"
-
+        
+        # 显示目标页面
         target_frame.pack(in_=self.page_container, fill=BOTH, expand=True)
         self.current_page = target_frame
         self.current_page_name = page_name
 
+        # 更新设置页面的UI（如果切换到设置页）
+        if page_name == "设置":
+            self._refresh_settings_ui()
+
+        # 高亮当前按钮
         selected_btn = self.nav_buttons.get(page_name)
         if selected_btn:
             selected_btn.config(bootstyle="primary")
@@ -454,28 +465,26 @@ class TimedBroadcastApp:
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
 
-        # 我们现在可以安全地调用修复后的函数
         self._build_screenshot_ui(screenshot_tab)
-        
-        # 为了安全，暂时仍然注释掉这个，先确保第一个能显示
-        # self._build_execute_ui(execute_tab)
-        ttk.Label(execute_tab, text="第二个标签页暂时为空").pack()
+        self._build_execute_ui(execute_tab)
 
         return page_frame
 
     def _build_screenshot_ui(self, parent_frame):
-        # 1. 配置父容器的Grid权重，确保我们的布局能伸展
         parent_frame.columnconfigure(0, weight=1)
-        parent_frame.rowconfigure(1, weight=1) # 第1行放表格，让它可以拉伸
+        parent_frame.rowconfigure(0, weight=1)
 
-        # 2. 创建并放置描述标签
-        desc_label = ttk.Label(parent_frame, 
+        main_content_frame = ttk.Frame(parent_frame)
+        main_content_frame.grid(row=0, column=0, sticky='nsew')
+        main_content_frame.columnconfigure(0, weight=1)
+        main_content_frame.rowconfigure(1, weight=1)
+
+        desc_label = ttk.Label(main_content_frame, 
                                text=f"此功能将在指定时间自动截取全屏图像，并以PNG格式保存到以下目录：\n{SCREENSHOT_FOLDER}",
                                font=self.font_10, bootstyle="secondary", wraplength=600)
-        desc_label.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10)) # columnspan=2 横跨两列
+        desc_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
 
-        # 3. 创建表格框架 (包含Treeview和滚动条)
-        table_frame = ttk.Frame(parent_frame)
+        table_frame = ttk.Frame(main_content_frame)
         table_frame.grid(row=1, column=0, sticky='nsew')
         table_frame.columnconfigure(0, weight=1)
         table_frame.rowconfigure(0, weight=1)
@@ -499,9 +508,8 @@ class TimedBroadcastApp:
 
         self.screenshot_tree.bind("<Double-1>", lambda e: self.edit_screenshot_task())
 
-        # 4. 【核心修复】创建右侧按钮栏，并完全使用 Grid 布局
         action_frame = ttk.Frame(parent_frame, padding=(10, 0))
-        action_frame.grid(row=1, column=1, sticky='ns', padx=(10, 0)) # 放在表格右侧
+        action_frame.grid(row=0, column=1, sticky='ns', padx=(10, 0))
 
         buttons_config = [
             ("添加任务", self.add_screenshot_task, "info"),
@@ -512,16 +520,11 @@ class TimedBroadcastApp:
             ("全部禁用", lambda: self._set_screenshot_status('禁用'), "outline-warning"),
             ("清空列表", self.clear_all_screenshot_tasks, "outline-danger")
         ]
-        
-        # 使用 enumerate 和 grid 来放置按钮，取代 pack
-        for i, (text, cmd, style) in enumerate(buttons_config):
+        for text, cmd, style in buttons_config:
             if text is None:
-                # 用一个 Label 来创建视觉上的分隔空间
-                ttk.Label(action_frame).grid(row=i, column=0, pady=5)
+                ttk.Separator(action_frame, orient=HORIZONTAL).pack(fill=X, pady=10)
                 continue
-            
-            btn = ttk.Button(action_frame, text=text, command=cmd, bootstyle=style)
-            btn.grid(row=i, column=0, pady=5, sticky='ew') # sticky='ew' 让按钮横向填满
+            ttk.Button(action_frame, text=text, command=cmd, bootstyle=style).pack(pady=5, fill=X)
             
         self.update_screenshot_list()
         
