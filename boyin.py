@@ -5256,31 +5256,40 @@ class TimedBroadcastApp:
         original_index = todo.get('original_index')
         task_type = todo.get('type')
 
-        # --- 最终布局修复：使用主容器框架和Grid布局 ---
+        # --- 最终布局修复：使用经典、稳妥的“三明治”Pack布局 ---
 
-        # 1. 创建一个主容器 Frame，让它填满整个窗口
-        main_container = ttk.Frame(reminder_win)
-        main_container.pack(fill=BOTH, expand=True)
+        # 1. 创建三个独立的容器，作为窗口的直接子控件
+        top_frame = ttk.Frame(reminder_win)
+        bottom_frame = ttk.Frame(reminder_win)
+        content_frame = ttk.Frame(reminder_win, bootstyle="secondary", padding=1)
 
-        # 2. 配置主容器内部的 Grid 系统
-        main_container.columnconfigure(0, weight=1)  # 第0列（唯一的列）可水平拉伸
-        main_container.rowconfigure(1, weight=1)     # 第1行（内容区）可垂直拉伸
+        # 2. 按照“底 -> 顶 -> 中”的顺序放置这三个容器
+        #    这个顺序是保证布局成功的关键
+        bottom_frame.pack(side=BOTTOM, fill=X, padx=10, pady=(10, 15))
+        top_frame.pack(side=TOP, fill=X, padx=20, pady=(15, 10))
+        content_frame.pack(side=TOP, fill=BOTH, expand=True, padx=20, pady=5)
 
-        # 3. 将所有组件作为 main_container 的子控件，并用 grid 布局
-        title_label = ttk.Label(main_container, text=todo.get('name', '无标题'), font=self.font_14_bold, wraplength=460)
-        title_label.grid(row=0, column=0, pady=(15, 10), padx=20, sticky='w')
+        # 3. 分别填充每个容器的内容
+        #    填充标题到 top_frame
+        title_label = ttk.Label(top_frame, text=todo.get('name', '无标题'), font=self.font_14_bold, wraplength=460)
+        title_label.pack(anchor='w')
 
-        content_frame = ttk.Frame(main_container, bootstyle="secondary", padding=1)
-        content_frame.grid(row=1, column=0, padx=20, pady=5, sticky='nsew')
-
+        #    填充内容到 content_frame
         content_text = ScrolledText(content_frame, font=self.font_11, wrap=WORD, bd=0, height=5)
         content_text.pack(fill=BOTH, expand=True)
         content_text.insert('1.0', todo.get('content', ''))
         content_text.config(state='disabled')
 
-        btn_frame = ttk.Frame(main_container)
-        btn_frame.grid(row=2, column=0, pady=(10, 15), padx=10, sticky='ew')
-        
+        #    填充按钮到 bottom_frame
+        if task_type == 'onetime':
+            # 从右向左放置按钮
+            ttk.Button(bottom_frame, text="删除任务", bootstyle="danger", command=lambda: handle_delete()).pack(side=RIGHT, padx=5, ipady=4)
+            ttk.Button(bottom_frame, text="稍后提醒", bootstyle="outline-secondary", command=lambda: handle_snooze()).pack(side=RIGHT, padx=5, ipady=4)
+            ttk.Button(bottom_frame, text="已完成", bootstyle="success", command=lambda: handle_complete()).pack(side=RIGHT, padx=5, ipady=4)
+        else:
+            ttk.Button(bottom_frame, text="删除任务", bootstyle="danger", command=lambda: handle_delete()).pack(side=RIGHT, padx=5, ipady=4)
+            ttk.Button(bottom_frame, text="本次完成", bootstyle="primary", command=lambda: close_and_release()).pack(side=RIGHT, padx=5, ipady=4)
+
         # --- 布局修复结束 ---
         
         def close_and_release():
@@ -5310,7 +5319,6 @@ class TimedBroadcastApp:
         def handle_delete():
             if messagebox.askyesno("确认删除", f"您确定要永久删除待办事项“{todo['name']}”吗？\n此操作不可恢复。", parent=reminder_win):
                 if original_index is not None and original_index < len(self.todos):
-                    # 安全检查，防止在操作期间列表被其他线程修改
                     if self.todos[original_index].get('name') == todo.get('name'):
                         self.todos.pop(original_index)
                         self.save_todos()
@@ -5325,18 +5333,6 @@ class TimedBroadcastApp:
                 close_and_release()
 
         reminder_win.protocol("WM_DELETE_WINDOW", on_closing_protocol)
-
-        # 4. 在 btn_frame 内部布局按钮，同样使用 grid 让按钮自动平分宽度
-        if task_type == 'onetime':
-            btn_frame.columnconfigure((0, 1, 2), weight=1)
-            ttk.Button(btn_frame, text="已完成", bootstyle="success", command=handle_complete).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
-            ttk.Button(btn_frame, text="稍后提醒", bootstyle="outline-secondary", command=handle_snooze).grid(row=0, column=1, padx=5, ipady=4, sticky='ew')
-            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).grid(row=0, column=2, padx=5, ipady=4, sticky='ew')
-        else:
-            btn_frame.columnconfigure((0, 1), weight=1)
-            ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=close_and_release).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
-            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).grid(row=0, column=1, padx=5, ipady=4, sticky='ew')
-
         self.center_window(reminder_win, parent=self.root)
 
     def _bind_mousewheel_to_entry(self, entry, handler):
