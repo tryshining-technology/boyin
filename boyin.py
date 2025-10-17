@@ -3570,7 +3570,7 @@ class TimedBroadcastApp:
     
     # 找到 _execute_screenshot_task 函数并替换为以下内容：
     def _execute_screenshot_task(self, task, trigger_time):
-    if not IMAGE_AVAILABLE:
+        if not IMAGE_AVAILABLE:
         self.log(f"错误：Pillow库未安装，无法执行截屏任务 '{task['name']}'。")
         return
     
