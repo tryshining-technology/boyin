@@ -5245,7 +5245,7 @@ class TimedBroadcastApp:
 
         reminder_win = ttk.Toplevel(self.root)
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
-        # 我们给窗口一个初始大小，grid布局会在此基础上工作
+        # 给窗口一个合理的初始大小和最小尺寸
         reminder_win.geometry("500x350")
         reminder_win.minsize(450, 300)
 
@@ -5257,32 +5257,27 @@ class TimedBroadcastApp:
         original_index = todo.get('original_index')
         task_type = todo.get('type')
 
-        # --- 布局修复: 使用 grid 代替 pack ---
-        # 1. 配置 reminder_win 自身的网格系统
-        reminder_win.columnconfigure(0, weight=1)  # 第0列（唯一的列）将占据所有多余的水平空间
-        reminder_win.rowconfigure(1, weight=1)     # 第1行（内容区）将占据所有多余的垂直空间
+        # --- 最终布局修复：使用经典的三段式 pack 布局 ---
 
-        # 2. 将各个组件放入网格中
+        # 1. 先创建好所有需要布局的顶级组件
         title_label = ttk.Label(reminder_win, text=todo.get('name', '无标题'), font=self.font_14_bold, wraplength=460)
-        title_label.grid(row=0, column=0, pady=(15, 10), padx=20, sticky='w')
-
+        btn_frame = ttk.Frame(reminder_win)
         content_frame = ttk.Frame(reminder_win, bootstyle="secondary", padding=1)
-        content_frame.grid(row=1, column=0, padx=20, pady=5, sticky='nsew') # 'nsew' 让它填满单元格
 
+        # 2. 【核心】按照 "底 -> 顶 -> 中" 的顺序进行 pack
+        #    这会先在窗口底部为按钮预留固定空间，然后在顶部为标题预留空间，
+        #    最后让内容区自动填充所有剩余的空间。
+        btn_frame.pack(side=BOTTOM, pady=15, padx=10, fill=X)
+        title_label.pack(side=TOP, pady=(15, 10), padx=20, anchor='w')
+        content_frame.pack(side=TOP, padx=20, pady=5, fill=BOTH, expand=True)
+
+        # 3. 填充内容区 (这里的 pack 只作用于 content_frame 内部)
         content_text = ScrolledText(content_frame, font=self.font_11, wrap=WORD, bd=0, height=5)
-        content_text.pack(fill=BOTH, expand=True) # 在 content_frame 内部用 pack 是独立的，没问题
+        content_text.pack(fill=BOTH, expand=True)
         content_text.insert('1.0', todo.get('content', ''))
         content_text.config(state='disabled')
-
-        btn_frame = ttk.Frame(reminder_win)
-        btn_frame.grid(row=2, column=0, pady=15, padx=10, sticky='ew')
+        
         # --- 布局修复结束 ---
-
-        # 配置按钮容器的网格，让按钮平分宽度
-        btn_frame.columnconfigure(0, weight=1)
-        btn_frame.columnconfigure(1, weight=1)
-        btn_frame.columnconfigure(2, weight=1)
-
 
         def close_and_release():
             self.is_reminder_active = False
@@ -5326,15 +5321,14 @@ class TimedBroadcastApp:
 
         reminder_win.protocol("WM_DELETE_WINDOW", on_closing_protocol)
 
+        # 4. 在 btn_frame 内部布局按钮 (这里的 pack 只作用于 btn_frame 内部)
         if task_type == 'onetime':
-            ttk.Button(btn_frame, text="已完成", bootstyle="success", command=handle_complete).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
-            ttk.Button(btn_frame, text="稍后提醒", bootstyle="outline-secondary", command=handle_snooze).grid(row=0, column=1, padx=5, ipady=4, sticky='ew')
-            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).grid(row=0, column=2, padx=5, ipady=4, sticky='ew')
+            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).pack(side=RIGHT, padx=5, ipady=4)
+            ttk.Button(btn_frame, text="稍后提醒", bootstyle="outline-secondary", command=handle_snooze).pack(side=RIGHT, padx=5, ipady=4)
+            ttk.Button(btn_frame, text="已完成", bootstyle="success", command=handle_complete).pack(side=RIGHT, padx=5, ipady=4)
         else:
-            # 循环任务只有两个按钮，所以配置2列即可
-            btn_frame.columnconfigure(2, weight=0) # 第三个位置权重设为0
-            ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=close_and_release).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
-            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).grid(row=0, column=1, padx=5, ipady=4, sticky='ew')
+            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).pack(side=RIGHT, padx=5, ipady=4)
+            ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=close_and_release).pack(side=RIGHT, padx=5, ipady=4)
 
         self.center_window(reminder_win, parent=self.root)
 
