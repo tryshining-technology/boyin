@@ -470,6 +470,42 @@ class TimedBroadcastApp:
 
         return page_frame
 
+    def enable_all_screenshot(self):
+        """启用所有的定时截屏任务"""
+        if not self.screenshot_tasks: return
+        for task in self.screenshot_tasks:
+            task['status'] = '启用'
+        self.update_screenshot_list()
+        self.save_screenshot_tasks()
+        self.log("已将 *全部* 截屏任务的状态设置为: 启用")
+
+    def disable_all_screenshot(self):
+        """禁用所有的定时截屏任务"""
+        if not self.screenshot_tasks: return
+        for task in self.screenshot_tasks:
+            task['status'] = '禁用'
+        self.update_screenshot_list()
+        self.save_screenshot_tasks()
+        self.log("已将 *全部* 截屏任务的状态设置为: 禁用")
+
+    def enable_all_execute(self):
+        """启用所有的定时运行任务"""
+        if not self.execute_tasks: return
+        for task in self.execute_tasks:
+            task['status'] = '启用'
+        self.update_execute_list()
+        self.save_execute_tasks()
+        self.log("已将 *全部* 运行任务的状态设置为: 启用")
+
+    def disable_all_execute(self):
+        """禁用所有的定时运行任务"""
+        if not self.execute_tasks: return
+        for task in self.execute_tasks:
+            task['status'] = '禁用'
+        self.update_execute_list()
+        self.save_execute_tasks()
+        self.log("已将 *全部* 运行任务的状态设置为: 禁用")
+
     def update_screenshot_list(self):
         if not hasattr(self, 'screenshot_tree') or not self.screenshot_tree.winfo_exists(): return
         self.screenshot_tree.delete(*self.screenshot_tree.get_children())
@@ -679,8 +715,8 @@ class TimedBroadcastApp:
             ("修改任务", self.edit_screenshot_task, "success"),
             ("删除任务", self.delete_screenshot_task, "danger"),
             (None, None, None),
-            ("全部启用", lambda: self._set_screenshot_status('启用'), "outline-success"),
-            ("全部禁用", lambda: self._set_screenshot_status('禁用'), "outline-warning"),
+            ("全部启用", self.enable_all_screenshot, "outline-success"),
+            ("全部禁用", self.disable_all_screenshot, "outline-warning"),
             ("清空列表", self.clear_all_screenshot_tasks, "outline-danger")
         ]
         for text, cmd, style in buttons_config:
@@ -742,8 +778,8 @@ class TimedBroadcastApp:
             ("修改任务", self.edit_execute_task, "success"),
             ("删除任务", self.delete_execute_task, "danger"),
             (None, None, None),
-            ("全部启用", lambda: self._set_execute_status('启用'), "outline-success"),
-            ("全部禁用", lambda: self._set_execute_status('禁用'), "outline-warning"),
+            ("全部启用", self.enable_all_execute, "outline-success"),
+            ("全部禁用", self.disable_all_execute, "outline-warning"),
             ("清空列表", self.clear_all_execute_tasks, "outline-danger")
         ]
         for text, cmd, style in buttons_config:
@@ -3437,6 +3473,46 @@ class TimedBroadcastApp:
         threading.Thread(target=self._playback_worker, daemon=True).start()
         self.root.after(1000, self._process_reminder_queue)
 
+    def _check_running_processes_for_termination(self, now):
+    # 遍历活动进程字典的副本，因为我们可能会在循环中删除元素
+    for task_id in list(self.active_processes.keys()):
+        proc_info = self.active_processes.get(task_id)
+        if not proc_info: continue
+
+        task = proc_info.get('task')
+        process = proc_info.get('process')
+        stop_time_str = task.get('stop_time')
+
+        if not stop_time_str: continue # 如果任务没有设置停止时间，则跳过
+
+        # 检查进程是否还在运行，如果已经自己退出了，就清理掉
+        try:
+            if process.poll() is not None:
+                del self.active_processes[task_id]
+                continue
+        except Exception: # 捕获所有可能的异常，例如进程不存在
+            del self.active_processes[task_id]
+            continue
+
+        # 核心判断：当前时间是否到达停止时间
+        current_time_str = now.strftime("%H:%M:%S")
+        if current_time_str >= stop_time_str:
+            self.log(f"到达停止时间，正在终止任务 '{task['name']}' (PID: {process.pid})...")
+            try:
+                # 使用 psutil 强制结束进程及其所有子进程
+                parent = psutil.Process(process.pid)
+                for child in parent.children(recursive=True):
+                    child.kill()
+                parent.kill()
+                self.log(f"任务 '{task['name']}' (PID: {process.pid}) 已被强制终止。")
+            except psutil.NoSuchProcess:
+                self.log(f"尝试终止任务 '{task['name']}' 时，进程 (PID: {process.pid}) 已不存在。")
+            except Exception as e:
+                self.log(f"终止任务 '{task['name']}' (PID: {process.pid}) 时发生错误: {e}")
+            finally:
+                # 无论成功与否，都从监控列表中移除
+                del self.active_processes[task_id]
+
     def _scheduler_worker(self):
         while self.running:
             now = datetime.now()
@@ -3445,6 +3521,7 @@ class TimedBroadcastApp:
                 self._check_advanced_tasks(now)
                 self._check_time_chime(now)
                 self._check_todo_tasks(now)
+                self._check_running_processes_for_termination(now)
 
             self._check_power_tasks(now)
             time.sleep(1)
@@ -3490,30 +3567,40 @@ class TimedBroadcastApp:
                 self.log(f"触发运行任务: {task['name']}")
                 threading.Thread(target=self._execute_program_task, args=(task, trigger_time), daemon=True).start()
     
-    def _execute_screenshot_task(self, task, trigger_time):
-        if not IMAGE_AVAILABLE:
-            self.log(f"错误：Pillow库未安装，无法执行截屏任务 '{task['name']}'。")
-            return
+    # 找到 _execute_screenshot_task 函数并替换为以下内容：
+def _execute_screenshot_task(self, task, trigger_time):
+    if not IMAGE_AVAILABLE:
+        self.log(f"错误：Pillow库未安装，无法执行截屏任务 '{task['name']}'。")
+        return
+    
+    try:
+        repeat_count = task.get('repeat_count', 1)
+        interval_seconds = task.get('interval_seconds', 0)
+        stop_time_str = task.get('stop_time') # 获取停止时间
+
+        for i in range(repeat_count):
+            # --- 【核心修复】在这里增加停止时间的判断 ---
+            if stop_time_str:
+                current_time_str = datetime.now().strftime('%H:%M:%S')
+                if current_time_str >= stop_time_str:
+                    self.log(f"任务 '{task['name']}' 已到达停止时间 '{stop_time_str}'，提前中止截屏。")
+                    break # 退出循环
+            # --- 修复结束 ---
+
+            screenshot = ImageGrab.grab()
+            filename = f"Screenshot_{task['name']}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]}.png"
+            save_path = os.path.join(SCREENSHOT_FOLDER, filename)
+            screenshot.save(save_path)
+            self.log(f"任务 '{task['name']}' 已成功截屏 ({i+1}/{repeat_count})，保存至: {filename}")
+
+            if i < repeat_count - 1:
+                time.sleep(interval_seconds)
         
-        try:
-            repeat_count = task.get('repeat_count', 1)
-            interval_seconds = task.get('interval_seconds', 0)
+        task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
+        self.save_screenshot_tasks()
 
-            for i in range(repeat_count):
-                screenshot = ImageGrab.grab()
-                filename = f"Screenshot_{task['name']}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]}.png"
-                save_path = os.path.join(SCREENSHOT_FOLDER, filename)
-                screenshot.save(save_path)
-                self.log(f"任务 '{task['name']}' 已成功截屏 ({i+1}/{repeat_count})，保存至: {filename}")
-
-                if i < repeat_count - 1:
-                    time.sleep(interval_seconds)
-            
-            task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
-            self.save_screenshot_tasks()
-
-        except Exception as e:
-            self.log(f"执行截屏任务 '{task['name']}' 失败: {e}")
+    except Exception as e:
+        self.log(f"执行截屏任务 '{task['name']}' 失败: {e}")
 
     def _execute_program_task(self, task, trigger_time):
         target_path = task.get('target_path')
@@ -5406,7 +5493,7 @@ class TimedBroadcastApp:
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
         
         # --- 核心修改：完全按照您的要求，设置一个固定的窗口尺寸 ---
-        reminder_win.geometry("480x320")
+        reminder_win.geometry("640x480")
         # 为了防止窗口被意外缩小，我们禁止调整大小
         reminder_win.resizable(False, False)
         # --- 修改结束 ---
