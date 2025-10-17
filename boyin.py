@@ -437,40 +437,62 @@ class TimedBroadcastApp:
             self.log("尝试进入超级管理模块失败：密码错误。")
             
     def create_advanced_features_page(self):
-        # 1. 创建作为页面的主容器 Frame
-        page_frame = ttk.Frame(self.page_container, padding=10)
+        # --- 诊断版本：为所有关键容器添加彩色边框 ---
 
-        # 2. 【核心修复】应用我们从Bug 1学到的经验：
-        #    强制为 page_frame 内部的 Grid 布局配置权重。
-        #    这告诉 page_frame：“把所有多余的垂直空间给第 1 行，
-        #    把所有多余的水平空间给第 0 列。”
+        # 1. 创建主页面容器，并给它一个2像素宽的【红色】边框
+        page_frame = ttk.Frame(
+            self.page_container, 
+            padding=10, 
+            borderwidth=2, 
+            relief="solid" # relief="solid" 才能让边框可见
+        )
+        # 临时改变样式让边框变红，方便观察
+        style = ttk.Style.get_instance()
+        style.configure("Red.TFrame", bordercolor="red")
+        page_frame.configure(style="Red.TFrame")
+
+
+        # 2. 我们仍然配置Grid权重，这是正确的做法
         page_frame.rowconfigure(1, weight=1)
         page_frame.columnconfigure(0, weight=1)
 
-        # 3. 创建标题并放入网格的第 0 行
-        title_label = ttk.Label(page_frame, text="高级功能", font=self.font_14_bold, bootstyle="primary")
+        # 3. 创建标题
+        title_label = ttk.Label(page_frame, text="高级功能 (诊断模式)", font=self.font_14_bold, bootstyle="primary")
         title_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
 
-        # 4. 创建 Notebook (工作表切换器)
-        notebook = ttk.Notebook(page_frame, bootstyle="primary")
+        # 4. 创建Notebook，并给它一个2像素宽的【蓝色】边框
+        notebook = ttk.Notebook(
+            page_frame, 
+            bootstyle="primary",
+            borderwidth=2,
+            relief="solid"
+        )
+        style.configure("Blue.TNotebook", bordercolor="blue")
+        notebook.configure(style="Blue.TNotebook")
         
-        # 5. 将 Notebook 放入网格的可拉伸区域 (第1行, 第0列)
-        #    sticky='nsew' 确保 Notebook 会填满它所在的整个单元格
         notebook.grid(row=1, column=0, sticky='nsew', pady=5)
 
-        # 6. 创建 Notebook 中的两个标签页
-        screenshot_tab = ttk.Frame(notebook, padding=10)
+        # 5. 创建标签页，并给第一个标签页一个2像素宽的【绿色】边框
+        screenshot_tab = ttk.Frame(
+            notebook, 
+            padding=10,
+            borderwidth=2,
+            relief="solid"
+        )
+        style.configure("Green.TFrame", bordercolor="green")
+        screenshot_tab.configure(style="Green.TFrame")
+
         execute_tab = ttk.Frame(notebook, padding=10)
 
-        # 7. 将标签页添加到 Notebook 中
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
 
-        # 8. 分别构建两个标签页内的 UI
-        self._build_screenshot_ui(screenshot_tab)
-        self._build_execute_ui(execute_tab)
+        # 6. 我们暂时不构建复杂的UI，只在绿色框里放一个标签
+        ttk.Label(screenshot_tab, text="如果能看到我，说明Notebook和Tab页都已正确显示。").pack()
 
-        # 9. 返回构建完成的、可正常显示的页面容器
+        # self._build_screenshot_ui(screenshot_tab)
+        # self._build_execute_ui(execute_tab)
+
         return page_frame
 
     def _build_screenshot_ui(self, parent_frame):
