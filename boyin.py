@@ -96,15 +96,19 @@ except Exception as e:
     print(f"警告: vlc 初始化失败 - {e}，视频播放功能不可用。")
 
 def resource_path(relative_path):
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
+    """ 获取资源的绝对路径，兼容开发环境和 Nuitka 打包环境 """
+    if getattr(sys, 'frozen', False):
+        # 如果程序被打包，基础路径就是可执行文件所在的目录 (在 --onefile 模式下是临时目录)
+        base_path = os.path.dirname(sys.executable)
+    else:
+        # 在开发环境中，基础路径是主脚本所在的目录
         base_path = os.path.abspath(".")
+    
     return os.path.join(base_path, relative_path)
 
 # --- 全局路径设置 ---
 if getattr(sys, 'frozen', False):
-    application_path = os.path.dirname(sys.executable)
+    application_path = os.path.dirname(os.path.abspath(sys.argv[0]))
 else:
     application_path = os.path.dirname(os.path.abspath(__file__))
 
