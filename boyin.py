@@ -288,9 +288,6 @@ class TimedBroadcastApp:
         self.nav_frame.pack_propagate(False)
 
         self.page_container = ttk.Frame(self.root)
-        style = ttk.Style.get_instance()
-        style.configure("Yellow.TFrame", background='yellow')
-        self.page_container.configure(style="Yellow.TFrame")
         self.page_container.pack(side=LEFT, fill=BOTH, expand=True)
 
         nav_button_titles = ["定时广播", "节假日", "待办事项", "高级功能", "设置", "注册软件", "超级管理"]
@@ -337,42 +334,62 @@ class TimedBroadcastApp:
             self.status_labels.append(label)
 
     def switch_page(self, page_name):
-        # 暂时禁用所有锁定逻辑
-        # if self.is_app_locked_down ...
-        # if self.is_locked ...
+        if self.is_app_locked_down and page_name not in ["注册软件", "超级管理"]:
+            self.log("软件授权已过期，请先注册。")
+            if self.current_page_name != "注册软件":
+                self.root.after(10, lambda: self.switch_page("注册软件"))
+            return
 
-        # 获取样式对象
-        style = ttk.Style.get_instance()
+        if self.is_locked and page_name not in ["超级管理", "注册软件"]:
+            self.log("界面已锁定，请先解锁。")
+            return
 
-        # 定义颜色样式
-        style.configure("Green.TFrame", background='green')
-        style.configure("Red.TFrame", background='red')
-        style.configure("Blue.TFrame", background='blue')
-        style.configure("Orange.TFrame", background='orange')
-        style.configure("Yellow.TFrame", background='yellow')
+        if self.current_page:
+            self.current_page.pack_forget()
 
+        for title, btn in self.nav_buttons.items():
+            btn.config(bootstyle="light")
 
-        self.log(f"--- 诊断模式：点击了 '{page_name}' ---")
-
+        target_frame = None
         if page_name == "定时广播":
-            self.page_container.configure(style="Green.TFrame")
-            self.log("诊断：尝试将 page_container 变为绿色。")
+            target_frame = self.pages["定时广播"]
         elif page_name == "节假日":
-            self.page_container.configure(style="Blue.TFrame")
-            self.log("诊断：尝试将 page_container 变为蓝色。")
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_holiday_page()
+            target_frame = self.pages[page_name]
         elif page_name == "待办事项":
-            self.page_container.configure(style="Orange.TFrame")
-            self.log("诊断：尝试将 page_container 变为橙色。")
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_todo_page()
+            target_frame = self.pages[page_name]
         elif page_name == "高级功能":
-            self.page_container.configure(style="Red.TFrame")
-            self.log("诊断：尝试将 page_container 变为红色。")
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_advanced_features_page()
+            target_frame = self.pages[page_name]
+        elif page_name == "设置":
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_settings_page()
+            self._refresh_settings_ui()
+            target_frame = self.pages[page_name]
+        elif page_name == "注册软件":
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_registration_page()
+            target_frame = self.pages[page_name]
+        elif page_name == "超级管理":
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_super_admin_page()
+            target_frame = self.pages[page_name]
         else:
-            # 对于其他按钮，恢复初始的黄色
-            self.page_container.configure(style="Yellow.TFrame")
-            self.log(f"诊断：为 '{page_name}' 恢复为黄色。")
-        
-        # 强制UI刷新，确保颜色变化能被看到
-        self.root.update_idletasks()
+            self.log(f"功能开发中: {page_name}")
+            target_frame = self.pages["定时广播"]
+            page_name = "定时广播"
+
+        target_frame.pack(in_=self.page_container, fill=BOTH, expand=True)
+        self.current_page = target_frame
+        self.current_page_name = page_name
+
+        selected_btn = self.nav_buttons.get(page_name)
+        if selected_btn:
+            selected_btn.config(bootstyle="primary")
 
     def _prompt_for_super_admin_password(self):
         if self.auth_info['status'] != 'Permanent':
@@ -420,62 +437,36 @@ class TimedBroadcastApp:
             self.log("尝试进入超级管理模块失败：密码错误。")
             
     def create_advanced_features_page(self):
-        # --- 诊断版本：为所有关键容器添加彩色边框 ---
+        # 1. 创建主页面容器
+        page_frame = ttk.Frame(self.page_container, padding=10)
 
-        # 1. 创建主页面容器，并给它一个2像素宽的【红色】边框
-        page_frame = ttk.Frame(
-            self.page_container, 
-            padding=10, 
-            borderwidth=2, 
-            relief="solid" # relief="solid" 才能让边框可见
-        )
-        # 临时改变样式让边框变红，方便观察
-        style = ttk.Style.get_instance()
-        style.configure("Red.TFrame", bordercolor="red")
-        page_frame.configure(style="Red.TFrame")
-
-
-        # 2. 我们仍然配置Grid权重，这是正确的做法
+        # 2. 配置Grid权重，这是绝对正确的做法
         page_frame.rowconfigure(1, weight=1)
         page_frame.columnconfigure(0, weight=1)
 
         # 3. 创建标题
-        title_label = ttk.Label(page_frame, text="高级功能 (诊断模式)", font=self.font_14_bold, bootstyle="primary")
+        title_label = ttk.Label(page_frame, text="高级功能", font=self.font_14_bold, bootstyle="primary")
         title_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
 
-        # 4. 创建Notebook，并给它一个2像素宽的【蓝色】边框
-        notebook = ttk.Notebook(
-            page_frame, 
-            bootstyle="primary",
-            borderwidth=2,
-            relief="solid"
-        )
-        style.configure("Blue.TNotebook", bordercolor="blue")
-        notebook.configure(style="Blue.TNotebook")
-        
+        # 4. 创建Notebook
+        notebook = ttk.Notebook(page_frame, bootstyle="primary")
         notebook.grid(row=1, column=0, sticky='nsew', pady=5)
 
-        # 5. 创建标签页，并给第一个标签页一个2像素宽的【绿色】边框
-        screenshot_tab = ttk.Frame(
-            notebook, 
-            padding=10,
-            borderwidth=2,
-            relief="solid"
-        )
-        style.configure("Green.TFrame", bordercolor="green")
-        screenshot_tab.configure(style="Green.TFrame")
-
+        # 5. 创建空的标签页
+        screenshot_tab = ttk.Frame(notebook, padding=10)
         execute_tab = ttk.Frame(notebook, padding=10)
 
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
 
-        # 6. 我们暂时不构建复杂的UI，只在绿色框里放一个标签
-        ttk.Label(screenshot_tab, text="如果能看到我，说明Notebook和Tab页都已正确显示。").pack()
-
+        # --- 【关键】我们暂时不调用下面这两个复杂的函数 ---
         # self._build_screenshot_ui(screenshot_tab)
         # self._build_execute_ui(execute_tab)
+        
+        # 我们只在第一个标签页里放一个简单的标签，用于测试
+        ttk.Label(screenshot_tab, text="骨架加载成功！").pack()
 
+        self.log("诊断：已加载高级功能的“安全模式”骨架。")
         return page_frame
 
     def _build_screenshot_ui(self, parent_frame):
@@ -1974,7 +1965,7 @@ class TimedBroadcastApp:
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(expand=True, fill=X)
 
-        audio_btn = ttk.Button(btn_frame, text="🎵    音频节目",
+        audio_btn = ttk.Button(btn_frame, text="🎵 音频节目",
                              bootstyle="primary", width=20, command=lambda: self.open_audio_dialog(choice_dialog))
         audio_btn.pack(pady=8, ipady=8, fill=X)
 
@@ -1982,7 +1973,7 @@ class TimedBroadcastApp:
                              bootstyle="info", width=20, command=lambda: self.open_voice_dialog(choice_dialog))
         voice_btn.pack(pady=8, ipady=8, fill=X)
 
-        video_btn = ttk.Button(btn_frame, text="🎬    视频节目",
+        video_btn = ttk.Button(btn_frame, text="🎬 视频节目",
                              bootstyle="success", width=20, command=lambda: self.open_video_dialog(choice_dialog))
         video_btn.pack(pady=8, ipady=8, fill=X)
         if not VLC_AVAILABLE:
