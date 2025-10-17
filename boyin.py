@@ -5241,6 +5241,7 @@ class TimedBroadcastApp:
                 self.log(f"播放系统默认提示音失败: {e}")
 
     def show_todo_reminder(self, todo):
+        # 这一部分没有变化
         self._play_reminder_sound()
 
         reminder_win = ttk.Toplevel(self.root)
@@ -5256,34 +5257,43 @@ class TimedBroadcastApp:
         original_index = todo.get('original_index')
         task_type = todo.get('type')
 
-        # --- 最终布局方案：使用 Grid 精确控制行和列 ---
+        # --- 最终布局方案：彻底放弃ScrolledText，手动搭建滚动文本框 ---
 
-        # 1. 配置窗口自身的网格系统
-        #    第0列（唯一的列）将占据所有多余的水平空间
+        # 1. 使用 Grid 布局，并精确配置窗口的行和列
         reminder_win.columnconfigure(0, weight=1)
-        #    第1行（内容区）将占据所有多余的垂直空间
-        reminder_win.rowconfigure(1, weight=1)
+        reminder_win.rowconfigure(1, weight=1) # 第1行（内容区）是唯一可拉伸的行
 
-        # 2. 将所有组件放入网格中
-        #    标题放在第0行
+        # 2. 放置标题（第0行）
         title_label = ttk.Label(reminder_win, text=todo.get('name', '无标题'), font=self.font_14_bold, wraplength=460)
         title_label.grid(row=0, column=0, pady=(15, 10), padx=20, sticky='w')
 
-        #    内容区容器放在第1行，并让它填满单元格 ('nsew')
-        content_frame = ttk.Frame(reminder_win, bootstyle="secondary", padding=1)
-        content_frame.grid(row=1, column=0, padx=20, pady=5, sticky='nsew')
-
-        #    按钮区容器放在第2行
+        # 3. 放置按钮区（第2行）
         btn_frame = ttk.Frame(reminder_win)
         btn_frame.grid(row=2, column=0, pady=(10, 15), padx=10, sticky='ew')
-        
-        # 3. 填充内容区的 ScrolledText
-        content_text = ScrolledText(content_frame, font=self.font_11, wrap=WORD, bd=0, height=5)
-        content_text.pack(fill=BOTH, expand=True) # 在它自己的容器里用 pack 是安全的
-        content_text.insert('1.0', todo.get('content', ''))
-        content_text.config(state='disabled')
 
-        # 4. 填充按钮区的按钮，并配置按钮区的列权重，让按钮平分空间
+        # 4. 【核心替换】创建内容区容器，并手动搭建滚动文本框
+        content_frame = ttk.Frame(reminder_win)
+        content_frame.grid(row=1, column=0, padx=20, pady=5, sticky='nsew')
+        content_frame.rowconfigure(0, weight=1)
+        content_frame.columnconfigure(0, weight=1)
+
+        #   4a. 创建一个原始的 Text 控件
+        #       我们导入的 tkinter as tk 在这里派上了用场
+        content_text_widget = tk.Text(content_frame, font=self.font_11, wrap=WORD, bd=0, highlightthickness=0)
+        content_text_widget.grid(row=0, column=0, sticky='nsew')
+        
+        #   4b. 创建一个原始的 Scrollbar 控件
+        scrollbar = ttk.Scrollbar(content_frame, orient=VERTICAL, command=content_text_widget.yview)
+        scrollbar.grid(row=0, column=1, sticky='ns')
+        
+        #   4c. 将两者互相绑定
+        content_text_widget.config(yscrollcommand=scrollbar.set)
+
+        #   4d. 插入内容并禁用编辑
+        content_text_widget.insert('1.0', todo.get('content', ''))
+        content_text_widget.config(state='disabled')
+
+        # 5. 在按钮区内部配置按钮
         if task_type == 'onetime':
             btn_frame.columnconfigure((0, 1, 2), weight=1)
             ttk.Button(btn_frame, text="已完成", bootstyle="success", command=lambda: handle_complete()).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
@@ -5293,8 +5303,8 @@ class TimedBroadcastApp:
             btn_frame.columnconfigure((0, 1), weight=1)
             ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=lambda: close_and_release()).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
             ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=lambda: handle_delete()).grid(row=0, column=1, padx=5, ipady=4, sticky='ew')
-        # --- 布局修复结束 ---
-
+        
+        # --- 逻辑处理部分（没有变化） ---
         def close_and_release():
             self.is_reminder_active = False
             reminder_win.destroy()
