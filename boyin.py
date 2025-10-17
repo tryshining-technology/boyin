@@ -3569,24 +3569,23 @@ class TimedBroadcastApp:
                 threading.Thread(target=self._execute_program_task, args=(task, trigger_time), daemon=True).start()
     
     # 找到 _execute_screenshot_task 函数并替换为以下内容：
-def _execute_screenshot_task(self, task, trigger_time):
-    if not IMAGE_AVAILABLE:
-        self.log(f"错误：Pillow库未安装，无法执行截屏任务 '{task['name']}'。")
-        return
-    
-    try:
-        repeat_count = task.get('repeat_count', 1)
-        interval_seconds = task.get('interval_seconds', 0)
-        stop_time_str = task.get('stop_time') # 获取停止时间
+    def _execute_screenshot_task(self, task, trigger_time):  # <--- 修正：已添加4个空格的缩进
+        if not IMAGE_AVAILABLE:
+            self.log(f"错误：Pillow库未安装，无法执行截屏任务 '{task['name']}'。")
+            return
+        
+        try:
+            repeat_count = task.get('repeat_count', 1)
+            interval_seconds = task.get('interval_seconds', 0)
+            stop_time_str = task.get('stop_time') # 获取停止时间
 
-        for i in range(repeat_count):
-            # --- 【核心修复】在这里增加停止时间的判断 ---
-            if stop_time_str:
-                current_time_str = datetime.now().strftime('%H:%M:%S')
-                if current_time_str >= stop_time_str:
-                    self.log(f"任务 '{task['name']}' 已到达停止时间 '{stop_time_str}'，提前中止截屏。")
-                    break # 退出循环
-            # --- 修复结束 ---
+            for i in range(repeat_count):
+                # --- 【核心修复】在这里增加停止时间的判断 ---
+                if stop_time_str:
+                    current_time_str = datetime.now().strftime('%H:%M:%S')
+                    if current_time_str >= stop_time_str:
+                        self.log(f"任务 '{task['name']}' 已到达停止时间 '{stop_time_str}'，提前中止截屏。")
+                        break # 退出循环
 
             screenshot = ImageGrab.grab()
             filename = f"Screenshot_{task['name']}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]}.png"
