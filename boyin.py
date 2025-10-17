@@ -5245,9 +5245,12 @@ class TimedBroadcastApp:
 
         reminder_win = ttk.Toplevel(self.root)
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
-        # 不再预设固定的高度，让窗口根据内容自适应
-        reminder_win.geometry("500x-1+1")
-        reminder_win.minsize(450, 200)
+        
+        # --- 核心修改：完全按照您的要求，设置一个固定的窗口尺寸 ---
+        reminder_win.geometry("480x320")
+        # 为了防止窗口被意外缩小，我们禁止调整大小
+        reminder_win.resizable(False, False)
+        # --- 修改结束 ---
 
         reminder_win.attributes('-topmost', True)
         reminder_win.lift()
@@ -5257,56 +5260,34 @@ class TimedBroadcastApp:
         original_index = todo.get('original_index')
         task_type = todo.get('type')
 
-        # --- 最终布局方案：基于成功的Grid布局，动态计算内容高度 ---
-
-        # 1. 配置窗口Grid，让内容区（第1行）可以垂直拉伸
+        # --- 使用我们已验证过可以稳定显示所有组件的 Grid 布局 ---
         reminder_win.columnconfigure(0, weight=1)
-        # 这一行是关键，确保内容区能获得空间
-        # 即使我们手动设置高度，也需要它来保证布局的稳定性
         reminder_win.rowconfigure(1, weight=1)
 
-        # 2. 放置标题（第0行）和按钮区（第2行），为内容区“框定”范围
-        title_label = ttk.Label(reminder_win, text=todo.get('name', '无标题'), font=self.font_14_bold, wraplength=460)
+        title_label = ttk.Label(reminder_win, text=todo.get('name', '无标题'), font=self.font_14_bold, wraplength=440)
         title_label.grid(row=0, column=0, pady=(15, 10), padx=20, sticky='w')
 
         btn_frame = ttk.Frame(reminder_win)
         btn_frame.grid(row=2, column=0, pady=(10, 15), padx=10, sticky='ew')
 
-        # 3. 创建内容区容器
         content_frame = ttk.Frame(reminder_win)
         content_frame.grid(row=1, column=0, padx=20, pady=5, sticky='nsew')
         content_frame.rowconfigure(0, weight=1)
         content_frame.columnconfigure(0, weight=1)
 
-        # 4. 【核心修改】创建原始Text控件，但不再创建滚动条
-        content_text_widget = tk.Text(
-            content_frame,
-            font=self.font_11,
-            wrap=WORD,              # 自动换行是关键
-            bd=0,
-            highlightthickness=0,
-            spacing3=5,             # 增加段间距，更美观
-            bg=reminder_win.cget('bg'), # 让背景色和窗口一致
-            relief='flat'
-        )
+        # 使用原始的 Text 和 Scrollbar 组件，这是最可靠的组合
+        content_text_widget = tk.Text(content_frame, font=self.font_11, wrap=WORD, bd=0, highlightthickness=0)
         content_text_widget.grid(row=0, column=0, sticky='nsew')
         
-        # 5. 插入内容
-        content_text_widget.insert('1.0', todo.get('content', ''))
+        scrollbar = ttk.Scrollbar(content_frame, orient=VERTICAL, command=content_text_widget.yview)
+        scrollbar.grid(row=0, column=1, sticky='ns')
         
-        # 6. 【关键】强制更新UI，让Text控件计算出换行后的实际行数
-        content_text_widget.update_idletasks()
-        
-        # 7. 获取实际行数，并动态设置Text控件的高度
-        #    'end-1c' 表示到最后一个字符，'lines' 表示计算可见行
-        num_lines = content_text_widget.count('1.0', 'end-1c', 'lines')[0]
-        # 如果没有内容，至少显示1行的高度
-        content_text_widget.config(height=max(1, num_lines))
+        content_text_widget.config(yscrollcommand=scrollbar.set)
 
-        # 8. 最后，禁用编辑
+        content_text_widget.insert('1.0', todo.get('content', ''))
         content_text_widget.config(state='disabled')
-        
-        # 9. 在按钮区内部配置按钮
+
+        # 在按钮区内部配置按钮
         if task_type == 'onetime':
             btn_frame.columnconfigure((0, 1, 2), weight=1)
             ttk.Button(btn_frame, text="已完成", bootstyle="success", command=lambda: handle_complete()).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
