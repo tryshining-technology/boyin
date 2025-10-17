@@ -437,29 +437,41 @@ class TimedBroadcastApp:
             self.log("尝试进入超级管理模块失败：密码错误。")
             
     def create_advanced_features_page(self):
+        # 1. 创建作为页面的主容器 Frame
         page_frame = ttk.Frame(self.page_container, padding=10)
 
-        # 关键修复：为 page_frame 自身配置网格布局权重
+        # 2. 【核心修复】配置 page_frame 内部的 grid 布局权重
+        #    这告诉 page_frame：当你有额外空间时，
+        #    - 把所有垂直方向的额外空间给第 1 行 (row 1)
+        #    - 把所有水平方向的额外空间给第 0 列 (column 0)
         page_frame.rowconfigure(1, weight=1)
         page_frame.columnconfigure(0, weight=1)
 
+        # 3. 创建标题并放入网格的第 0 行
         title_label = ttk.Label(page_frame, text="高级功能", font=self.font_14_bold, bootstyle="primary")
-        # 关键修复：使用 grid 布局
         title_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
 
+        # 4. 创建 Notebook (工作表切换器)
         notebook = ttk.Notebook(page_frame, bootstyle="primary")
-        # 关键修复：使用 grid 布局，并让其填充可用空间
+        
+        # 5. 将 Notebook 放入网格的第 1 行、第 0 列
+        #    因为这个单元格现在被设置为可拉伸，所以 Notebook 也会随之拉伸
+        #    sticky='nsew' 确保 Notebook 会填满它所在的整个单元格
         notebook.grid(row=1, column=0, sticky='nsew', pady=5)
 
+        # 6. 创建 Notebook 中的两个标签页
         screenshot_tab = ttk.Frame(notebook, padding=10)
         execute_tab = ttk.Frame(notebook, padding=10)
 
+        # 7. 将标签页添加到 Notebook 中
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
 
+        # 8. 分别构建两个标签页内的 UI
         self._build_screenshot_ui(screenshot_tab)
         self._build_execute_ui(execute_tab)
 
+        # 9. 返回构建完成的、可正常显示的页面容器
         return page_frame
 
     def _build_screenshot_ui(self, parent_frame):
@@ -5233,7 +5245,9 @@ class TimedBroadcastApp:
 
         reminder_win = ttk.Toplevel(self.root)
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
-        reminder_win.resizable(False, False)
+        # 我们给窗口一个初始大小，grid布局会在此基础上工作
+        reminder_win.geometry("500x350")
+        reminder_win.minsize(450, 300)
 
         reminder_win.attributes('-topmost', True)
         reminder_win.lift()
@@ -5243,20 +5257,31 @@ class TimedBroadcastApp:
         original_index = todo.get('original_index')
         task_type = todo.get('type')
 
+        # --- 布局修复: 使用 grid 代替 pack ---
+        # 1. 配置 reminder_win 自身的网格系统
+        reminder_win.columnconfigure(0, weight=1)  # 第0列（唯一的列）将占据所有多余的水平空间
+        reminder_win.rowconfigure(1, weight=1)     # 第1行（内容区）将占据所有多余的垂直空间
+
+        # 2. 将各个组件放入网格中
         title_label = ttk.Label(reminder_win, text=todo.get('name', '无标题'), font=self.font_14_bold, wraplength=460)
-        title_label.pack(pady=(15, 10), padx=20)
-        
-        content_frame = ttk.Frame(reminder_win, bootstyle="secondary", padding=1)
-        btn_frame = ttk.Frame(reminder_win)
-        # 1. 先 pack 按钮区域，让它占据底部空间
-        btn_frame.pack(side=BOTTOM, pady=15, padx=10, fill=X)
+        title_label.grid(row=0, column=0, pady=(15, 10), padx=20, sticky='w')
 
         content_frame = ttk.Frame(reminder_win, bootstyle="secondary", padding=1)
-        # 2. 再 pack 内容区域，让它填充剩余的全部空间
-        content_frame.pack(fill=BOTH, expand=True, padx=20, pady=5)
+        content_frame.grid(row=1, column=0, padx=20, pady=5, sticky='nsew') # 'nsew' 让它填满单元格
 
         content_text = ScrolledText(content_frame, font=self.font_11, wrap=WORD, bd=0, height=5)
-        content_text.pack(fill=BOTH, expand=True)
+        content_text.pack(fill=BOTH, expand=True) # 在 content_frame 内部用 pack 是独立的，没问题
+        content_text.insert('1.0', todo.get('content', ''))
+        content_text.config(state='disabled')
+
+        btn_frame = ttk.Frame(reminder_win)
+        btn_frame.grid(row=2, column=0, pady=15, padx=10, sticky='ew')
+        # --- 布局修复结束 ---
+
+        # 配置按钮容器的网格，让按钮平分宽度
+        btn_frame.columnconfigure(0, weight=1)
+        btn_frame.columnconfigure(1, weight=1)
+        btn_frame.columnconfigure(2, weight=1)
 
 
         def close_and_release():
@@ -5302,15 +5327,14 @@ class TimedBroadcastApp:
         reminder_win.protocol("WM_DELETE_WINDOW", on_closing_protocol)
 
         if task_type == 'onetime':
-            # 最终方案：使用 ttk.Button 保证风格，并使用 V1 证明有效的 pack(side=LEFT) 布局
-            # 增加 expand=True 和 fill=X 让按钮自动填充宽度，更美观
-            ttk.Button(btn_frame, text="已完成", bootstyle="success", command=handle_complete).pack(side=tk.LEFT, padx=5, ipady=4, fill=X, expand=True)
-            ttk.Button(btn_frame, text="稍后提醒", bootstyle="outline-secondary", command=handle_snooze).pack(side=tk.LEFT, padx=5, ipady=4, fill=X, expand=True)
-            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).pack(side=tk.LEFT, padx=5, ipady=4, fill=X, expand=True)
+            ttk.Button(btn_frame, text="已完成", bootstyle="success", command=handle_complete).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
+            ttk.Button(btn_frame, text="稍后提醒", bootstyle="outline-secondary", command=handle_snooze).grid(row=0, column=1, padx=5, ipady=4, sticky='ew')
+            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).grid(row=0, column=2, padx=5, ipady=4, sticky='ew')
         else:
-            # 同样应用最终方案
-            ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=close_and_release).pack(side=tk.LEFT, padx=5, ipady=4, fill=X, expand=True)
-            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).pack(side=tk.LEFT, padx=5, ipady=4, fill=X, expand=True)
+            # 循环任务只有两个按钮，所以配置2列即可
+            btn_frame.columnconfigure(2, weight=0) # 第三个位置权重设为0
+            ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=close_and_release).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
+            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).grid(row=0, column=1, padx=5, ipady=4, sticky='ew')
 
         self.center_window(reminder_win, parent=self.root)
 
