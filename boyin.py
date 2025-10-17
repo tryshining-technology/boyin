@@ -440,10 +440,10 @@ class TimedBroadcastApp:
         # 1. 创建作为页面的主容器 Frame
         page_frame = ttk.Frame(self.page_container, padding=10)
 
-        # 2. 【核心修复】配置 page_frame 内部的 grid 布局权重
-        #    这告诉 page_frame：当你有额外空间时，
-        #    - 把所有垂直方向的额外空间给第 1 行 (row 1)
-        #    - 把所有水平方向的额外空间给第 0 列 (column 0)
+        # 2. 【核心修复】应用我们从Bug 1学到的经验：
+        #    强制为 page_frame 内部的 Grid 布局配置权重。
+        #    这告诉 page_frame：“把所有多余的垂直空间给第 1 行，
+        #    把所有多余的水平空间给第 0 列。”
         page_frame.rowconfigure(1, weight=1)
         page_frame.columnconfigure(0, weight=1)
 
@@ -454,8 +454,7 @@ class TimedBroadcastApp:
         # 4. 创建 Notebook (工作表切换器)
         notebook = ttk.Notebook(page_frame, bootstyle="primary")
         
-        # 5. 将 Notebook 放入网格的第 1 行、第 0 列
-        #    因为这个单元格现在被设置为可拉伸，所以 Notebook 也会随之拉伸
+        # 5. 将 Notebook 放入网格的可拉伸区域 (第1行, 第0列)
         #    sticky='nsew' 确保 Notebook 会填满它所在的整个单元格
         notebook.grid(row=1, column=0, sticky='nsew', pady=5)
 
@@ -1970,7 +1969,7 @@ class TimedBroadcastApp:
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(expand=True, fill=X)
 
-        audio_btn = ttk.Button(btn_frame, text="🎵 音频节目",
+        audio_btn = ttk.Button(btn_frame, text="🎵    音频节目",
                              bootstyle="primary", width=20, command=lambda: self.open_audio_dialog(choice_dialog))
         audio_btn.pack(pady=8, ipady=8, fill=X)
 
@@ -1978,7 +1977,7 @@ class TimedBroadcastApp:
                              bootstyle="info", width=20, command=lambda: self.open_voice_dialog(choice_dialog))
         voice_btn.pack(pady=8, ipady=8, fill=X)
 
-        video_btn = ttk.Button(btn_frame, text="🎬 视频节目",
+        video_btn = ttk.Button(btn_frame, text="🎬    视频节目",
                              bootstyle="success", width=20, command=lambda: self.open_video_dialog(choice_dialog))
         video_btn.pack(pady=8, ipady=8, fill=X)
         if not VLC_AVAILABLE:
