@@ -3475,7 +3475,7 @@ class TimedBroadcastApp:
 
     def _check_running_processes_for_termination(self, now):
     # 遍历活动进程字典的副本，因为我们可能会在循环中删除元素
-    for task_id in list(self.active_processes.keys()):
+        for task_id in list(self.active_processes.keys()):
         proc_info = self.active_processes.get(task_id)
         if not proc_info: continue
 
