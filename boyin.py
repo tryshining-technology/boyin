@@ -5247,15 +5247,16 @@ class TimedBroadcastApp:
         title_label.pack(pady=(15, 10), padx=20)
         
         content_frame = ttk.Frame(reminder_win, bootstyle="secondary", padding=1)
+        btn_frame = ttk.Frame(reminder_win)
+        # 1. 先 pack 按钮区域，让它占据底部空间
+        btn_frame.pack(side=BOTTOM, pady=15, padx=10, fill=X)
+
+        content_frame = ttk.Frame(reminder_win, bootstyle="secondary", padding=1)
+        # 2. 再 pack 内容区域，让它填充剩余的全部空间
         content_frame.pack(fill=BOTH, expand=True, padx=20, pady=5)
 
         content_text = ScrolledText(content_frame, font=self.font_11, wrap=WORD, bd=0, height=5)
         content_text.pack(fill=BOTH, expand=True)
-        content_text.insert('1.0', todo.get('content', ''))
-        content_text.config(state='disabled')
-
-        btn_frame = ttk.Frame(reminder_win)
-        btn_frame.pack(side=BOTTOM, pady=15, padx=10, fill=X)
 
 
         def close_and_release():
