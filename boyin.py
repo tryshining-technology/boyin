@@ -312,7 +312,6 @@ class TimedBroadcastApp:
         self.switch_page("定时广播")
 
         self.update_status_bar()
-        ttk.Button(self.nav_frame, text="!!! 运行测试 !!!", command=self._run_diagnostic_test, bootstyle="danger").pack(side=BOTTOM, fill=X, pady=20)
         self.log("创翔多功能定时播音旗舰版软件已启动")
 
     def create_status_bar_content(self):
@@ -5257,42 +5256,45 @@ class TimedBroadcastApp:
         original_index = todo.get('original_index')
         task_type = todo.get('type')
 
-        # --- 最终布局修复：使用经典、稳妥的“三明治”Pack布局 ---
+        # --- 最终布局方案：使用 Grid 精确控制行和列 ---
 
-        # 1. 创建三个独立的容器，作为窗口的直接子控件
-        top_frame = ttk.Frame(reminder_win)
-        bottom_frame = ttk.Frame(reminder_win)
+        # 1. 配置窗口自身的网格系统
+        #    第0列（唯一的列）将占据所有多余的水平空间
+        reminder_win.columnconfigure(0, weight=1)
+        #    第1行（内容区）将占据所有多余的垂直空间
+        reminder_win.rowconfigure(1, weight=1)
+
+        # 2. 将所有组件放入网格中
+        #    标题放在第0行
+        title_label = ttk.Label(reminder_win, text=todo.get('name', '无标题'), font=self.font_14_bold, wraplength=460)
+        title_label.grid(row=0, column=0, pady=(15, 10), padx=20, sticky='w')
+
+        #    内容区容器放在第1行，并让它填满单元格 ('nsew')
         content_frame = ttk.Frame(reminder_win, bootstyle="secondary", padding=1)
+        content_frame.grid(row=1, column=0, padx=20, pady=5, sticky='nsew')
 
-        # 2. 按照“底 -> 顶 -> 中”的顺序放置这三个容器
-        #    这个顺序是保证布局成功的关键
-        bottom_frame.pack(side=BOTTOM, fill=X, padx=10, pady=(10, 15))
-        top_frame.pack(side=TOP, fill=X, padx=20, pady=(15, 10))
-        content_frame.pack(side=TOP, fill=BOTH, expand=True, padx=20, pady=5)
-
-        # 3. 分别填充每个容器的内容
-        #    填充标题到 top_frame
-        title_label = ttk.Label(top_frame, text=todo.get('name', '无标题'), font=self.font_14_bold, wraplength=460)
-        title_label.pack(anchor='w')
-
-        #    填充内容到 content_frame
+        #    按钮区容器放在第2行
+        btn_frame = ttk.Frame(reminder_win)
+        btn_frame.grid(row=2, column=0, pady=(10, 15), padx=10, sticky='ew')
+        
+        # 3. 填充内容区的 ScrolledText
         content_text = ScrolledText(content_frame, font=self.font_11, wrap=WORD, bd=0, height=5)
-        content_text.pack(fill=BOTH, expand=True)
+        content_text.pack(fill=BOTH, expand=True) # 在它自己的容器里用 pack 是安全的
         content_text.insert('1.0', todo.get('content', ''))
         content_text.config(state='disabled')
 
-        #    填充按钮到 bottom_frame
+        # 4. 填充按钮区的按钮，并配置按钮区的列权重，让按钮平分空间
         if task_type == 'onetime':
-            # 从右向左放置按钮
-            ttk.Button(bottom_frame, text="删除任务", bootstyle="danger", command=lambda: handle_delete()).pack(side=RIGHT, padx=5, ipady=4)
-            ttk.Button(bottom_frame, text="稍后提醒", bootstyle="outline-secondary", command=lambda: handle_snooze()).pack(side=RIGHT, padx=5, ipady=4)
-            ttk.Button(bottom_frame, text="已完成", bootstyle="success", command=lambda: handle_complete()).pack(side=RIGHT, padx=5, ipady=4)
+            btn_frame.columnconfigure((0, 1, 2), weight=1)
+            ttk.Button(btn_frame, text="已完成", bootstyle="success", command=lambda: handle_complete()).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
+            ttk.Button(btn_frame, text="稍后提醒", bootstyle="outline-secondary", command=lambda: handle_snooze()).grid(row=0, column=1, padx=5, ipady=4, sticky='ew')
+            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=lambda: handle_delete()).grid(row=0, column=2, padx=5, ipady=4, sticky='ew')
         else:
-            ttk.Button(bottom_frame, text="删除任务", bootstyle="danger", command=lambda: handle_delete()).pack(side=RIGHT, padx=5, ipady=4)
-            ttk.Button(bottom_frame, text="本次完成", bootstyle="primary", command=lambda: close_and_release()).pack(side=RIGHT, padx=5, ipady=4)
-
+            btn_frame.columnconfigure((0, 1), weight=1)
+            ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=lambda: close_and_release()).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
+            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=lambda: handle_delete()).grid(row=0, column=1, padx=5, ipady=4, sticky='ew')
         # --- 布局修复结束 ---
-        
+
         def close_and_release():
             self.is_reminder_active = False
             reminder_win.destroy()
@@ -5439,36 +5441,6 @@ class TimedBroadcastApp:
         entry.insert(0, new_full_val)
         entry.icursor(cursor_pos)
         return "break"
-
-    def _run_diagnostic_test(self):
-        """一个独立的、用于诊断Toplevel窗口布局问题的测试函数"""
-        try:
-            # 1. 创建一个全新的、干净的Toplevel窗口
-            diag_win = ttk.Toplevel(self.root)
-            diag_win.title("诊断测试窗口")
-            diag_win.geometry("300x200")
-            diag_win.transient(self.root) # 确保它在主窗口之上
-            diag_win.grab_set()          # 锁定焦点
-
-            # 2. 创建一个底部容器，并用最稳妥的方式放置它
-            bottom_frame = ttk.Frame(diag_win, padding=10)
-            bottom_frame.pack(side=BOTTOM, fill=X)
-
-            # 3. 创建一个顶部容器，让它填充剩余空间
-            top_frame = ttk.Frame(diag_win, padding=10)
-            top_frame.pack(side=TOP, fill=BOTH, expand=True)
-
-            # 4. 在顶部容器里放一个标签
-            ttk.Label(top_frame, text="这是一个测试标签").pack()
-
-            # 5. 在底部容器里放一个按钮
-            ttk.Button(bottom_frame, text="测试按钮").pack()
-
-            self.log("诊断测试窗口已弹出。")
-
-        except Exception as e:
-            self.log(f"诊断测试时发生错误: {e}")
-            messagebox.showerror("诊断错误", f"无法运行测试: {e}")
 
 
 def main():
