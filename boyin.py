@@ -344,48 +344,59 @@ class TimedBroadcastApp:
             self.log("界面已锁定，请先解锁。")
             return
 
-        if self.current_page:
+        if self.current_page and self.current_page.winfo_exists():
             self.current_page.pack_forget()
 
         for title, btn in self.nav_buttons.items():
             btn.config(bootstyle="light")
 
         target_frame = None
-        if page_name == "定时广播":
-            target_frame = self.pages["定时广播"]
-        elif page_name == "节假日":
-            if page_name not in self.pages:
-                self.pages[page_name] = self.create_holiday_page()
-            target_frame = self.pages[page_name]
-        elif page_name == "待办事项":
-            if page_name not in self.pages:
-                self.pages[page_name] = self.create_todo_page()
-            target_frame = self.pages[page_name]
-        elif page_name == "高级功能":
-            if page_name not in self.pages:
-                self.pages[page_name] = self.create_advanced_features_page()
-            target_frame = self.pages[page_name]
-        elif page_name == "设置":
-            if page_name not in self.pages:
-                self.pages[page_name] = self.create_settings_page()
-            self._refresh_settings_ui()
-            target_frame = self.pages[page_name]
-        elif page_name == "注册软件":
-            if page_name not in self.pages:
-                self.pages[page_name] = self.create_registration_page()
-            target_frame = self.pages[page_name]
-        elif page_name == "超级管理":
-            if page_name not in self.pages:
-                self.pages[page_name] = self.create_super_admin_page()
+        
+        # --- 核心修改：明确处理“高级功能”的创建和缓存 ---
+        
+        # 我们检查 self.pages 字典中是否已经存在这个页面
+        if page_name in self.pages and self.pages[page_name].winfo_exists():
+            # 如果存在，直接使用
             target_frame = self.pages[page_name]
         else:
-            self.log(f"功能开发中: {page_name}")
-            target_frame = self.pages["定时广播"]
-            page_name = "定时广播"
+            # 如果不存在，或者因为某些原因被销毁了，就根据页面名称重新创建它
+            if page_name == "定时广播":
+                # 定时广播页面是预先创建的，所以理论上总是在 self.pages 中
+                target_frame = self.pages.get("定时广播", self.main_frame)
+            elif page_name == "节假日":
+                target_frame = self.create_holiday_page()
+                self.pages[page_name] = target_frame # 创建后存入字典
+            elif page_name == "待办事项":
+                target_frame = self.create_todo_page()
+                self.pages[page_name] = target_frame
+            elif page_name == "高级功能":
+                # 【关键】在这里调用创建函数
+                target_frame = self.create_advanced_features_page()
+                # 【关键】创建完成后，立即将它存入 self.pages 字典中，以便下次直接使用
+                self.pages[page_name] = target_frame
+            elif page_name == "设置":
+                target_frame = self.create_settings_page()
+                self.pages[page_name] = target_frame
+                self._refresh_settings_ui() # 这句移到创建之后更合理
+            elif page_name == "注册软件":
+                target_frame = self.create_registration_page()
+                self.pages[page_name] = target_frame
+            elif page_name == "超级管理":
+                target_frame = self.create_super_admin_page()
+                self.pages[page_name] = target_frame
+            else:
+                self.log(f"功能开发中: {page_name}")
+                target_frame = self.pages["定时广播"]
+                page_name = "定时广播"
 
-        target_frame.pack(in_=self.page_container, fill=BOTH, expand=True)
-        self.current_page = target_frame
-        self.current_page_name = page_name
+        # 确保我们有一个有效的 Frame 可以显示
+        if target_frame:
+            target_frame.pack(in_=self.page_container, fill=BOTH, expand=True)
+            self.current_page = target_frame
+            self.current_page_name = page_name
+        else:
+            self.log(f"错误：无法为 '{page_name}' 创建或找到目标页面！")
+
 
         selected_btn = self.nav_buttons.get(page_name)
         if selected_btn:
