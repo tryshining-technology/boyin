@@ -437,49 +437,50 @@ class TimedBroadcastApp:
             self.log("尝试进入超级管理模块失败：密码错误。")
             
     def create_advanced_features_page(self):
-        self.log("--- 诊断步骤 1：正在测试 _build_screenshot_ui ---")
+        # 1. 创建作为页面的主容器 Frame
         page_frame = ttk.Frame(self.page_container, padding=10)
 
+        # 2. 【核心】强制为 page_frame 内部的 Grid 布局配置权重
+        #    这确保了 Notebook 控件有空间可以显示
         page_frame.rowconfigure(1, weight=1)
         page_frame.columnconfigure(0, weight=1)
 
-        title_label = ttk.Label(page_frame, text="高级功能 (测试 1: 仅加载截图UI)", font=self.font_14_bold, bootstyle="primary")
+        # 3. 创建标题并放入网格的第 0 行
+        title_label = ttk.Label(page_frame, text="高级功能", font=self.font_14_bold, bootstyle="primary")
         title_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
 
+        # 4. 创建 Notebook (工作表切换器)
         notebook = ttk.Notebook(page_frame, bootstyle="primary")
         notebook.grid(row=1, column=0, sticky='nsew', pady=5)
 
+        # 5. 创建 Notebook 中的两个标签页
         screenshot_tab = ttk.Frame(notebook, padding=10)
         execute_tab = ttk.Frame(notebook, padding=10)
 
+        # 6. 将标签页添加到 Notebook 中
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
 
-        # <<< 步骤 1：我们只调用这一个函数 >>>
+        # 7. 【恢复】现在我们调用真正的UI构建函数，把您设计的界面加载进来
         self._build_screenshot_ui(screenshot_tab)
-        
-        # <<< 步骤 1：另一个保持注释状态 >>>
-        # self._build_execute_ui(execute_tab)
+        self._build_execute_ui(execute_tab)
 
-        ttk.Label(execute_tab, text="第二个标签页是空的").pack()
-
+        # 8. 返回构建完成的、可正常显示的页面容器
         return page_frame
 
     def _build_screenshot_ui(self, parent_frame):
+        # 1. 配置父容器的Grid权重，确保我们的布局能伸展
         parent_frame.columnconfigure(0, weight=1)
-        parent_frame.rowconfigure(0, weight=1)
+        parent_frame.rowconfigure(1, weight=1) # 第1行放表格，让它可以拉伸
 
-        main_content_frame = ttk.Frame(parent_frame)
-        main_content_frame.grid(row=0, column=0, sticky='nsew')
-        main_content_frame.columnconfigure(0, weight=1)
-        main_content_frame.rowconfigure(1, weight=1)
-
-        desc_label = ttk.Label(main_content_frame, 
+        # 2. 创建并放置描述标签
+        desc_label = ttk.Label(parent_frame, 
                                text=f"此功能将在指定时间自动截取全屏图像，并以PNG格式保存到以下目录：\n{SCREENSHOT_FOLDER}",
                                font=self.font_10, bootstyle="secondary", wraplength=600)
-        desc_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
+        desc_label.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10)) # columnspan=2 横跨两列
 
-        table_frame = ttk.Frame(main_content_frame)
+        # 3. 创建表格框架 (包含Treeview和滚动条)
+        table_frame = ttk.Frame(parent_frame)
         table_frame.grid(row=1, column=0, sticky='nsew')
         table_frame.columnconfigure(0, weight=1)
         table_frame.rowconfigure(0, weight=1)
@@ -503,8 +504,9 @@ class TimedBroadcastApp:
 
         self.screenshot_tree.bind("<Double-1>", lambda e: self.edit_screenshot_task())
 
+        # 4. 【核心修复】创建右侧按钮栏，并完全使用 Grid 布局
         action_frame = ttk.Frame(parent_frame, padding=(10, 0))
-        action_frame.grid(row=0, column=1, sticky='ns', padx=(10, 0))
+        action_frame.grid(row=1, column=1, sticky='ns', padx=(10, 0)) # 放在表格右侧
 
         buttons_config = [
             ("添加任务", self.add_screenshot_task, "info"),
@@ -515,11 +517,16 @@ class TimedBroadcastApp:
             ("全部禁用", lambda: self._set_screenshot_status('禁用'), "outline-warning"),
             ("清空列表", self.clear_all_screenshot_tasks, "outline-danger")
         ]
-        for text, cmd, style in buttons_config:
+        
+        # 使用 enumerate 和 grid 来放置按钮，取代 pack
+        for i, (text, cmd, style) in enumerate(buttons_config):
             if text is None:
-                ttk.Separator(action_frame, orient=HORIZONTAL).pack(fill=X, pady=10)
+                # 用一个 Label 来创建视觉上的分隔空间
+                ttk.Label(action_frame).grid(row=i, column=0, pady=5)
                 continue
-            ttk.Button(action_frame, text=text, command=cmd, bootstyle=style).pack(pady=5, fill=X)
+            
+            btn = ttk.Button(action_frame, text=text, command=cmd, bootstyle=style)
+            btn.grid(row=i, column=0, pady=5, sticky='ew') # sticky='ew' 让按钮横向填满
             
         self.update_screenshot_list()
         
