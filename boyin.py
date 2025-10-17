@@ -20,22 +20,16 @@ import ctypes
 
 # --- 全局修复：启用高DPI感知 ---
 try:
-    # 告诉Windows，程序自己处理DPI缩放，Windows 8.1+
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
 except Exception:
     try:
-        # 兼容旧版Windows (Vista+)
         ctypes.windll.user32.SetProcessDPIAware(True)
     except Exception:
         print("警告: 无法设置DPI感知，在高分屏下布局可能出现问题。")
 # --- DPI修复结束 ---
 
 # --- Nuitka/PyInstaller 打包 VLC 的关键修复 ---
-# 检查程序是否被打包成单文件
 if getattr(sys, 'frozen', False):
-    # 如果是，则手动设置VLC库的搜索路径
-    # application_path 是我们之前定义的程序所在目录
-    # 我们需要同时考虑32位和64位的情况
     if sys.maxsize > 2**32:
         vlc_lib_folder = "vlc_lib_x64"
     else:
@@ -43,19 +37,16 @@ if getattr(sys, 'frozen', False):
     
     vlc_dll_path = os.path.join(os.path.dirname(sys.executable), vlc_lib_folder)
     
-    # 告诉 python-vlc 核心库(dll)在哪里
     if os.path.isdir(vlc_dll_path):
         os.environ['PYTHON_VLC_LIB_PATH'] = vlc_dll_path
-        # 告诉 python-vlc 插件(plugins目录)在哪里
         os.environ['PYTHON_VLC_PLUGIN_PATH'] = os.path.join(vlc_dll_path, 'plugins')
 # --- 修复结束 ---
-
 
 # 尝试导入所需库
 TRAY_AVAILABLE = False
 try:
     from pystray import MenuItem as item, Icon
-    from PIL import Image, ImageTk
+    from PIL import Image, ImageTk, ImageGrab
     TRAY_AVAILABLE = True
     IMAGE_AVAILABLE = True
 except ImportError:
@@ -79,7 +70,6 @@ AUDIO_AVAILABLE = False
 try:
     import pygame
     pygame.mixer.init()
-    # 为提示音和报时预留单独的通道，避免与背景音乐冲突
     pygame.mixer.set_num_channels(10)
     AUDIO_AVAILABLE = True
 except ImportError:
@@ -94,7 +84,6 @@ try:
 except ImportError:
     print("警告: psutil 未安装，无法获取机器码，注册功能不可用。")
 
-# --- 导入 VLC 库 ---
 VLC_AVAILABLE = False
 try:
     import vlc
@@ -104,9 +93,7 @@ except ImportError:
 except Exception as e:
     print(f"警告: vlc 初始化失败 - {e}，视频播放功能不可用。")
 
-
 def resource_path(relative_path):
-    """ 获取资源的绝对路径，无论是开发环境还是打包后 """
     try:
         base_path = sys._MEIPASS
     except Exception:
@@ -123,12 +110,18 @@ TASK_FILE = os.path.join(application_path, "broadcast_tasks.json")
 SETTINGS_FILE = os.path.join(application_path, "settings.json")
 HOLIDAY_FILE = os.path.join(application_path, "holidays.json")
 TODO_FILE = os.path.join(application_path, "todos.json")
+# 新增高级功能任务文件
+SCREENSHOT_TASK_FILE = os.path.join(application_path, "screenshot_tasks.json")
+EXECUTE_TASK_FILE = os.path.join(application_path, "execute_tasks.json")
+
 PROMPT_FOLDER = os.path.join(application_path, "提示音")
 AUDIO_FOLDER = os.path.join(application_path, "音频文件")
 BGM_FOLDER = os.path.join(application_path, "文稿背景")
 VOICE_SCRIPT_FOLDER = os.path.join(application_path, "语音文稿")
-ICON_FILE = resource_path("icon.ico")
+# 新增截屏文件夹路径
+SCREENSHOT_FOLDER = os.path.join(application_path, "截屏")
 
+ICON_FILE = resource_path("icon.ico")
 REMINDER_SOUND_FILE = os.path.join(PROMPT_FOLDER, "reminder.wav")
 CHIME_FOLDER = os.path.join(AUDIO_FOLDER, "整点报时")
 
@@ -152,6 +145,10 @@ class TimedBroadcastApp:
         self.tasks = []
         self.holidays = []
         self.todos = []
+        # 新增任务列表
+        self.screenshot_tasks = []
+        self.execute_tasks = []
+        
         self.settings = {}
         self.running = True
         self.tray_icon = None
@@ -162,7 +159,6 @@ class TimedBroadcastApp:
         self.machine_code = None
 
         self.lock_password_b64 = ""
-
         self.drag_start_item = None
 
         self.playback_command_queue = queue.Queue()
@@ -190,13 +186,15 @@ class TimedBroadcastApp:
         self.load_lock_password()
 
         self._apply_global_font()
-
         self.check_authorization()
 
         self.create_widgets()
         self.load_tasks()
         self.load_holidays()
         self.load_todos()
+        # 新增加载方法调用
+        self.load_screenshot_tasks()
+        # self.load_execute_tasks() # 稍后在第二部分实现
 
         self.start_background_threads()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
@@ -204,29 +202,22 @@ class TimedBroadcastApp:
 
         if self.settings.get("lock_on_start", False) and self.lock_password_b64:
             self.root.after(100, self.perform_initial_lock)
-
         if self.settings.get("start_minimized", False):
             self.root.after(100, self.hide_to_tray)
-
         if self.is_app_locked_down:
             self.root.after(100, self.perform_lockdown)
 
     def _apply_global_font(self):
-        """在创建控件前，应用全局字体设置"""
         font_name = self.settings.get("app_font", "Microsoft YaHei")
-
         try:
-            # 检查字体是否存在于系统中，不存在则回退
             if font_name not in font.families():
                 self.log(f"警告：字体 '{font_name}' 未在系统中找到，已回退至默认字体。")
                 font_name = "Microsoft YaHei"
                 self.settings["app_font"] = font_name
         except Exception:
             font_name = "Microsoft YaHei"
-
         self.log(f"应用全局字体: {font_name}")
 
-        # 定义不同大小的字体对象
         self.font_8 = (font_name, 8)
         self.font_9 = (font_name, 9)
         self.font_10 = (font_name, 10)
@@ -238,11 +229,7 @@ class TimedBroadcastApp:
         self.font_14_bold = (font_name, 14, 'bold')
         self.font_22_bold = (font_name, 22, 'bold')
 
-        # --- 全局应用 ---
-        # 1. 对标准 tk 控件使用 option_add (非常有效)
         self.root.option_add("*Font", self.font_11)
-
-        # 2. 对 ttk 控件使用 Style
         style = ttk.Style.get_instance()
         style.configure("TButton", font=self.font_11)
         style.configure("TLabel", font=self.font_11)
@@ -250,15 +237,10 @@ class TimedBroadcastApp:
         style.configure("TRadiobutton", font=self.font_11)
         style.configure("TCombobox", font=self.font_11)
         style.configure("TEntry", font=self.font_11)
-
-        # 3. 对 Treeview 单独设置
-        # 动态计算rowheight以适应字体
         font_obj = font.Font(font=self.font_11)
-        row_height = font_obj.metrics("linespace") + 10 # 增加一些padding
+        row_height = font_obj.metrics("linespace") + 10
         style.configure("Treeview", font=self.font_11, rowheight=row_height)
         style.configure("Treeview.Heading", font=self.font_11_bold)
-
-        # 4. 对 LabelFrame 单独设置
         style.configure("TLabelframe.Label", font=self.font_12_bold)
 
     def _save_to_registry(self, key_name, value):
@@ -289,7 +271,12 @@ class TimedBroadcastApp:
         self.lock_password_b64 = self._load_from_registry("LockPasswordB64") or ""
 
     def create_folder_structure(self):
-        for folder in [PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER, VOICE_SCRIPT_FOLDER]:
+        # 新增 SCREENSHOT_FOLDER
+        folders_to_create = [
+            PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER, 
+            VOICE_SCRIPT_FOLDER, SCREENSHOT_FOLDER
+        ]
+        for folder in folders_to_create:
             if not os.path.exists(folder):
                 os.makedirs(folder)
 
@@ -305,18 +292,20 @@ class TimedBroadcastApp:
         self.page_container = ttk.Frame(self.root)
         self.page_container.pack(side=LEFT, fill=BOTH, expand=True)
 
-        nav_button_titles = ["定时广播", "节假日", "待办事项", "设置", "注册软件", "超级管理"]
+        # 新增“高级功能”到导航栏
+        nav_button_titles = ["定时广播", "节假日", "待办事项", "高级功能", "设置", "注册软件", "超级管理"]
 
         for i, title in enumerate(nav_button_titles):
+            is_super_admin = (title == "超级管理")
+            cmd = (lambda t=title: self._prompt_for_super_admin_password()) if is_super_admin else (lambda t=title: self.switch_page(t))
+            
             btn = ttk.Button(self.nav_frame, text=title, bootstyle="light",
-                           style='Link.TButton',
-                           command=lambda t=title: self.switch_page(t) if t != "超级管理" else self._prompt_for_super_admin_password())
+                           style='Link.TButton', command=cmd)
             btn.pack(fill=X, pady=1, ipady=8, padx=5)
             self.nav_buttons[title] = btn
             
         style = ttk.Style.get_instance()
         style.configure('Link.TButton', font=self.font_13_bold, anchor='w')
-
 
         self.main_frame = ttk.Frame(self.page_container)
         self.pages["定时广播"] = self.main_frame
@@ -374,6 +363,11 @@ class TimedBroadcastApp:
         elif page_name == "待办事项":
             if page_name not in self.pages:
                 self.pages[page_name] = self.create_todo_page()
+            target_frame = self.pages[page_name]
+        # 新增“高级功能”页面的切换逻辑
+        elif page_name == "高级功能":
+            if page_name not in self.pages:
+                self.pages[page_name] = self.create_advanced_features_page()
             target_frame = self.pages[page_name]
         elif page_name == "设置":
             if page_name not in self.pages:
@@ -433,12 +427,10 @@ class TimedBroadcastApp:
         ttk.Button(btn_frame, text="取消", command=on_cancel, width=8).pack(side=LEFT, padx=10)
         dialog.bind('<Return>', lambda event: on_confirm())
 
-        # 修复 Bug 2: 弹窗居中
         self.center_window(dialog, parent=self.root)
         self.root.wait_window(dialog)
         
         entered_password = result[0]
-
         correct_password = datetime.now().strftime('%Y%m%d')
 
         if entered_password == correct_password:
@@ -448,6 +440,294 @@ class TimedBroadcastApp:
             messagebox.showerror("验证失败", "密码错误！", parent=self.root)
             self.log("尝试进入超级管理模块失败：密码错误。")
 
+    # 新增：创建“高级功能”页面
+    def create_advanced_features_page(self):
+        page_frame = ttk.Frame(self.page_container, padding=10)
+
+        title_label = ttk.Label(page_frame, text="高级功能", font=self.font_14_bold, bootstyle="primary")
+        title_label.pack(anchor=W, pady=(0, 10))
+
+        notebook = ttk.Notebook(page_frame, bootstyle="primary")
+        notebook.pack(fill=BOTH, expand=True, pady=5)
+
+        screenshot_tab = ttk.Frame(notebook, padding=10)
+        execute_tab = ttk.Frame(notebook, padding=10)
+
+        notebook.add(screenshot_tab, text=' 定时截屏 ')
+        notebook.add(execute_tab, text=' 定时运行 ')
+
+        # 构建每个标签页的UI
+        self._build_screenshot_ui(screenshot_tab)
+        # self._build_execute_ui(execute_tab) # 稍后在第二部分实现
+
+        return page_frame
+
+    # 新增：构建“定时截屏”UI
+    def _build_screenshot_ui(self, parent_frame):
+        parent_frame.columnconfigure(0, weight=1)
+        parent_frame.rowconfigure(0, weight=1)
+
+        main_content_frame = ttk.Frame(parent_frame)
+        main_content_frame.grid(row=0, column=0, sticky='nsew')
+        main_content_frame.columnconfigure(0, weight=1)
+        main_content_frame.rowconfigure(1, weight=1)
+
+        desc_label = ttk.Label(main_content_frame, 
+                               text=f"此功能将在指定时间自动截取全屏图像，并以PNG格式保存到以下目录：\n{SCREENSHOT_FOLDER}",
+                               font=self.font_10, bootstyle="secondary", wraplength=self.root.winfo_width() - 400)
+        desc_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
+
+        table_frame = ttk.Frame(main_content_frame)
+        table_frame.grid(row=1, column=0, sticky='nsew')
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.rowconfigure(0, weight=1)
+
+        columns = ('任务名称', '状态', '执行时间', '截取张数', '间隔(秒)', '周/月规则', '日期范围')
+        self.screenshot_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended', bootstyle="info")
+        
+        col_configs = [
+            ('任务名称', 200, 'w'), ('状态', 80, 'center'), ('执行时间', 150, 'center'),
+            ('截取张数', 80, 'center'), ('间隔(秒)', 80, 'center'), 
+            ('周/月规则', 150, 'center'), ('日期范围', 200, 'center')
+        ]
+        for name, width, anchor in col_configs:
+            self.screenshot_tree.heading(name, text=name)
+            self.screenshot_tree.column(name, width=width, anchor=anchor)
+
+        self.screenshot_tree.grid(row=0, column=0, sticky='nsew')
+        scrollbar = ttk.Scrollbar(table_frame, orient=VERTICAL, command=self.screenshot_tree.yview, bootstyle="round-info")
+        scrollbar.grid(row=0, column=1, sticky='ns')
+        self.screenshot_tree.configure(yscrollcommand=scrollbar.set)
+
+        self.screenshot_tree.bind("<Double-1>", lambda e: self.edit_screenshot_task())
+
+        action_frame = ttk.Frame(parent_frame, padding=(10, 0))
+        action_frame.grid(row=0, column=1, sticky='ns', padx=(10, 0))
+
+        buttons_config = [
+            ("添加任务", self.add_screenshot_task, "info"),
+            ("修改任务", self.edit_screenshot_task, "success"),
+            ("删除任务", self.delete_screenshot_task, "danger"),
+            (None, None, None),
+            ("全部启用", lambda: self._set_screenshot_status('启用'), "outline-success"),
+            ("全部禁用", lambda: self._set_screenshot_status('禁用'), "outline-warning"),
+            ("清空列表", self.clear_all_screenshot_tasks, "outline-danger")
+        ]
+        for text, cmd, style in buttons_config:
+            if text is None:
+                ttk.Separator(action_frame, orient=HORIZONTAL).pack(fill=X, pady=10)
+                continue
+            ttk.Button(action_frame, text=text, command=cmd, bootstyle=style).pack(pady=5, fill=X)
+            
+        self.update_screenshot_list()
+
+    # --- 定时截屏功能的全套方法 ---
+
+    def load_screenshot_tasks(self):
+        if not os.path.exists(SCREENSHOT_TASK_FILE): return
+        try:
+            with open(SCREENSHOT_TASK_FILE, 'r', encoding='utf-8') as f:
+                self.screenshot_tasks = json.load(f)
+            self.log(f"已加载 {len(self.screenshot_tasks)} 个截屏任务")
+            if hasattr(self, 'screenshot_tree'):
+                self.update_screenshot_list()
+        except Exception as e:
+            self.log(f"加载截屏任务失败: {e}")
+            self.screenshot_tasks = []
+
+    def save_screenshot_tasks(self):
+        try:
+            with open(SCREENSHOT_TASK_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.screenshot_tasks, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log(f"保存截屏任务失败: {e}")
+            
+    def update_screenshot_list(self):
+        if not hasattr(self, 'screenshot_tree') or not self.screenshot_tree.winfo_exists(): return
+        self.screenshot_tree.delete(*self.screenshot_tree.get_children())
+        for task in self.screenshot_tasks:
+            self.screenshot_tree.insert('', END, values=(
+                task.get('name', ''),
+                task.get('status', '启用'),
+                task.get('time', ''),
+                task.get('repeat_count', 1),
+                task.get('interval_seconds', 0),
+                task.get('weekday', ''),
+                task.get('date_range', '')
+            ))
+            
+    def add_screenshot_task(self):
+        self.open_screenshot_dialog()
+        
+    def edit_screenshot_task(self):
+        selection = self.screenshot_tree.selection()
+        if not selection:
+            messagebox.showwarning("提示", "请先选择要修改的截屏任务", parent=self.root)
+            return
+        index = self.screenshot_tree.index(selection[0])
+        task_to_edit = self.screenshot_tasks[index]
+        self.open_screenshot_dialog(task_to_edit=task_to_edit, index=index)
+        
+    def delete_screenshot_task(self):
+        selections = self.screenshot_tree.selection()
+        if not selections:
+            messagebox.showwarning("提示", "请先选择要删除的截屏任务", parent=self.root)
+            return
+        if messagebox.askyesno("确认删除", f"确定要删除选中的 {len(selections)} 个截屏任务吗？", parent=self.root):
+            indices = sorted([self.screenshot_tree.index(s) for s in selections], reverse=True)
+            for index in indices:
+                self.screenshot_tasks.pop(index)
+            self.update_screenshot_list()
+            self.save_screenshot_tasks()
+
+    def clear_all_screenshot_tasks(self):
+        if not self.screenshot_tasks: return
+        if messagebox.askyesno("确认清空", "您确定要清空所有截屏任务吗？", parent=self.root):
+            self.screenshot_tasks.clear()
+            self.update_screenshot_list()
+            self.save_screenshot_tasks()
+            
+    def _set_screenshot_status(self, status):
+        selection = self.screenshot_tree.selection()
+        if not selection:
+            messagebox.showwarning("提示", f"请先选择要 {status} 的任务", parent=self.root)
+            return
+        for item_id in selection:
+            index = self.screenshot_tree.index(item_id)
+            self.screenshot_tasks[index]['status'] = status
+        self.update_screenshot_list()
+        self.save_screenshot_tasks()
+
+    def open_screenshot_dialog(self, task_to_edit=None, index=None):
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("修改截屏任务" if task_to_edit else "添加截屏任务")
+        dialog.resizable(False, False)
+        dialog.transient(self.root); dialog.grab_set()
+
+        main_frame = ttk.Frame(dialog, padding=15)
+        main_frame.pack(fill=BOTH, expand=True)
+
+        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
+        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
+        content_frame.columnconfigure(1, weight=1)
+        ttk.Label(content_frame, text="任务名称:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        name_entry = ttk.Entry(content_frame, font=self.font_11)
+        name_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
+
+        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
+        time_frame.grid(row=1, column=0, sticky='ew', pady=4)
+        time_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(time_frame, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        start_time_entry = ttk.Entry(time_frame, font=self.font_11)
+        start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
+        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
+        ttk.Label(time_frame, text="《可多个,用英文逗号,隔开》").grid(row=0, column=2, sticky='w', padx=5)
+        ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
+
+        ttk.Label(time_frame, text="截取张数:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
+        repeat_entry = ttk.Entry(time_frame, font=self.font_11)
+        repeat_entry.grid(row=1, column=1, sticky='w', padx=5, pady=2)
+        ttk.Label(time_frame, text="(范围 1-3)").grid(row=1, column=2, sticky='w')
+
+        ttk.Label(time_frame, text="间隔秒数:").grid(row=2, column=0, sticky='e', padx=5, pady=2)
+        interval_entry = ttk.Entry(time_frame, font=self.font_11)
+        interval_entry.grid(row=2, column=1, sticky='w', padx=5, pady=2)
+        ttk.Label(time_frame, text="(仅在张数 > 1 时有效)").grid(row=2, column=2, sticky='w')
+        
+        ttk.Label(time_frame, text="周几/几号:").grid(row=3, column=0, sticky='e', padx=5, pady=3)
+        weekday_entry = ttk.Entry(time_frame, font=self.font_11)
+        weekday_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=3)
+        ttk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bootstyle="outline").grid(row=3, column=3, padx=5)
+        
+        ttk.Label(time_frame, text="日期范围:").grid(row=4, column=0, sticky='e', padx=5, pady=3)
+        date_range_entry = ttk.Entry(time_frame, font=self.font_11)
+        date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=3)
+        self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
+        ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=4, column=3, padx=5)
+
+        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=10)
+        other_frame.grid(row=2, column=0, sticky='ew', pady=5)
+        other_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(other_frame, text="保存位置:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
+        path_entry = ttk.Entry(other_frame, font=self.font_10)
+        path_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
+        path_entry.insert(0, SCREENSHOT_FOLDER)
+        path_entry.config(state='readonly')
+        
+        dialog_button_frame = ttk.Frame(dialog)
+        dialog_button_frame.pack(pady=15)
+
+        if task_to_edit:
+            name_entry.insert(0, task_to_edit.get('name', ''))
+            start_time_entry.insert(0, task_to_edit.get('time', ''))
+            repeat_entry.insert(0, task_to_edit.get('repeat_count', '1'))
+            interval_entry.insert(0, task_to_edit.get('interval_seconds', '60'))
+            weekday_entry.insert(0, task_to_edit.get('weekday', '每周:1234567'))
+            date_range_entry.insert(0, task_to_edit.get('date_range', '2000-01-01 ~ 2099-12-31'))
+        else:
+            repeat_entry.insert(0, "1")
+            interval_entry.insert(0, "60")
+            weekday_entry.insert(0, "每周:1234567")
+            date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
+
+        def save_task():
+            try:
+                repeat_count = int(repeat_entry.get())
+                if not (1 <= repeat_count <= 3):
+                    messagebox.showerror("输入错误", "截取张数必须是 1 到 3 之间的整数。", parent=dialog)
+                    return
+            except ValueError:
+                messagebox.showerror("输入错误", "截取张数必须是一个有效的整数。", parent=dialog)
+                return
+
+            try:
+                interval_seconds = int(interval_entry.get())
+                if interval_seconds < 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("输入错误", "间隔秒数必须是一个非负整数。", parent=dialog)
+                return
+
+            is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
+            if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
+            is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
+            if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
+
+            new_task_data = {
+                'name': name_entry.get().strip(), 'time': time_msg, 'type': 'screenshot',
+                'repeat_count': repeat_count, 'interval_seconds': interval_seconds,
+                'weekday': weekday_entry.get().strip(), 'date_range': date_msg,
+                'status': '启用' if not task_to_edit else task_to_edit.get('status', '启用'),
+                'last_run': {} if not task_to_edit else task_to_edit.get('last_run', {}),
+            }
+            if not new_task_data['name'] or not new_task_data['time']: 
+                messagebox.showwarning("警告", "请填写任务名称和开始时间", parent=dialog); return
+
+            if task_to_edit:
+                self.screenshot_tasks[index] = new_task_data
+                self.log(f"已修改截屏任务: {new_task_data['name']}")
+            else:
+                self.screenshot_tasks.append(new_task_data)
+                self.log(f"已添加截屏任务: {new_task_data['name']}")
+
+            self.update_screenshot_list()
+            self.save_screenshot_tasks()
+            dialog.destroy()
+
+        button_text = "保存修改" if task_to_edit else "添加"
+        ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
+        ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
+        
+        self.center_window(dialog, parent=self.root)
+
+    # --- “定时运行”功能占位符 ---
+    def _build_execute_ui(self, parent_frame):
+        ttk.Label(parent_frame, text="“定时运行”功能正在开发中...", font=self.font_12_bold).pack(pady=50)
+
+    # --- 现有代码 ---
+    
     def create_registration_page(self):
         page_frame = ttk.Frame(self.page_container, padding=20)
         title_label = ttk.Label(page_frame, text="注册软件", font=self.font_14_bold, bootstyle="primary")
@@ -491,6 +771,7 @@ class TimedBroadcastApp:
 
         return page_frame
 
+#第1部分
     def cancel_registration(self):
         if not messagebox.askyesno("确认操作", "您确定要取消当前注册吗？\n取消后，软件将恢复到试用或过期状态。", parent=self.root):
             return
@@ -724,12 +1005,10 @@ class TimedBroadcastApp:
         ttk.Button(btn_frame, text="取消", command=on_cancel, width=8).pack(side=LEFT, padx=10)
         dialog.bind('<Return>', lambda event: on_confirm())
         
-        # 修复 Bug 2: 弹窗居中
         self.center_window(dialog, parent=self.root)
         self.root.wait_window(dialog)
 
         entered_password = result[0]
-
         correct_password = datetime.now().strftime('%Y%m%d')[::-1]
 
         if entered_password == correct_password:
@@ -766,7 +1045,7 @@ class TimedBroadcastApp:
             except Exception as e:
                 self.log(f"删除注册表时出错: {e}")
 
-        folders_to_delete = [PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER, VOICE_SCRIPT_FOLDER]
+        folders_to_delete = [PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER, VOICE_SCRIPT_FOLDER, SCREENSHOT_FOLDER]
         for folder in folders_to_delete:
             if os.path.isdir(folder):
                 try:
@@ -775,7 +1054,10 @@ class TimedBroadcastApp:
                 except Exception as e:
                     self.log(f"删除文件夹 {os.path.basename(folder)} 时出错: {e}")
 
-        files_to_delete = [TASK_FILE, SETTINGS_FILE, HOLIDAY_FILE, TODO_FILE]
+        files_to_delete = [
+            TASK_FILE, SETTINGS_FILE, HOLIDAY_FILE, TODO_FILE,
+            SCREENSHOT_TASK_FILE, EXECUTE_TASK_FILE
+        ]
         for file in files_to_delete:
             if os.path.isfile(file):
                 try:
@@ -793,8 +1075,13 @@ class TimedBroadcastApp:
         self.log("开始备份所有设置...")
         try:
             backup_data = {
-                'backup_date': datetime.now().isoformat(), 'tasks': self.tasks, 'holidays': self.holidays,
-                'todos': self.todos, 'settings': self.settings,
+                'backup_date': datetime.now().isoformat(), 
+                'tasks': self.tasks, 
+                'holidays': self.holidays,
+                'todos': self.todos, 
+                'screenshot_tasks': self.screenshot_tasks,
+                'execute_tasks': self.execute_tasks,
+                'settings': self.settings,
                 'lock_password_b64': self._load_from_registry("LockPasswordB64")
             }
             filename = filedialog.asksaveasfilename(
@@ -833,12 +1120,16 @@ class TimedBroadcastApp:
             self.tasks = backup_data['tasks']
             self.holidays = backup_data['holidays']
             self.todos = backup_data.get('todos', [])
+            self.screenshot_tasks = backup_data.get('screenshot_tasks', [])
+            self.execute_tasks = backup_data.get('execute_tasks', [])
             self.settings = backup_data['settings']
             self.lock_password_b64 = backup_data['lock_password_b64']
 
             self.save_tasks()
             self.save_holidays()
             self.save_todos()
+            self.save_screenshot_tasks()
+            self.save_execute_tasks()
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, ensure_ascii=False, indent=2)
 
@@ -850,9 +1141,10 @@ class TimedBroadcastApp:
             self.update_task_list()
             self.update_holiday_list()
             self.update_todo_list()
+            self.update_screenshot_list()
+            self.update_execute_list()
             self._refresh_settings_ui()
             
-            # 还原后需要重新应用字体
             self._apply_global_font()
             messagebox.showinfo("还原成功", "所有设置已成功还原。\n软件需要重启以应用字体更改。", parent=self.root)
             self.log("所有设置已从备份文件成功还原。")
@@ -894,16 +1186,17 @@ class TimedBroadcastApp:
     def _reset_software(self):
         if not messagebox.askyesno(
             "！！！最终确认！！！",
-            "您真的要重置整个软件吗？\n\n此操作将：\n- 清空所有节目单 (但保留音频文件)\n- 清空所有节假日和待办事项\n- 清除锁定密码\n- 重置所有系统设置 (包括字体)\n\n此操作【无法恢复】！软件将在重置后提示您重启。",
+            "您真的要重置整个软件吗？\n\n此操作将：\n- 清空所有节目单 (但保留音频文件)\n- 清空所有高级功能任务\n- 清空所有节假日和待办事项\n- 清除锁定密码\n- 重置所有系统设置 (包括字体)\n\n此操作【无法恢复】！软件将在重置后提示您重启。",
             parent=self.root
         ): return
 
         self.log("开始执行软件重置...")
         try:
-            # 临时覆盖 askyesno 以便非交互式地清除数据
             original_askyesno = messagebox.askyesno
             messagebox.askyesno = lambda title, message, parent: True
             self.clear_all_tasks(delete_associated_files=False)
+            self.clear_all_screenshot_tasks()
+            self.clear_all_execute_tasks()
             self.clear_all_holidays()
             self.clear_all_todos()
             messagebox.askyesno = original_askyesno
@@ -1137,7 +1430,6 @@ class TimedBroadcastApp:
         self.weekly_reboot_time_var = ttk.StringVar()
         self.weekly_reboot_days_var = ttk.StringVar()
 
-        # 每日关机
         daily_frame = ttk.Frame(power_frame)
         daily_frame.pack(fill=X, pady=4)
         daily_frame.columnconfigure(1, weight=1)
@@ -1147,7 +1439,6 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(daily_time_entry, self._handle_time_scroll)
         ttk.Button(daily_frame, text="设置", bootstyle="primary-outline", command=lambda: self.show_single_time_dialog(self.daily_shutdown_time_var)).grid(row=0, column=2, sticky='e', padx=5)
 
-        # 每周关机
         weekly_frame = ttk.Frame(power_frame)
         weekly_frame.pack(fill=X, pady=4)
         weekly_frame.columnconfigure(1, weight=1)
@@ -1159,7 +1450,6 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(weekly_shutdown_time_entry, self._handle_time_scroll)
         ttk.Button(weekly_frame, text="设置", bootstyle="primary-outline", command=lambda: self.show_power_week_time_dialog("设置每周关机", self.weekly_shutdown_days_var, self.weekly_shutdown_time_var)).grid(row=0, column=3, sticky='e', padx=5)
 
-        # 每周重启
         reboot_frame = ttk.Frame(power_frame)
         reboot_frame.pack(fill=X, pady=4)
         reboot_frame.columnconfigure(1, weight=1)
@@ -1170,11 +1460,9 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(weekly_reboot_time_entry, self._handle_time_scroll)
         ttk.Button(reboot_frame, text="设置", bootstyle="primary-outline", command=lambda: self.show_power_week_time_dialog("设置每周重启", self.weekly_reboot_days_var, self.weekly_reboot_time_var)).grid(row=0, column=3, sticky='e', padx=5)
 
-
         return settings_frame
 
     def _restore_all_video_speeds(self):
-        """恢复所有视频节目的播放速度为1.0x"""
         if not self.tasks:
             messagebox.showinfo("提示", "当前没有节目，无需操作。", parent=self.root)
             return
@@ -1194,7 +1482,6 @@ class TimedBroadcastApp:
             messagebox.showinfo("提示", "所有视频节目已经是默认播放速度，无需恢复。", parent=self.root)
 
     def _on_font_selected(self, event):
-        """当用户从下拉列表中选择一个新字体时调用"""
         new_font = self.font_var.get()
         if new_font and new_font != self.settings.get("app_font", "Microsoft YaHei"):
             self.settings["app_font"] = new_font
@@ -1204,12 +1491,11 @@ class TimedBroadcastApp:
             messagebox.showinfo("设置已保存", "字体设置已保存。\n请重启软件以使新字体完全生效。", parent=self.root)
 
     def _restore_default_font(self):
-        """恢复默认字体"""
         default_font = "Microsoft YaHei"
         if self.settings.get("app_font") != default_font:
             self.settings["app_font"] = default_font
             self.save_settings()
-            self.font_var.set(default_font) # 更新UI显示
+            self.font_var.set(default_font)
             self.log("字体已恢复为默认。")
             self._apply_global_font()
             messagebox.showinfo("设置已保存", "字体已恢复为默认设置。\n请重启软件以生效。", parent=self.root)
@@ -1295,7 +1581,6 @@ class TimedBroadcastApp:
             progress_label = ttk.Label(progress_dialog, text="", font=self.font_10)
             progress_label.pack(pady=5, padx=20)
             
-            # 修复 Bug 2: 弹窗居中
             self.center_window(progress_dialog, parent=self.root)
 
             threading.Thread(target=self._generate_chime_files_worker,
@@ -1435,7 +1720,6 @@ class TimedBroadcastApp:
         ttk.Button(btn_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=10)
         ttk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10)
         
-        # 修复 Bug 2: 弹窗居中
         self.center_window(dialog, parent=self.root)
 
     def _prompt_for_password_unlock(self):
@@ -1480,7 +1764,6 @@ class TimedBroadcastApp:
         ttk.Button(btn_frame, text="取消", command=dialog.destroy).grid(row=0, column=2, padx=5, sticky='ew')
         dialog.bind('<Return>', lambda event: confirm())
         
-        # 修复 Bug 2: 弹窗居中
         self.center_window(dialog, parent=self.root)
 
     def _perform_password_clear_logic(self):
@@ -1545,10 +1828,10 @@ class TimedBroadcastApp:
 
     def clear_log(self):
         if messagebox.askyesno("确认操作", "您确定要清空所有日志记录吗？\n此操作不可恢复。", parent=self.root):
-            # 修复 Bug 1: 访问 ScrolledText 内部的 text 控件
-            self.log_text.text.config(state='normal')
-            self.log_text.text.delete('1.0', END)
-            self.log_text.text.config(state='disabled')
+            log_widget = self.log_text.text
+            log_widget.config(state='normal')
+            log_widget.delete('1.0', END)
+            log_widget.config(state='disabled')
             self.log("日志已清空。")
 
     def on_double_click_edit(self, event):
@@ -1628,9 +1911,9 @@ class TimedBroadcastApp:
         if not VLC_AVAILABLE:
             video_btn.config(state=DISABLED, text="🎬 视频节目 (VLC未安装)")
 
-        # 修复 Bug 2: 弹窗居中
         self.center_window(choice_dialog, parent=self.root)
 
+#第2部分
     def open_audio_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
@@ -2077,244 +2360,7 @@ class TimedBroadcastApp:
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
         ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
 
-#第1部分
-    def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
-        parent_dialog.destroy()
-        is_edit_mode = task_to_edit is not None
-        dialog = ttk.Toplevel(self.root)
-        dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
-        dialog.resizable(True, True)
-        dialog.minsize(800, 700)
-        dialog.transient(self.root); dialog.grab_set()
-
-        main_frame = ttk.Frame(dialog, padding=15)
-        main_frame.pack(fill=BOTH, expand=True)
-        main_frame.columnconfigure(0, weight=1)
-
-        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
-        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
-        content_frame.columnconfigure(1, weight=1)
-
-        ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
-        name_entry = ttk.Entry(content_frame, font=self.font_11)
-        name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        ttk.Label(content_frame, text="播音文字:").grid(row=1, column=0, sticky='nw', padx=5, pady=2)
-        text_frame = ttk.Frame(content_frame)
-        text_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        text_frame.columnconfigure(0, weight=1)
-        text_frame.rowconfigure(0, weight=1)
-        content_text = ScrolledText(text_frame, height=5, font=self.font_11, wrap=WORD)
-        content_text.grid(row=0, column=0, sticky='nsew')
-        
-        script_btn_frame = ttk.Frame(content_frame)
-        script_btn_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=(0, 2))
-        ttk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text), bootstyle="outline").pack(side=LEFT)
-        ttk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text, name_entry), bootstyle="outline").pack(side=LEFT, padx=10)
-        
-        ttk.Label(content_frame, text="播音员:").grid(row=3, column=0, sticky='w', padx=5, pady=3)
-        voice_frame = ttk.Frame(content_frame)
-        voice_frame.grid(row=3, column=1, columnspan=3, sticky='ew', padx=5, pady=3)
-        voice_frame.columnconfigure(0, weight=1)
-        available_voices = self.get_available_voices()
-        voice_var = tk.StringVar()
-        voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, values=available_voices, font=self.font_11, state='readonly')
-        voice_combo.grid(row=0, column=0, sticky='ew')
-        
-        speech_params_frame = ttk.Frame(content_frame)
-        speech_params_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=2)
-        ttk.Label(speech_params_frame, text="语速(-10~10):").pack(side=LEFT, padx=(0,5))
-        speed_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=8); speed_entry.pack(side=LEFT, padx=5)
-        ttk.Label(speech_params_frame, text="音调(-10~10):").pack(side=LEFT, padx=(10,5))
-        pitch_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=8); pitch_entry.pack(side=LEFT, padx=5)
-        ttk.Label(speech_params_frame, text="音量(0-100):").pack(side=LEFT, padx=(10,5))
-        volume_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=8); volume_entry.pack(side=LEFT, padx=5)
-        
-        prompt_var = tk.IntVar(); prompt_frame = ttk.Frame(content_frame)
-        prompt_frame.grid(row=5, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        prompt_frame.columnconfigure(1, weight=1)
-        ttk.Checkbutton(prompt_frame, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
-        prompt_file_var, prompt_volume_var = tk.StringVar(), tk.StringVar()
-        prompt_file_entry = ttk.Entry(prompt_frame, textvariable=prompt_file_var, font=self.font_11); prompt_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        ttk.Button(prompt_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var), bootstyle="outline", width=2).grid(row=0, column=2)
-        
-        prompt_vol_frame = ttk.Frame(prompt_frame)
-        prompt_vol_frame.grid(row=0, column=3, sticky='e')
-        ttk.Label(prompt_vol_frame, text="音量(0-100):").pack(side=LEFT, padx=(10,5))
-        ttk.Entry(prompt_vol_frame, textvariable=prompt_volume_var, font=self.font_11, width=8).pack(side=LEFT, padx=5)
-        
-        bgm_var = tk.IntVar(); bgm_frame = ttk.Frame(content_frame)
-        bgm_frame.grid(row=6, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        bgm_frame.columnconfigure(1, weight=1)
-        ttk.Checkbutton(bgm_frame, text="背景音乐:", variable=bgm_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
-        bgm_file_var, bgm_volume_var = tk.StringVar(), tk.StringVar()
-        bgm_file_entry = ttk.Entry(bgm_frame, textvariable=bgm_file_var, font=self.font_11); bgm_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        ttk.Button(bgm_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var), bootstyle="outline", width=2).grid(row=0, column=2)
-        
-        bgm_vol_frame = ttk.Frame(bgm_frame)
-        bgm_vol_frame.grid(row=0, column=3, sticky='e')
-        ttk.Label(bgm_vol_frame, text="音量(0-100):").pack(side=LEFT, padx=(10,5))
-        ttk.Entry(bgm_vol_frame, textvariable=bgm_volume_var, font=self.font_11, width=8).pack(side=LEFT, padx=5)
-
-        bg_image_var = tk.IntVar(value=0)
-        bg_image_path_var = tk.StringVar()
-        bg_image_order_var = tk.StringVar(value="sequential")
-
-        bg_image_frame = ttk.Frame(content_frame)
-        bg_image_frame.grid(row=7, column=1, columnspan=3, sticky='ew', padx=5, pady=5)
-        bg_image_frame.columnconfigure(1, weight=1)
-        bg_image_cb = ttk.Checkbutton(bg_image_frame, text="背景图片:", variable=bg_image_var, bootstyle="round-toggle")
-        bg_image_cb.grid(row=0, column=0, sticky='w')
-        if not IMAGE_AVAILABLE: bg_image_cb.config(state=DISABLED, text="背景图片(Pillow未安装):")
-
-        bg_image_entry = ttk.Entry(bg_image_frame, textvariable=bg_image_path_var, font=self.font_11)
-        bg_image_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        
-        bg_image_btn_frame = ttk.Frame(bg_image_frame)
-        bg_image_btn_frame.grid(row=0, column=2, sticky='e')
-        def select_folder(entry_widget):
-            foldername = filedialog.askdirectory(title="选择文件夹", initialdir=application_path, parent=dialog)
-            if foldername: entry_widget.delete(0, END); entry_widget.insert(0, foldername)
-        ttk.Button(bg_image_btn_frame, text="选取...", command=lambda: select_folder(bg_image_entry), bootstyle="outline").pack(side=LEFT, padx=5)
-        ttk.Radiobutton(bg_image_btn_frame, text="顺序", variable=bg_image_order_var, value="sequential").pack(side=LEFT, padx=(10,0))
-        ttk.Radiobutton(bg_image_btn_frame, text="随机", variable=bg_image_order_var, value="random").pack(side=LEFT)
-
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=10)
-        time_frame.grid(row=1, column=0, sticky='ew', pady=2)
-        time_frame.columnconfigure(1, weight=1)
-        
-        ttk.Label(time_frame, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
-        start_time_entry = ttk.Entry(time_frame, font=self.font_11)
-        start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
-        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
-        ttk.Label(time_frame, text="《可多个,用英文逗号,隔开》").grid(row=0, column=2, sticky='w', padx=5)
-        ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
-        
-        ttk.Label(time_frame, text="播 n 遍:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
-        repeat_entry = ttk.Entry(time_frame, font=self.font_11, width=12)
-        repeat_entry.grid(row=1, column=1, sticky='w', padx=5, pady=2)
-        
-        ttk.Label(time_frame, text="周几/几号:").grid(row=2, column=0, sticky='e', padx=5, pady=2)
-        weekday_entry = ttk.Entry(time_frame, font=self.font_11)
-        weekday_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=2)
-        ttk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bootstyle="outline").grid(row=2, column=3, padx=5)
-        
-        ttk.Label(time_frame, text="日期范围:").grid(row=3, column=0, sticky='e', padx=5, pady=2)
-        date_range_entry = ttk.Entry(time_frame, font=self.font_11)
-        date_range_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=2)
-        self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
-        ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=3, column=3, padx=5)
-
-        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=15)
-        other_frame.grid(row=2, column=0, sticky='ew', pady=4)
-        other_frame.columnconfigure(1, weight=1)
-        
-        delay_var = tk.StringVar(value="delay")
-        ttk.Label(other_frame, text="模式:").grid(row=0, column=0, sticky='nw', padx=5, pady=2)
-        delay_frame = ttk.Frame(other_frame)
-        delay_frame.grid(row=0, column=1, sticky='w', padx=5, pady=2)
-        ttk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们", variable=delay_var, value="ontime").pack(anchor='w', pady=1)
-        ttk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候（默认）", variable=delay_var, value="delay").pack(anchor='w', pady=1)
-        ttk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate").pack(anchor='w', pady=1)
-        
-        dialog_button_frame = ttk.Frame(other_frame)
-        dialog_button_frame.grid(row=0, column=2, sticky='se', padx=20, pady=10)
-
-        if is_edit_mode:
-            task = task_to_edit
-            name_entry.insert(0, task.get('name', ''))
-            content_text.insert('1.0', task.get('source_text', ''))
-            voice_var.set(task.get('voice', ''))
-            speed_entry.insert(0, task.get('speed', '0'))
-            pitch_entry.insert(0, task.get('pitch', '0'))
-            volume_entry.insert(0, task.get('volume', '80'))
-            prompt_var.set(task.get('prompt', 0)); prompt_file_var.set(task.get('prompt_file', '')); prompt_volume_var.set(task.get('prompt_volume', '80'))
-            bgm_var.set(task.get('bgm', 0)); bgm_file_var.set(task.get('bgm_file', '')); bgm_volume_var.set(task.get('bgm_volume', '40'))
-            start_time_entry.insert(0, task.get('time', ''))
-            repeat_entry.insert(0, task.get('repeat', '1'))
-            weekday_entry.insert(0, task.get('weekday', '每周:1234567'))
-            date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31'))
-            delay_var.set(task.get('delay', 'delay'))
-            bg_image_var.set(task.get('bg_image_enabled', 0))
-            bg_image_path_var.set(task.get('bg_image_path', ''))
-            bg_image_order_var.set(task.get('bg_image_order', 'sequential'))
-        else:
-            speed_entry.insert(0, "0"); pitch_entry.insert(0, "0"); volume_entry.insert(0, "80")
-            prompt_var.set(0); prompt_volume_var.set("80"); bgm_var.set(0); bgm_volume_var.set("40")
-            repeat_entry.insert(0, "1"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
-
-        def save_task():
-            text_content = content_text.get('1.0', END).strip()
-            if not text_content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
-            is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
-            if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
-            is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
-            if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
-            regeneration_needed = True
-            if is_edit_mode:
-                original_task = task_to_edit
-                if (text_content == original_task.get('source_text') and voice_var.get() == original_task.get('voice') and
-                    speed_entry.get().strip() == original_task.get('speed', '0') and pitch_entry.get().strip() == original_task.get('pitch', '0') and
-                    volume_entry.get().strip() == original_task.get('volume', '80')):
-                    regeneration_needed = False; self.log("语音内容未变更，跳过重新生成WAV文件。")
-
-            def build_task_data(wav_path, wav_filename_str):
-                play_mode = delay_var.get()
-                play_this_task_now = (play_mode == 'immediate')
-                saved_delay_type = 'delay' if play_mode == 'immediate' else play_mode
-
-                return {
-                    'name': name_entry.get().strip(), 'time': time_msg, 'type': 'voice', 'content': wav_path,
-                    'wav_filename': wav_filename_str, 'source_text': text_content, 'voice': voice_var.get(),
-                    'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0",
-                    'volume': volume_entry.get().strip() or "80", 'prompt': prompt_var.get(),
-                    'prompt_file': prompt_file_var.get(), 'prompt_volume': prompt_volume_var.get(),
-                    'bgm': bgm_var.get(), 'bgm_file': bgm_file_var.get(), 'bgm_volume': bgm_volume_var.get(),
-                    'repeat': repeat_entry.get().strip() or "1", 'weekday': weekday_entry.get().strip(),
-                    'date_range': date_msg, 'delay': saved_delay_type,
-                    'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'),
-                    'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {}),
-                    'bg_image_enabled': bg_image_var.get(),
-                    'bg_image_path': bg_image_path_var.get().strip(),
-                    'bg_image_order': bg_image_order_var.get()
-                }, play_this_task_now
-
-            if not regeneration_needed:
-                new_task_data, play_now_flag = build_task_data(task_to_edit.get('content'), task_to_edit.get('wav_filename'))
-                if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
-                self.tasks[index] = new_task_data; self.log(f"已修改语音节目(未重新生成语音): {new_task_data['name']}")
-                self.update_task_list(); self.save_tasks(); dialog.destroy()
-                if play_now_flag: self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
-                return
-
-            progress_dialog = ttk.Toplevel(dialog); progress_dialog.title("请稍候")
-            progress_dialog.resizable(False, False); progress_dialog.transient(dialog); progress_dialog.grab_set()
-            ttk.Label(progress_dialog, text="语音文件生成中，请稍后...", font=self.font_11).pack(expand=True, padx=20, pady=20)
-            self.center_window(progress_dialog, parent=dialog)
-            
-            new_wav_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.wav"
-            output_path = os.path.join(AUDIO_FOLDER, new_wav_filename)
-            voice_params = {'voice': voice_var.get(), 'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0", 'volume': volume_entry.get().strip() or "80"}
-            def _on_synthesis_complete(result):
-                progress_dialog.destroy()
-                if not result['success']: messagebox.showerror("错误", f"无法生成语音文件: {result['error']}", parent=dialog); return
-                if is_edit_mode and 'wav_filename' in task_to_edit:
-                    old_wav_path = os.path.join(AUDIO_FOLDER, task_to_edit['wav_filename'])
-                    if os.path.exists(old_wav_path):
-                        try: os.remove(old_wav_path); self.log(f"已删除旧语音文件: {task_to_edit['wav_filename']}")
-                        except Exception as e: self.log(f"删除旧语音文件失败: {e}")
-                new_task_data, play_now_flag = build_task_data(output_path, new_wav_filename)
-                if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
-                if is_edit_mode: self.tasks[index] = new_task_data; self.log(f"已修改语音节目(并重新生成语音): {new_task_data['name']}")
-                else: self.tasks.append(new_task_data); self.log(f"已添加语音节目: {new_task_data['name']}")
-                self.update_task_list(); self.save_tasks(); dialog.destroy()
-                if play_now_flag: self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
-            synthesis_thread = threading.Thread(target=self._synthesis_worker, args=(text_content, voice_params, output_path, _on_synthesis_complete))
-            synthesis_thread.daemon = True; synthesis_thread.start()
-
-        button_text = "保存修改" if is_edit_mode else "添加"
-        ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
-        ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
-#第2部分
+#第3部分
     def _import_voice_script(self, text_widget):
         filename = filedialog.askopenfilename(
             title="选择要导入的文稿",
@@ -2558,6 +2604,7 @@ class TimedBroadcastApp:
         for i in selection: self.tasks[self.task_tree.index(i)]['status'] = status
         if count > 0: self.update_task_list(); self.save_tasks(); self.log(f"已{status} {count} 个节目")
 
+#第4部分
     def _set_tasks_status_by_type(self, task_type, status):
         if not self.tasks: return
 
@@ -2769,7 +2816,7 @@ class TimedBroadcastApp:
         ttk.Button(bottom_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=5, ipady=5)
 
         self.center_window(dialog, parent=self.root)
-
+#第5部分
     def show_daterange_settings_dialog(self, date_range_entry):
         dialog = ttk.Toplevel(self.root)
         dialog.title("日期范围")
@@ -2925,11 +2972,110 @@ class TimedBroadcastApp:
             now = datetime.now()
             if not self.is_app_locked_down:
                 self._check_broadcast_tasks(now)
+                # 新增：检查高级功能任务
+                self._check_advanced_tasks(now)
                 self._check_time_chime(now)
                 self._check_todo_tasks(now)
 
             self._check_power_tasks(now)
             time.sleep(1)
+
+    # 新增：通用任务到期检查逻辑
+    def _is_task_due(self, task, now):
+        current_date_str = now.strftime("%Y-%m-%d")
+        current_time_str = now.strftime("%H:%M:%S")
+
+        if task.get('status') != '启用':
+            return False, None
+        
+        try:
+            start, end = [d.strip() for d in task.get('date_range', '').split('~')]
+            if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()):
+                return False, None
+        except (ValueError, IndexError):
+            pass
+
+        schedule = task.get('weekday', '每周:1234567')
+        run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or \
+                    (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
+        if not run_today:
+            return False, None
+
+        for trigger_time in [t.strip() for t in task.get('time', '').split(',')]:
+            if trigger_time == current_time_str and task.get('last_run', {}).get(trigger_time) != current_date_str:
+                return True, trigger_time
+        
+        return False, None
+
+    # 新增：检查高级任务
+    def _check_advanced_tasks(self, now):
+        if self._is_in_holiday(now): return
+
+        # 检查截屏任务
+        for task in self.screenshot_tasks:
+            is_due, trigger_time = self._is_task_due(task, now)
+            if is_due:
+                self.log(f"触发截屏任务: {task['name']}")
+                # 使用独立线程执行，防止阻塞调度器
+                threading.Thread(target=self._execute_screenshot_task, args=(task, trigger_time), daemon=True).start()
+        
+        # 检查运行任务
+        for task in self.execute_tasks:
+            is_due, trigger_time = self._is_task_due(task, now)
+            if is_due:
+                self.log(f"触发运行任务: {task['name']}")
+                threading.Thread(target=self._execute_program_task, args=(task, trigger_time), daemon=True).start()
+    
+    # 新增：执行截屏任务
+    def _execute_screenshot_task(self, task, trigger_time):
+        if not IMAGE_AVAILABLE:
+            self.log(f"错误：Pillow库未安装，无法执行截屏任务 '{task['name']}'。")
+            return
+        
+        try:
+            repeat_count = task.get('repeat_count', 1)
+            interval_seconds = task.get('interval_seconds', 0)
+
+            for i in range(repeat_count):
+                screenshot = ImageGrab.grab()
+                filename = f"Screenshot_{task['name']}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]}.png"
+                save_path = os.path.join(SCREENSHOT_FOLDER, filename)
+                screenshot.save(save_path)
+                self.log(f"任务 '{task['name']}' 已成功截屏 ({i+1}/{repeat_count})，保存至: {filename}")
+
+                if i < repeat_count - 1:
+                    time.sleep(interval_seconds)
+            
+            task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
+            self.save_screenshot_tasks()
+
+        except Exception as e:
+            self.log(f"执行截屏任务 '{task['name']}' 失败: {e}")
+
+    # 新增：执行程序任务
+    def _execute_program_task(self, task, trigger_time):
+        target_path = task.get('target_path')
+        if not target_path or not os.path.exists(target_path):
+            self.log(f"错误：无法执行任务 '{task['name']}'，因为目标程序路径无效或文件不存在: {target_path}")
+            return
+            
+        try:
+            import shlex
+            command = [target_path]
+            arguments = task.get('arguments', '')
+            if arguments:
+                command.extend(shlex.split(arguments))
+
+            # 使用 Popen 在后台运行，不阻塞
+            subprocess.Popen(command, cwd=os.path.dirname(target_path))
+            
+            self.log(f"任务 '{task['name']}' 已成功触发，开始运行: {os.path.basename(target_path)}")
+            
+            task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
+            self.save_execute_tasks()
+
+        except Exception as e:
+            self.log(f"执行程序任务 '{task['name']}' 失败: {e}")
 
     def _is_in_holiday(self, check_time):
         for holiday in self.holidays:
@@ -2964,31 +3110,14 @@ class TimedBroadcastApp:
                 self.log(f"警告：找不到整点报时文件 {chime_file}，报时失败。")
 
     def _check_broadcast_tasks(self, now):
-        current_date_str = now.strftime("%Y-%m-%d")
-        current_time_str = now.strftime("%H:%M:%S")
-
-        is_holiday_now = self._is_in_holiday(now)
+        if self._is_in_holiday(now):
+            return
 
         tasks_to_play = []
-
         for task in self.tasks:
-            if task.get('status') != '启用': continue
-            try:
-                start, end = [d.strip() for d in task.get('date_range', '').split('~')]
-                if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()): continue
-            except (ValueError, IndexError): pass
-            schedule = task.get('weekday', '每周:1234567')
-            run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
-            if not run_today: continue
-
-            for trigger_time in [t.strip() for t in task.get('time', '').split(',')]:
-                if trigger_time == current_time_str and task.get('last_run', {}).get(trigger_time) != current_date_str:
-
-                    if is_holiday_now:
-                        self.log(f"任务 '{task['name']}' 因处于节假日期间而被跳过。")
-                        continue
-
-                    tasks_to_play.append((task, trigger_time))
+            is_due, trigger_time = self._is_task_due(task, now)
+            if is_due:
+                tasks_to_play.append((task, trigger_time))
 
         if not tasks_to_play:
             return
@@ -3085,6 +3214,7 @@ class TimedBroadcastApp:
                     try: self.playback_command_queue.get_nowait()
                     except queue.Empty: break
 
+#第6部分
     def _execute_broadcast(self, task, trigger_time):
         self.update_playing_text(f"[{task['name']}] 正在准备播放...")
         self.status_labels[2].config(text="播放状态: 播放中")
@@ -3564,18 +3694,14 @@ class TimedBroadcastApp:
         try:
             screen_width = self.fullscreen_window.winfo_width()
             screen_height = self.fullscreen_window.winfo_height()
-
-            # 修复 Bug 3: 创建一个黑色背景的画布，并将缩放后的图片粘贴到中央
+            
             background = Image.new('RGBA', (screen_width, screen_height), (0, 0, 0, 255))
             
             with Image.open(to_path) as img_to_pil:
                 img_to_pil.thumbnail((screen_width, screen_height), Image.Resampling.LANCZOS)
-                
-                # 计算粘贴位置
                 paste_x = (screen_width - img_to_pil.width) // 2
                 paste_y = (screen_height - img_to_pil.height) // 2
                 
-                # 创建一个带内容的画布
                 foreground_to = background.copy()
                 foreground_to.paste(img_to_pil, (paste_x, paste_y))
                 img_to_rgba = foreground_to
@@ -3624,7 +3750,6 @@ class TimedBroadcastApp:
     
     def _log_threadsafe(self, message):
         if hasattr(self, 'log_text') and self.log_text.winfo_exists():
-            # 修复 Bug 1: 操作 ScrolledText 内部的 text 控件，而不是容器本身
             log_widget = self.log_text.text
             log_widget.config(state='normal')
             log_widget.insert(END, f"{datetime.now().strftime('%H:%M:%S')} -> {message}\n")
@@ -3742,7 +3867,6 @@ class TimedBroadcastApp:
             self.autostart_var.set(not enable); self.save_settings()
             messagebox.showerror("错误", f"操作失败: {e}", parent=self.root)
 
-    # 修复 Bug 2: 重写弹窗居中函数，使其相对于父窗口居中
     def center_window(self, win, parent=None):
         win.update_idletasks()
         width = win.winfo_width()
@@ -3759,7 +3883,6 @@ class TimedBroadcastApp:
         x = parent_x + (parent_width // 2) - (width // 2)
         y = parent_y + (parent_height // 2) - (height // 2)
 
-        # 确保窗口不会跑到屏幕外面
         screen_width = win.winfo_screenwidth()
         screen_height = win.winfo_screenheight()
         if x < 0: x = 0
@@ -3835,6 +3958,8 @@ class TimedBroadcastApp:
         self.save_settings()
         self.save_holidays()
         self.save_todos()
+        self.save_screenshot_tasks()
+        self.save_execute_tasks()
 
         if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
         self.root.destroy()
@@ -3971,6 +4096,7 @@ class TimedBroadcastApp:
             self.log(f"加载节假日失败: {e}")
             self.holidays = []
 
+#第7部分
     def update_holiday_list(self):
         if not hasattr(self, 'holiday_tree') or not self.holiday_tree.winfo_exists(): return
         selection = self.holiday_tree.selection()
@@ -4331,6 +4457,7 @@ class TimedBroadcastApp:
             self.log(f"加载待办事项失败: {e}")
             self.todos = []
 
+#第8部分
     def update_todo_list(self):
         if not hasattr(self, 'todo_tree') or not self.todo_tree.winfo_exists(): return
         selection = self.todo_tree.selection()
@@ -4782,19 +4909,16 @@ class TimedBroadcastApp:
 
         title_label = ttk.Label(reminder_win, text=todo.get('name', '无标题'), font=self.font_14_bold, wraplength=460)
         title_label.pack(pady=(15, 10), padx=20)
-
-        # 修复 Bug 4: 调整 pack 顺序和参数
+        
         content_frame = ttk.Frame(reminder_win, bootstyle="secondary", padding=1)
-        # 让 content_frame 先填充可用空间
         content_frame.pack(fill=BOTH, expand=True, padx=20, pady=5)
 
         content_text = ScrolledText(content_frame, font=self.font_11, wrap=WORD, bd=0, height=5)
         content_text.pack(fill=BOTH, expand=True)
         content_text.insert('1.0', todo.get('content', ''))
         content_text.config(state='disabled')
-        
+
         btn_frame = ttk.Frame(reminder_win)
-        # 然后再将 btn_frame 放在底部
         btn_frame.pack(side=BOTTOM, pady=15, padx=10, fill=X)
 
 
@@ -4803,7 +4927,6 @@ class TimedBroadcastApp:
             reminder_win.destroy()
 
         def handle_complete():
-            # 修复 Bug 5: 将状态更新逻辑移到这里
             if original_index is not None and original_index < len(self.todos):
                 self.todos[original_index]['status'] = '禁用'
                 self.save_todos()
@@ -4816,7 +4939,6 @@ class TimedBroadcastApp:
             if minutes:
                 new_remind_time = datetime.now() + timedelta(minutes=minutes)
                 if original_index is not None and original_index < len(self.todos):
-                    # 修复 Bug 5: 将状态更新逻辑移到这里
                     self.todos[original_index]['remind_datetime'] = new_remind_time.strftime('%Y-%m-%d %H:%M:%S')
                     self.todos[original_index]['status'] = '启用'
                     self.save_todos()
@@ -4978,4 +5100,4 @@ if __name__ == "__main__":
             print("错误: psutil 库未安装，无法显示图形化错误消息。")
         sys.exit(1)
     main()
-#第3部分
+#第9部分
