@@ -3599,7 +3599,7 @@ class TimedBroadcastApp:
         task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
         self.save_screenshot_tasks()
 
-    except Exception as e:
+        except Exception as e:
         self.log(f"执行截屏任务 '{task['name']}' 失败: {e}")
 
     def _execute_program_task(self, task, trigger_time):
