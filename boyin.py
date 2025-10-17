@@ -470,6 +470,169 @@ class TimedBroadcastApp:
 
         return page_frame
 
+    def update_screenshot_list(self):
+        if not hasattr(self, 'screenshot_tree') or not self.screenshot_tree.winfo_exists(): return
+        self.screenshot_tree.delete(*self.screenshot_tree.get_children())
+        for task in self.screenshot_tasks:
+            self.screenshot_tree.insert('', END, values=(
+                task.get('name', ''),
+                task.get('status', '启用'),
+                task.get('time', ''),
+                task.get('stop_time', ''), # 确保这里有 stop_time
+                task.get('repeat_count', 1), # 确保这里有 repeat_count
+                task.get('interval_seconds', 0), # 确保这里有 interval_seconds
+                task.get('weekday', ''),
+                task.get('date_range', '')
+            ))
+
+    def add_screenshot_task(self):
+        self.open_screenshot_dialog()
+
+    def edit_screenshot_task(self):
+        selection = self.screenshot_tree.selection()
+        if not selection:
+            messagebox.showwarning("提示", "请先选择要修改的截屏任务", parent=self.root)
+            return
+        index = self.screenshot_tree.index(selection[0])
+        task_to_edit = self.screenshot_tasks[index]
+        self.open_screenshot_dialog(task_to_edit=task_to_edit, index=index)
+
+    def delete_screenshot_task(self):
+        selections = self.screenshot_tree.selection()
+        if not selections:
+            messagebox.showwarning("提示", "请先选择要删除的截屏任务", parent=self.root)
+            return
+        if messagebox.askyesno("确认删除", f"确定要删除选中的 {len(selections)} 个截屏任务吗？", parent=self.root):
+            indices = sorted([self.screenshot_tree.index(s) for s in selections], reverse=True)
+            for index in indices:
+                self.screenshot_tasks.pop(index)
+            self.update_screenshot_list()
+            self.save_screenshot_tasks()
+
+    def clear_all_screenshot_tasks(self):
+        if not self.screenshot_tasks: return
+        if messagebox.askyesno("确认清空", "您确定要清空所有截屏任务吗？", parent=self.root):
+            self.screenshot_tasks.clear()
+            self.update_screenshot_list()
+            self.save_screenshot_tasks()
+
+    def _set_screenshot_status(self, status):
+        selection = self.screenshot_tree.selection()
+        if not selection:
+            messagebox.showwarning("提示", f"请先选择要 {status} 的任务", parent=self.root)
+            return
+        for item_id in selection:
+            index = self.screenshot_tree.index(item_id)
+            self.screenshot_tasks[index]['status'] = status
+        self.update_screenshot_list()
+        self.save_screenshot_tasks()
+
+    def open_screenshot_dialog(self, task_to_edit=None, index=None):
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("修改截屏任务" if task_to_edit else "添加截屏任务")
+        dialog.resizable(False, False)
+        dialog.transient(self.root); dialog.grab_set()
+
+        main_frame = ttk.Frame(dialog, padding=15)
+        main_frame.pack(fill=BOTH, expand=True)
+
+        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
+        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
+        content_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(content_frame, text="任务名称:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        name_entry = ttk.Entry(content_frame, font=self.font_11)
+        name_entry.grid(row=0, column=1, columnspan=2, sticky='ew', padx=5, pady=2)
+        
+        ttk.Label(content_frame, text="截取张数:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
+        repeat_entry = ttk.Entry(content_frame, font=self.font_11)
+        repeat_entry.grid(row=1, column=1, sticky='w', pady=2)
+        
+        ttk.Label(content_frame, text="间隔(秒):").grid(row=2, column=0, sticky='e', padx=5, pady=2)
+        interval_entry = ttk.Entry(content_frame, font=self.font_11)
+        interval_entry.grid(row=2, column=1, sticky='w', pady=2)
+
+        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
+        time_frame.grid(row=1, column=0, sticky='ew', pady=4)
+        time_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(time_frame, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        start_time_entry = ttk.Entry(time_frame, font=self.font_11)
+        start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
+        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
+        ttk.Label(time_frame, text="《可多个,用英文逗号,隔开》").grid(row=0, column=2, sticky='w', padx=5)
+        ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
+
+        # 增加停止时间输入框
+        ttk.Label(time_frame, text="停止时间:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
+        stop_time_entry = ttk.Entry(time_frame, font=self.font_11)
+        stop_time_entry.grid(row=1, column=1, sticky='w', padx=5, pady=2)
+        self._bind_mousewheel_to_entry(stop_time_entry, self._handle_time_scroll)
+        ttk.Label(time_frame, text="(可选)").grid(row=1, column=2, sticky='w')
+        
+        ttk.Label(time_frame, text="周几/几号:").grid(row=2, column=0, sticky='e', padx=5, pady=3)
+        weekday_entry = ttk.Entry(time_frame, font=self.font_11)
+        weekday_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=3)
+        ttk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bootstyle="outline").grid(row=2, column=3, padx=5)
+        
+        ttk.Label(time_frame, text="日期范围:").grid(row=3, column=0, sticky='e', padx=5, pady=3)
+        date_range_entry = ttk.Entry(time_frame, font=self.font_11)
+        date_range_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=3)
+        self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
+        ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=3, column=3, padx=5)
+
+        dialog_button_frame = ttk.Frame(dialog)
+        dialog_button_frame.pack(pady=15)
+
+        if task_to_edit:
+            name_entry.insert(0, task_to_edit.get('name', ''))
+            start_time_entry.insert(0, task_to_edit.get('time', ''))
+            stop_time_entry.insert(0, task_to_edit.get('stop_time', ''))
+            repeat_entry.insert(0, task_to_edit.get('repeat_count', 1))
+            interval_entry.insert(0, task_to_edit.get('interval_seconds', 0))
+            weekday_entry.insert(0, task_to_edit.get('weekday', '每周:1234567'))
+            date_range_entry.insert(0, task_to_edit.get('date_range', '2000-01-01 ~ 2099-12-31'))
+        else:
+            repeat_entry.insert(0, '1')
+            interval_entry.insert(0, '0')
+            weekday_entry.insert(0, "每周:1234567")
+            date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
+
+        def save_task():
+            is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
+            if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
+            is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
+            if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
+
+            new_task_data = {
+                'name': name_entry.get().strip(), 'time': time_msg,
+                'stop_time': self._normalize_time_string(stop_time_entry.get().strip()) or "",
+                'repeat_count': int(repeat_entry.get().strip() or 1),
+                'interval_seconds': int(interval_entry.get().strip() or 0),
+                'weekday': weekday_entry.get().strip(), 'date_range': date_msg,
+                'status': '启用' if not task_to_edit else task_to_edit.get('status', '启用'),
+                'last_run': {} if not task_to_edit else task_to_edit.get('last_run', {}),
+            }
+            if not new_task_data['name'] or not new_task_data['time']: 
+                messagebox.showwarning("警告", "请填写任务名称和开始时间", parent=dialog); return
+
+            if task_to_edit:
+                self.screenshot_tasks[index] = new_task_data
+                self.log(f"已修改截屏任务: {new_task_data['name']}")
+            else:
+                self.screenshot_tasks.append(new_task_data)
+                self.log(f"已添加截屏任务: {new_task_data['name']}")
+
+            self.update_screenshot_list()
+            self.save_screenshot_tasks()
+            dialog.destroy()
+
+        button_text = "保存修改" if task_to_edit else "添加"
+        ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
+        ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
+        
+        self.center_window(dialog, parent=self.root)
+
     def _build_screenshot_ui(self, parent_frame):
         parent_frame.columnconfigure(0, weight=1)
         parent_frame.rowconfigure(0, weight=1)
