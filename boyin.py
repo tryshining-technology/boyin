@@ -439,11 +439,17 @@ class TimedBroadcastApp:
     def create_advanced_features_page(self):
         page_frame = ttk.Frame(self.page_container, padding=10)
 
+        # 配置 page_frame 的网格布局权重
+        page_frame.rowconfigure(1, weight=1)
+        page_frame.columnconfigure(0, weight=1)
+
         title_label = ttk.Label(page_frame, text="高级功能", font=self.font_14_bold, bootstyle="primary")
-        title_label.pack(anchor=W, pady=(0, 10))
+        # 使用 grid 布局
+        title_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
 
         notebook = ttk.Notebook(page_frame, bootstyle="primary")
-        notebook.pack(fill=BOTH, expand=True, pady=5)
+        # 使用 grid 布局，并让其填充可用空间
+        notebook.grid(row=1, column=0, sticky='nsew', pady=5)
 
         screenshot_tab = ttk.Frame(notebook, padding=10)
         execute_tab = ttk.Frame(notebook, padding=10)
@@ -5295,15 +5301,14 @@ class TimedBroadcastApp:
         reminder_win.protocol("WM_DELETE_WINDOW", on_closing_protocol)
 
         if task_type == 'onetime':
-            btn_frame.columnconfigure((0,1,2), weight=1)
-            ttk.Button(btn_frame, text="已完成", bootstyle="success", command=handle_complete).grid(row=0, column=0, padx=5, sticky='ew')
-            ttk.Button(btn_frame, text="稍后提醒", bootstyle="outline", command=handle_snooze).grid(row=0, column=1, padx=5, sticky='ew')
-            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).grid(row=0, column=2, padx=5, sticky='ew')
+            # 使用 .pack() 替代 .grid() 来实现布局
+            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).pack(side=RIGHT, padx=5)
+            ttk.Button(btn_frame, text="稍后提醒", bootstyle="outline", command=handle_snooze).pack(side=RIGHT, padx=5)
+            ttk.Button(btn_frame, text="已完成", bootstyle="success", command=handle_complete).pack(side=RIGHT, padx=5)
         else:
-            btn_frame.columnconfigure((0,1), weight=1)
-            ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=close_and_release).grid(row=0, column=0, padx=5, sticky='ew')
-            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).grid(row=0, column=1, padx=5, sticky='ew')
-
+            # 使用 .pack() 替代 .grid() 来实现布局
+            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).pack(side=RIGHT, padx=5)
+            ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=close_and_release).pack(side=RIGHT, padx=5)
         self.center_window(reminder_win, parent=self.root)
 
     def _bind_mousewheel_to_entry(self, entry, handler):
