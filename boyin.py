@@ -473,7 +473,7 @@ class TimedBroadcastApp:
 
         desc_label = ttk.Label(main_content_frame, 
                                text=f"此功能将在指定时间自动截取全屏图像，并以PNG格式保存到以下目录：\n{SCREENSHOT_FOLDER}",
-                               font=self.font_10, bootstyle="secondary", wraplength=self.root.winfo_width() - 400)
+                               font=self.font_10, bootstyle="secondary", wraplength=600)
         desc_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
 
         table_frame = ttk.Frame(main_content_frame)
@@ -536,7 +536,7 @@ class TimedBroadcastApp:
 
         warning_label = ttk.Label(main_content_frame, 
                                   text="/!\\ 警告：请确保您完全信任所要运行的程序。运行未知或恶意程序可能对您的计算机安全造成严重威胁。",
-                                  font=self.font_10, bootstyle="danger", wraplength=self.root.winfo_width() - 400)
+                                  font=self.font_10, bootstyle="danger", wraplength=600)
         warning_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
 
         table_frame = ttk.Frame(main_content_frame)
@@ -5300,14 +5300,16 @@ class TimedBroadcastApp:
 
         reminder_win.protocol("WM_DELETE_WINDOW", on_closing_protocol)
 
-        # 关键修复：确保 btn_frame 内部只使用一种布局管理器 (pack)
         if task_type == 'onetime':
-            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).pack(side=RIGHT, padx=5)
-            ttk.Button(btn_frame, text="稍后提醒", bootstyle="outline", command=handle_snooze).pack(side=RIGHT, padx=5)
-            ttk.Button(btn_frame, text="已完成", bootstyle="success", command=handle_complete).pack(side=RIGHT, padx=5)
+            # 最终方案：使用 ttk.Button 保证风格，并使用 V1 证明有效的 pack(side=LEFT) 布局
+            # 增加 expand=True 和 fill=X 让按钮自动填充宽度，更美观
+            ttk.Button(btn_frame, text="已完成", bootstyle="success", command=handle_complete).pack(side=tk.LEFT, padx=5, ipady=4, fill=X, expand=True)
+            ttk.Button(btn_frame, text="稍后提醒", bootstyle="outline-secondary", command=handle_snooze).pack(side=tk.LEFT, padx=5, ipady=4, fill=X, expand=True)
+            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).pack(side=tk.LEFT, padx=5, ipady=4, fill=X, expand=True)
         else:
-            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).pack(side=RIGHT, padx=5)
-            ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=close_and_release).pack(side=RIGHT, padx=5)
+            # 同样应用最终方案
+            ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=close_and_release).pack(side=tk.LEFT, padx=5, ipady=4, fill=X, expand=True)
+            ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=handle_delete).pack(side=tk.LEFT, padx=5, ipady=4, fill=X, expand=True)
 
         self.center_window(reminder_win, parent=self.root)
 
