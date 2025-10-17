@@ -437,36 +437,35 @@ class TimedBroadcastApp:
             self.log("尝试进入超级管理模块失败：密码错误。")
             
     def create_advanced_features_page(self):
-        # 1. 创建主页面容器
+        # 1. 创建作为页面的主容器 Frame
         page_frame = ttk.Frame(self.page_container, padding=10)
 
-        # 2. 配置Grid权重，这是绝对正确的做法
+        # 2. 【核心】强制为 page_frame 内部的 Grid 布局配置权重
+        #    这确保了 Notebook 控件有空间可以显示
         page_frame.rowconfigure(1, weight=1)
         page_frame.columnconfigure(0, weight=1)
 
-        # 3. 创建标题
+        # 3. 创建标题并放入网格的第 0 行
         title_label = ttk.Label(page_frame, text="高级功能", font=self.font_14_bold, bootstyle="primary")
         title_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
 
-        # 4. 创建Notebook
+        # 4. 创建 Notebook (工作表切换器)
         notebook = ttk.Notebook(page_frame, bootstyle="primary")
         notebook.grid(row=1, column=0, sticky='nsew', pady=5)
 
-        # 5. 创建空的标签页
+        # 5. 创建 Notebook 中的两个标签页
         screenshot_tab = ttk.Frame(notebook, padding=10)
         execute_tab = ttk.Frame(notebook, padding=10)
 
+        # 6. 将标签页添加到 Notebook 中
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
 
-        # --- 【关键】我们暂时不调用下面这两个复杂的函数 ---
-        # self._build_screenshot_ui(screenshot_tab)
-        # self._build_execute_ui(execute_tab)
-        
-        # 我们只在第一个标签页里放一个简单的标签，用于测试
-        ttk.Label(screenshot_tab, text="骨架加载成功！").pack()
+        # 7. 【恢复】现在我们调用真正的UI构建函数，把您设计的界面加载进来
+        self._build_screenshot_ui(screenshot_tab)
+        self._build_execute_ui(execute_tab)
 
-        self.log("诊断：已加载高级功能的“安全模式”骨架。")
+        # 8. 返回构建完成的、可正常显示的页面容器
         return page_frame
 
     def _build_screenshot_ui(self, parent_frame):
