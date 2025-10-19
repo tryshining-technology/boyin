@@ -5238,14 +5238,10 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
         dialog.resizable(True, True)
-        dialog.minsize(700, 550)
         dialog.transient(self.root)
         
-        # --- [核心修改 1]: 先将窗口隐藏在屏幕外 ---
-        # 这是一个技巧：让窗口在后台完成所有计算，而用户看不到这个过程
-        dialog.geometry("+10000+10000") 
-        
-        # dialog.grab_set() # 暂时注释掉 grab_set，在最后再启用
+        # 关键点1: 先将窗口“藏”起来
+        dialog.withdraw()
 
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
@@ -5306,21 +5302,14 @@ class TimedBroadcastApp:
         ttk.Label(interval_frame, text="分钟 (0表示仅在'开始时间'提醒)", font=self.font_10).pack(side=LEFT, padx=5)
 
         def toggle_frames(*args):
+            # 简化后的 toggle_frames，只负责显示和隐藏
             if type_var.get() == 'onetime':
                 recurring_lf.grid_forget()
                 onetime_lf.grid(row=3, column=0, columnspan=4, sticky='ew', padx=5, pady=5)
             else:
                 onetime_lf.grid_forget()
                 recurring_lf.grid(row=3, column=0, columnspan=4, sticky='ew', padx=5, pady=5)
-            
-            # --- [核心修正 2]: 在切换后，让Tkinter重新计算窗口的最佳尺寸 ---
-            dialog.update_idletasks()
-            # 获取窗口根据当前内容计算出的“理想”宽度和高度
-            req_width = dialog.winfo_reqwidth()
-            req_height = dialog.winfo_reqheight()
-            # 使用这个理想尺寸来重新设置窗口大小和位置
-            dialog.geometry(f"{req_width}x{req_height}")
-            self.center_window(dialog) # 再次居中
+            # 不再调用 center_window
 
         type_var.trace_add("write", toggle_frames)
 
@@ -5347,6 +5336,7 @@ class TimedBroadcastApp:
             recurring_daterange_entry.insert(0, '2000-01-01 ~ 2099-12-31')
             recurring_interval_entry.insert(0, '0')
 
+        # 首次手动调用，确保初始状态正确
         toggle_frames()
 
         def save():
@@ -5405,8 +5395,11 @@ class TimedBroadcastApp:
         ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
         ttk.Button(button_frame, text="取消", command=dialog.destroy, width=10).pack(side=LEFT, padx=10)
         
-        # --- [核心修正 3]: 在所有内容都设置好后，最后才居中并启用 grab_set ---
-        self.center_window(dialog)
+        # --- [核心修正 3]: 调整显示和居中的时机 ---
+        dialog.update_idletasks() # 强制计算一次最终布局
+        self.center_window(dialog) # 根据最终布局居中
+        dialog.deiconify() # 将窗口从“隐藏”状态恢复，显示在正确位置
+        
         dialog.grab_set()
         self.root.wait_window(dialog)
 
