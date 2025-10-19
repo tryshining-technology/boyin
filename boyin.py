@@ -5238,10 +5238,14 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
         dialog.resizable(True, True)
-        dialog.geometry("700x600")
-        dialog.minsize(600, 580)
+        dialog.minsize(700, 550)
         dialog.transient(self.root)
-        dialog.grab_set()
+        
+        # --- [核心修改 1]: 先将窗口隐藏在屏幕外 ---
+        # 这是一个技巧：让窗口在后台完成所有计算，而用户看不到这个过程
+        dialog.geometry("+10000+10000") 
+        
+        # dialog.grab_set() # 暂时注释掉 grab_set，在最后再启用
 
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
@@ -5308,6 +5312,15 @@ class TimedBroadcastApp:
             else:
                 onetime_lf.grid_forget()
                 recurring_lf.grid(row=3, column=0, columnspan=4, sticky='ew', padx=5, pady=5)
+            
+            # --- [核心修正 2]: 在切换后，让Tkinter重新计算窗口的最佳尺寸 ---
+            dialog.update_idletasks()
+            # 获取窗口根据当前内容计算出的“理想”宽度和高度
+            req_width = dialog.winfo_reqwidth()
+            req_height = dialog.winfo_reqheight()
+            # 使用这个理想尺寸来重新设置窗口大小和位置
+            dialog.geometry(f"{req_width}x{req_height}")
+            self.center_window(dialog) # 再次居中
 
         type_var.trace_add("write", toggle_frames)
 
@@ -5392,7 +5405,10 @@ class TimedBroadcastApp:
         ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
         ttk.Button(button_frame, text="取消", command=dialog.destroy, width=10).pack(side=LEFT, padx=10)
         
+        # --- [核心修正 3]: 在所有内容都设置好后，最后才居中并启用 grab_set ---
         self.center_window(dialog)
+        dialog.grab_set()
+        self.root.wait_window(dialog)
 
 #第13部分
     def show_todo_context_menu(self, event):
