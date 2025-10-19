@@ -2206,24 +2206,26 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改音频节目" if is_edit_mode else "添加音频节目")
         dialog.resizable(True, True)
-        dialog.minsize(800, 600)
+        # dialog.minsize(800, 600)  # <--- 删除 minsize，由新函数处理
         dialog.transient(self.root); dialog.grab_set()
 
-        # 1. 创建 ScrolledFrame 作为最外层容器
-        scroll_container = ScrolledFrame(dialog, autohide=True, padding=15)
+        scroll_container = ScrolledFrame(dialog, autohide=True)
         scroll_container.pack(fill=BOTH, expand=True)
 
-        # 2. 直接将所有内容框架 pack 到 scroll_container 中
-        content_frame = ttk.LabelFrame(scroll_container, text="内容", padding=10)
-        content_frame.pack(fill=X, expand=True, pady=2)
+        main_frame = scroll_container.scrollable_frame
+        main_frame.configure(padding=15)
+        main_frame.columnconfigure(0, weight=1)
+
+        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
+        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
 
-        time_frame = ttk.LabelFrame(scroll_container, text="时间", padding=15)
-        time_frame.pack(fill=X, expand=True, pady=4)
+        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
+        time_frame.grid(row=1, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
 
-        other_frame = ttk.LabelFrame(scroll_container, text="其它", padding=10)
-        other_frame.pack(fill=X, expand=True, pady=5)
+        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=10)
+        other_frame.grid(row=2, column=0, sticky='ew', pady=5)
         other_frame.columnconfigure(1, weight=1)
 
         # --- 填充 content_frame ---
@@ -2397,13 +2399,15 @@ class TimedBroadcastApp:
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
         ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
 
+        # --- 调用新的智能尺寸函数 ---
+        self._auto_size_and_center_dialog(dialog, main_frame)
+
     def open_video_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改视频节目" if is_edit_mode else "添加视频节目")
         dialog.resizable(True, True)
-        dialog.minsize(800, 700)
         dialog.transient(self.root)
         dialog.grab_set()
 
@@ -2411,20 +2415,21 @@ class TimedBroadcastApp:
         scroll_container.pack(fill=BOTH, expand=True)
 
         main_frame = scroll_container.scrollable_frame
+        main_frame.columnconfigure(0, weight=1)
 
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
-        content_frame.pack(fill=X, expand=True, pady=2)
+        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
 
         playback_frame = ttk.LabelFrame(main_frame, text="播放选项", padding=10)
-        playback_frame.pack(fill=X, expand=True, pady=4)
+        playback_frame.grid(row=1, column=0, sticky='ew', pady=4)
 
         time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
-        time_frame.pack(fill=X, expand=True, pady=4)
+        time_frame.grid(row=2, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
 
         other_frame = ttk.LabelFrame(main_frame, text="其它", padding=10)
-        other_frame.pack(fill=X, expand=True, pady=5)
+        other_frame.grid(row=3, column=0, sticky='ew', pady=5)
         other_frame.columnconfigure(1, weight=1)
 
         # --- 填充 content_frame ---
@@ -2659,6 +2664,9 @@ class TimedBroadcastApp:
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
         ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
 
+        # --- 调用新的智能尺寸函数 ---
+        self._auto_size_and_center_dialog(dialog, main_frame)
+
 #第6部分
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
@@ -2666,7 +2674,6 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
         dialog.resizable(True, True)
-        dialog.minsize(800, 700)
         dialog.transient(self.root); dialog.grab_set()
 
         scroll_container = ScrolledFrame(dialog, autohide=True, padding=15)
@@ -2676,15 +2683,15 @@ class TimedBroadcastApp:
         main_frame.columnconfigure(0, weight=1)
 
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
-        content_frame.pack(fill=X, expand=True, pady=2)
+        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
 
         time_frame = ttk.LabelFrame(main_frame, text="时间", padding=10)
-        time_frame.pack(fill=X, expand=True, pady=2)
+        time_frame.grid(row=1, column=0, sticky='ew', pady=2)
         time_frame.columnconfigure(1, weight=1)
 
         other_frame = ttk.LabelFrame(main_frame, text="其它", padding=15)
-        other_frame.pack(fill=X, expand=True, pady=4)
+        other_frame.grid(row=2, column=0, sticky='ew', pady=4)
         other_frame.columnconfigure(1, weight=1)
         
         # --- 填充 content_frame ---
@@ -2902,6 +2909,9 @@ class TimedBroadcastApp:
         button_text = "保存修改" if is_edit_mode else "添加"
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
         ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
+
+        # --- 调用新的智能尺寸函数 ---
+        self._auto_size_and_center_dialog(dialog, main_frame)
         
 #第7部分
     def _import_voice_script(self, text_widget):
@@ -4481,6 +4491,53 @@ class TimedBroadcastApp:
         if y + height > screen_height: y = screen_height - height
         
         win.geometry(f'{width}x{height}+{x}+{y}')
+
+#20251019 尝试增加智能计算尺寸
+    def _auto_size_and_center_dialog(self, dialog, content_frame):
+        """
+        智能计算对话框的最佳尺寸并将其居中。
+        如果内容放得下，就使用内容大小；如果放不下，就使用屏幕最大高度并启用滚动。
+        """
+        # 1. 强制Tkinter计算所有控件所需的尺寸，但先不绘制窗口
+        dialog.update_idletasks()
+
+        # 2. 获取内容所需的实际宽度和高度
+        content_width = content_frame.winfo_reqwidth()
+        content_height = content_frame.winfo_reqheight()
+        
+        # 3. 获取屏幕尺寸
+        screen_width = dialog.winfo_screenwidth()
+        screen_height = dialog.winfo_screenheight()
+
+        # 4. 为窗口边框和标题栏增加一些额外的填充
+        padding_x = 40
+        padding_y = 50
+
+        # 5. 计算窗口的最终理想尺寸
+        final_width = content_width + padding_x
+        final_height = content_height + padding_y
+
+        # 6. 如果理想高度超过屏幕可用高度，则限制窗口高度
+        #    减去100像素是为了给任务栏等留出空间
+        max_allowable_height = screen_height - 100
+        if final_height > max_allowable_height:
+            final_height = max_allowable_height
+        
+        # 确保宽度不超过屏幕宽度
+        if final_width > screen_width:
+            final_width = screen_width
+
+        # 7. 计算居中位置
+        pos_x = (screen_width // 2) - (final_width // 2)
+        pos_y = (screen_height // 2) - (final_height // 2)
+
+        # 8. 应用最终的尺寸和位置
+        dialog.geometry(f"{final_width}x{final_height}+{pos_x}+{pos_y}")
+        
+        # 9. 设置最小尺寸，防止用户缩得太小
+        dialog.minsize(800, 500)
+
+#↑20251019 尝试添加智能计算尺寸
 
     def _normalize_time_string(self, time_str):
         try:
