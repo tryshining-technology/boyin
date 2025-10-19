@@ -5238,7 +5238,7 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
         dialog.resizable(True, True)
-        dialog.minsize(700, 550)
+        dialog.minsize(600, 550)
         dialog.transient(self.root)
         dialog.grab_set()
 
@@ -5390,6 +5390,8 @@ class TimedBroadcastApp:
         button_frame.grid(row=4, column=0, columnspan=4, pady=20)
         ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
         ttk.Button(button_frame, text="取消", command=dialog.destroy, width=10).pack(side=LEFT, padx=10)
+
+        self.center_window(dialog)
 
 #第13部分
     def show_todo_context_menu(self, event):
