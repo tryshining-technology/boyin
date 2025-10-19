@@ -2397,17 +2397,30 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改视频节目" if is_edit_mode else "添加视频节目")
         dialog.resizable(True, True)
-        dialog.minsize(800, 580)
+        dialog.minsize(800, 580) # <--- 统一最小尺寸
         dialog.transient(self.root)
         dialog.grab_set()
 
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
+        main_frame.columnconfigure(0, weight=1)
 
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
 
+        playback_frame = ttk.LabelFrame(main_frame, text="播放选项", padding=10)
+        playback_frame.grid(row=1, column=0, sticky='ew', pady=4)
+
+        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
+        time_frame.grid(row=2, column=0, sticky='ew', pady=4)
+        time_frame.columnconfigure(1, weight=1)
+
+        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=10)
+        other_frame.grid(row=3, column=0, sticky='ew', pady=5)
+        other_frame.columnconfigure(1, weight=1)
+
+        # --- 填充 content_frame ---
         ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -2445,22 +2458,20 @@ class TimedBroadcastApp:
                 entry_widget.insert(0, foldername)
         ttk.Button(video_folder_frame, text="选取...", command=lambda: select_folder(video_folder_entry), bootstyle="outline").grid(row=0, column=2, padx=5)
 
+        # --- [修改 1: 调整音量布局] ---
         play_order_frame = ttk.Frame(content_frame)
         play_order_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=2)
         play_order_var = tk.StringVar(value="sequential")
         ttk.Radiobutton(play_order_frame, text="顺序播", variable=play_order_var, value="sequential").pack(side=LEFT, padx=10)
         ttk.Radiobutton(play_order_frame, text="随机播", variable=play_order_var, value="random").pack(side=LEFT, padx=10)
+        
+        # 将音量控件放在同一行
+        ttk.Label(play_order_frame, text="音量:").pack(side=LEFT, padx=(20, 2))
+        volume_entry = ttk.Entry(play_order_frame, font=self.font_11, width=5)
+        volume_entry.pack(side=LEFT)
+        ttk.Label(play_order_frame, text="(0-100)").pack(side=LEFT, padx=2)
 
-        volume_frame = ttk.Frame(content_frame)
-        volume_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=3)
-        ttk.Label(volume_frame, text="音量:").pack(side=LEFT)
-        volume_entry = ttk.Entry(volume_frame, font=self.font_11, width=10)
-        volume_entry.pack(side=LEFT, padx=5)
-        ttk.Label(volume_frame, text="0-100").pack(side=LEFT, padx=5)
-
-        playback_frame = ttk.LabelFrame(main_frame, text="播放选项", padding=10)
-        playback_frame.grid(row=1, column=0, sticky='ew', pady=4)
-
+        # --- 填充 playback_frame ---
         playback_mode_var = tk.StringVar(value="fullscreen")
         resolutions = ["640x480", "800x600", "1024x768", "1280x720", "1366x768", "1600x900", "1920x1080"]
         resolution_var = tk.StringVar(value=resolutions[2])
@@ -2468,10 +2479,11 @@ class TimedBroadcastApp:
         playback_rates = ['0.5x', '0.75x', '1.0x (正常)', '1.25x', '1.5x', '2.0x']
         playback_rate_var = tk.StringVar(value='1.0x (正常)')
 
+        # --- [修改 2: 调整播放倍速布局] ---
         mode_frame = ttk.Frame(playback_frame)
         mode_frame.grid(row=0, column=0, columnspan=3, sticky='w')
 
-        resolution_combo = ttk.Combobox(mode_frame, textvariable=resolution_var, values=resolutions, font=self.font_11, width=15, state='readonly')
+        resolution_combo = ttk.Combobox(mode_frame, textvariable=resolution_var, values=resolutions, font=self.font_11, width=12, state='readonly')
 
         def toggle_resolution_combo():
             if playback_mode_var.get() == "windowed":
@@ -2481,17 +2493,17 @@ class TimedBroadcastApp:
 
         ttk.Radiobutton(mode_frame, text="无边框全屏", variable=playback_mode_var, value="fullscreen", command=toggle_resolution_combo).pack(side=LEFT, padx=5)
         ttk.Radiobutton(mode_frame, text="非全屏", variable=playback_mode_var, value="windowed", command=toggle_resolution_combo).pack(side=LEFT, padx=5)
-        resolution_combo.pack(side=LEFT, padx=10)
+        resolution_combo.pack(side=LEFT, padx=(5, 10))
 
-        rate_frame = ttk.Frame(playback_frame)
-        rate_frame.grid(row=1, column=0, columnspan=3, sticky='w', pady=5)
-        ttk.Label(rate_frame, text="播放倍速:").pack(side=LEFT, padx=5)
-        rate_combo = ttk.Combobox(rate_frame, textvariable=playback_rate_var, values=playback_rates, font=self.font_11, width=15)
-        rate_combo.pack(side=LEFT)
-        ttk.Label(rate_frame, text="(可手动输入0.25-4.0之间的值)", font=self.font_9, bootstyle="secondary").pack(side=LEFT, padx=5)
+        # 将播放倍速放在同一行
+        ttk.Label(mode_frame, text="倍速:").pack(side=LEFT)
+        rate_combo = ttk.Combobox(mode_frame, textvariable=playback_rate_var, values=playback_rates, font=self.font_11, width=10)
+        rate_combo.pack(side=LEFT, padx=2)
+        ttk.Label(mode_frame, text="(0.25-4.0)", font=self.font_9, bootstyle="secondary").pack(side=LEFT, padx=2)
 
         toggle_resolution_combo()
 
+        # --- 后续布局保持不变 ---
         time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
         time_frame.grid(row=2, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
@@ -2653,7 +2665,7 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
         dialog.resizable(True, True)
-        dialog.minsize(800, 580)
+        dialog.minsize(800, 580) # <--- [修改] 统一最小尺寸
         dialog.transient(self.root); dialog.grab_set()
 
         main_frame = ttk.Frame(dialog, padding=15)
@@ -2667,12 +2679,14 @@ class TimedBroadcastApp:
         ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
+        
+        # --- [修改 1: 减少播音文字框高度] ---
         ttk.Label(content_frame, text="播音文字:").grid(row=1, column=0, sticky='nw', padx=5, pady=2)
         text_frame = ttk.Frame(content_frame)
         text_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         text_frame.columnconfigure(0, weight=1)
         text_frame.rowconfigure(0, weight=1)
-        content_text = ScrolledText(text_frame, height=5, font=self.font_11, wrap=WORD)
+        content_text = ScrolledText(text_frame, height=3, font=self.font_11, wrap=WORD) # <-- 高度从5改为3
         content_text.grid(row=0, column=0, sticky='nsew')
         
         script_btn_frame = ttk.Frame(content_frame)
@@ -2680,25 +2694,31 @@ class TimedBroadcastApp:
         ttk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text), bootstyle="outline").pack(side=LEFT)
         ttk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text, name_entry), bootstyle="outline").pack(side=LEFT, padx=10)
         
+        # --- [修改 2: 调整语速/音调/音量布局] ---
         ttk.Label(content_frame, text="播音员:").grid(row=3, column=0, sticky='w', padx=5, pady=3)
         voice_frame = ttk.Frame(content_frame)
         voice_frame.grid(row=3, column=1, columnspan=3, sticky='ew', padx=5, pady=3)
-        voice_frame.columnconfigure(0, weight=1)
+        voice_frame.columnconfigure(0, weight=1) # 让播音员列表可以伸展
+        
         available_voices = self.get_available_voices()
         voice_var = tk.StringVar()
         voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, values=available_voices, font=self.font_11, state='readonly')
         voice_combo.grid(row=0, column=0, sticky='ew')
         
-        speech_params_frame = ttk.Frame(content_frame)
-        speech_params_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=2)
-        ttk.Label(speech_params_frame, text="语速(-10~10):").pack(side=LEFT, padx=(0,5))
-        speed_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=8); speed_entry.pack(side=LEFT, padx=5)
-        ttk.Label(speech_params_frame, text="音调(-10~10):").pack(side=LEFT, padx=(10,5))
-        pitch_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=8); pitch_entry.pack(side=LEFT, padx=5)
-        ttk.Label(speech_params_frame, text="音量(0-100):").pack(side=LEFT, padx=(10,5))
-        volume_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=8); volume_entry.pack(side=LEFT, padx=5)
-        
+        # 创建一个新的框架来容纳右侧的参数输入框
+        speech_params_frame = ttk.Frame(voice_frame)
+        speech_params_frame.grid(row=0, column=1, sticky='e', padx=(10, 0))
+
+        ttk.Label(speech_params_frame, text="语速:").pack(side=LEFT)
+        speed_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=5); speed_entry.pack(side=LEFT, padx=(2, 5))
+        ttk.Label(speech_params_frame, text="音调:").pack(side=LEFT)
+        pitch_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=5); pitch_entry.pack(side=LEFT, padx=(2, 5))
+        ttk.Label(speech_params_frame, text="音量:").pack(side=LEFT)
+        volume_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=5); volume_entry.pack(side=LEFT, padx=(2, 0))
+
+        # --- 后续布局保持不变，只是行号可能需要调整 ---
         prompt_var = tk.IntVar(); prompt_frame = ttk.Frame(content_frame)
+        # 原来的 speech_params_frame 在第4行，现在被合并了，所以后续控件从第5行开始
         prompt_frame.grid(row=5, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         prompt_frame.columnconfigure(1, weight=1)
         ttk.Checkbutton(prompt_frame, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
