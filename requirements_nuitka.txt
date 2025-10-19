@@ -15,3 +15,4 @@ pystray>=0.19.0
 # --- 视频播放 ---
 python-vlc>=3.0.18
 PySide6
+pydub
