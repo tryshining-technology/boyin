@@ -2206,16 +2206,17 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改音频节目" if is_edit_mode else "添加音频节目")
         dialog.resizable(True, True)
-        # dialog.minsize(800, 600)  # <--- 删除 minsize，由新函数处理
         dialog.transient(self.root); dialog.grab_set()
 
-        scroll_container = ScrolledFrame(dialog, autohide=True)
+        # 1. 创建 ScrolledFrame 作为最外层容器
+        scroll_container = ScrolledFrame(dialog, autohide=True, padding=15)
         scroll_container.pack(fill=BOTH, expand=True)
 
+        # 2. 获取内部可滚动框架，并为其配置列权重以允许水平扩展
         main_frame = scroll_container.scrollable_frame
-        main_frame.configure(padding=15)
         main_frame.columnconfigure(0, weight=1)
 
+        # 3. 将所有内容框架 grid 到 main_frame 中
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
@@ -2398,7 +2399,7 @@ class TimedBroadcastApp:
         button_text = "保存修改" if is_edit_mode else "添加"
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
         ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
-
+        
         # --- 调用新的智能尺寸函数 ---
         self._auto_size_and_center_dialog(dialog, main_frame)
 
@@ -2408,15 +2409,20 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改视频节目" if is_edit_mode else "添加视频节目")
         dialog.resizable(True, True)
+        dialog.minsize(800, 700)
         dialog.transient(self.root)
         dialog.grab_set()
 
+        # 1. 创建 ScrolledFrame 作为最外层容器
         scroll_container = ScrolledFrame(dialog, autohide=True, padding=15)
         scroll_container.pack(fill=BOTH, expand=True)
 
+        # 2. 获取 ScrolledFrame 内部的可滚动区域
         main_frame = scroll_container.scrollable_frame
+        # <--- 关键修正1：为 grid 布局配置列权重，使其能水平扩展
         main_frame.columnconfigure(0, weight=1)
 
+        # 3. 将所有内容框架 grid 到 main_frame 中，恢复原始布局方式
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
@@ -2663,7 +2669,7 @@ class TimedBroadcastApp:
         button_text = "保存修改" if is_edit_mode else "添加"
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
         ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
-
+        
         # --- 调用新的智能尺寸函数 ---
         self._auto_size_and_center_dialog(dialog, main_frame)
 
