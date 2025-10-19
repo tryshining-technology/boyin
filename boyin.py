@@ -1494,12 +1494,11 @@ class TimedBroadcastApp:
 
     def create_scheduled_broadcast_page(self):
         page_frame = self.pages["定时广播"]
-        # 使用 grid 布局并为可伸缩行设置权重
-        page_frame.columnconfigure(0, weight=1)
-        page_frame.rowconfigure(2, weight=1) 
 
+        # --- 顶部控件 ---
         top_frame = ttk.Frame(page_frame, padding=(10, 10))
-        top_frame.grid(row=0, column=0, sticky='ew')
+        top_frame.pack(side=TOP, fill=X)
+        
         title_label = ttk.Label(top_frame, text="定时广播", font=self.font_14_bold)
         title_label.pack(side=LEFT)
 
@@ -1533,41 +1532,38 @@ class TimedBroadcastApp:
             btn.pack(side=LEFT, padx=3)
 
         stats_frame = ttk.Frame(page_frame, padding=(10, 5))
-        stats_frame.grid(row=1, column=0, sticky='ew')
+        stats_frame.pack(side=TOP, fill=X)
         self.stats_label = ttk.Label(stats_frame, text="节目单：0", font=self.font_11, bootstyle="secondary")
         self.stats_label.pack(side=LEFT, fill=X, expand=True)
 
-        # 创建一个垂直方向的可拖动分隔窗格
-        main_paned_window = ttk.PanedWindow(page_frame, orient=VERTICAL)
-        main_paned_window.grid(row=2, column=0, sticky='nsew', padx=10, pady=5)
+        # --- 底部控件 (采用逆序 pack 技巧) ---
+        # 先 pack 最底部的日志区，它有固定高度
+        log_frame = ttk.LabelFrame(page_frame, text="", padding=(10, 5))
+        log_frame.pack(side=BOTTOM, fill=X, padx=10, pady=5)
 
-        # 创建用于放置列表和日志的框架
-        table_frame = ttk.Frame(main_paned_window)
-        log_frame = ttk.LabelFrame(main_paned_window, text="", padding=(10, 5))
+        # 再 pack 它上面的“正在播”区域，它也有固定高度
+        playing_frame = ttk.LabelFrame(page_frame, text="正在播：", padding=(10, 5))
+        playing_frame.pack(side=BOTTOM, fill=X, padx=10, pady=5)
+        
+        # --- 中间可伸缩的列表区域 ---
+        # 最后 pack 列表区，并设置 expand=True，它会自动填充所有剩余空间
+        table_frame = ttk.Frame(page_frame, padding=(10, 5))
+        table_frame.pack(side=TOP, fill=BOTH, expand=True)
 
-        # 将两个框架添加到分隔窗格中，weight决定初始比例
-        main_paned_window.add(table_frame, weight=3) # 列表占大部分空间
-        main_paned_window.add(log_frame, weight=1)   # 日志占小部分空间
-
+        # --- 填充各个区域的内容 (这部分和您原始代码一致) ---
         columns = ('节目名称', '状态', '开始时间', '模式', '文件或内容', '音量', '周几/几号', '日期范围')
         self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12, selectmode='extended', bootstyle="primary")
 
         self.task_tree.heading('节目名称', text='节目名称')
         self.task_tree.column('节目名称', width=200, anchor='w')
-        self.task_tree.heading('状态', text='状态')
-        self.task_tree.column('状态', width=70, anchor='center', stretch=NO)
-        self.task_tree.heading('开始时间', text='开始时间')
-        self.task_tree.column('开始时间', width=100, anchor='center', stretch=NO)
-        self.task_tree.heading('模式', text='模式')
-        self.task_tree.column('模式', width=70, anchor='center', stretch=NO)
-        self.task_tree.heading('文件或内容', text='文件或内容')
-        self.task_tree.column('文件或内容', width=300, anchor='w')
-        self.task_tree.heading('音量', text='音量')
-        self.task_tree.column('音量', width=70, anchor='center', stretch=NO)
-        self.task_tree.heading('周几/几号', text='周几/几号')
-        self.task_tree.column('周几/几号', width=100, anchor='center')
-        self.task_tree.heading('日期范围', text='日期范围')
-        self.task_tree.column('日期范围', width=120, anchor='center')
+        # ... (省略其他列定义，保持原样)
+        self.task_tree.heading('状态', text='状态'); self.task_tree.column('状态', width=70, anchor='center', stretch=NO)
+        self.task_tree.heading('开始时间', text='开始时间'); self.task_tree.column('开始时间', width=100, anchor='center', stretch=NO)
+        self.task_tree.heading('模式', text='模式'); self.task_tree.column('模式', width=70, anchor='center', stretch=NO)
+        self.task_tree.heading('文件或内容', text='文件或内容'); self.task_tree.column('文件或内容', width=300, anchor='w')
+        self.task_tree.heading('音量', text='音量'); self.task_tree.column('音量', width=70, anchor='center', stretch=NO)
+        self.task_tree.heading('周几/几号', text='周几/几号'); self.task_tree.column('周几/几号', width=100, anchor='center')
+        self.task_tree.heading('日期范围', text='日期范围'); self.task_tree.column('日期范围', width=120, anchor='center')
 
         self.task_tree.pack(side=LEFT, fill=BOTH, expand=True)
         scrollbar = ttk.Scrollbar(table_frame, orient=VERTICAL, command=self.task_tree.yview, bootstyle="round")
@@ -1578,14 +1574,11 @@ class TimedBroadcastApp:
         self.task_tree.bind("<Double-1>", self.on_double_click_edit)
         self._enable_drag_selection(self.task_tree)
 
-        playing_frame = ttk.LabelFrame(page_frame, text="正在播：", padding=(10, 5))
-        playing_frame.grid(row=3, column=0, sticky='ew', padx=10, pady=5)
         self.playing_label = ttk.Label(playing_frame, text="等待播放...", font=self.font_11,
                                        anchor=W, justify=LEFT, padding=5, bootstyle="warning")
         self.playing_label.pack(fill=X, expand=True, ipady=4)
         self.update_playing_text("等待播放...")
 
-        # 日志区域布局
         log_header_frame = ttk.Frame(log_frame)
         log_header_frame.pack(fill=X)
         log_label = ttk.Label(log_header_frame, text="日志：", font=self.font_11_bold)
@@ -2176,19 +2169,19 @@ class TimedBroadcastApp:
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(expand=True, fill=X)
 
-        audio_btn = ttk.Button(btn_frame, text="🎵 音频节目",
+        audio_btn = ttk.Button(btn_frame, text="🎵→音频节目",
                              bootstyle="primary", width=20, command=lambda: self.open_audio_dialog(choice_dialog))
         audio_btn.pack(pady=8, ipady=8, fill=X)
 
-        voice_btn = ttk.Button(btn_frame, text="🎙️语音节目",
+        voice_btn = ttk.Button(btn_frame, text="🎙️→语音节目",
                              bootstyle="info", width=20, command=lambda: self.open_voice_dialog(choice_dialog))
         voice_btn.pack(pady=8, ipady=8, fill=X)
 
-        video_btn = ttk.Button(btn_frame, text="🎬 视频节目",
+        video_btn = ttk.Button(btn_frame, text="🎬→视频节目",
                              bootstyle="success", width=20, command=lambda: self.open_video_dialog(choice_dialog))
         video_btn.pack(pady=8, ipady=8, fill=X)
         if not VLC_AVAILABLE:
-            video_btn.config(state=DISABLED, text="🎬 视频节目 (VLC未安装)")
+            video_btn.config(state=DISABLED, text="🎬→视频节目 (VLC未安装)")
 
         self.center_window(choice_dialog, parent=self.root)
 #第5部分
@@ -2201,13 +2194,26 @@ class TimedBroadcastApp:
         dialog.minsize(800, 600)
         dialog.transient(self.root); dialog.grab_set()
 
-        main_frame = ScrolledFrame(dialog, autohide=True)
-        main_frame.pack(fill=BOTH, expand=True, padx=15, pady=15)
+        # --- ↓↓↓ 核心修改区域开始 ↓↓↓ ---
+        
+        # 1. 创建一个 ScrolledFrame 作为最外层的滚动容器
+        scroll_container = ScrolledFrame(dialog, autohide=True)
+        scroll_container.pack(fill=BOTH, expand=True)
 
+        # 2. 在滚动容器内部，创建一个普通的 Frame 来放置所有控件。这个 Frame 会负责水平扩展。
+        main_frame = ttk.Frame(scroll_container, padding=15)
+        main_frame.pack(fill=BOTH, expand=True)
+
+        # --- ↑↑↑ 核心修改区域结束 ↑↑↑ ---
+
+        # 后续所有控件的父容器都是 main_frame，这部分逻辑与您的原始代码完全相同
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
 
+        # ... [此处省略了大量的控件创建代码，因为它们完全不需要改动] ...
+        # ... 您原始代码中从 ttk.Label(content_frame, text="节目名称:") 开始 ...
+        # ... 一直到 dialog_button_frame 创建结束的所有代码，都保持原样 ...
         ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -2393,13 +2399,17 @@ class TimedBroadcastApp:
         dialog.transient(self.root)
         dialog.grab_set()
 
-        main_frame = ScrolledFrame(dialog, autohide=True)
-        main_frame.pack(fill=BOTH, expand=True, padx=15, pady=15)
+        scroll_container = ScrolledFrame(dialog, autohide=True)
+        scroll_container.pack(fill=BOTH, expand=True)
+
+        main_frame = ttk.Frame(scroll_container, padding=15)
+        main_frame.pack(fill=BOTH, expand=True)
 
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
 
+        # ... [此处省略了大量的控件创建代码，因为它们完全不需要改动] ...
         ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -2648,14 +2658,18 @@ class TimedBroadcastApp:
         dialog.minsize(800, 700)
         dialog.transient(self.root); dialog.grab_set()
 
-        main_frame = ScrolledFrame(dialog, autohide=True)
-        main_frame.pack(fill=BOTH, expand=True, padx=15, pady=15)
+        scroll_container = ScrolledFrame(dialog, autohide=True)
+        scroll_container.pack(fill=BOTH, expand=True)
+
+        main_frame = ttk.Frame(scroll_container, padding=15)
+        main_frame.pack(fill=BOTH, expand=True)
         main_frame.columnconfigure(0, weight=1)
 
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
 
+        # ... [此处省略了大量的控件创建代码，因为它们完全不需要改动] ...
         ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
