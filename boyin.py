@@ -1,6 +1,6 @@
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
-ffrom ttkbootstrap.scrolled import ScrolledText, ScrolledFrame
+from ttkbootstrap.scrolled import ScrolledText, ScrolledFrame
 from tkinter import messagebox, filedialog, simpledialog, font
 import tkinter as tk
 import subprocess
