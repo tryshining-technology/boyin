@@ -5014,6 +5014,44 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"加载待办事项失败: {e}")
             self.todos = []
+    def load_screenshot_tasks(self):
+        if not os.path.exists(SCREENSHOT_TASK_FILE): return
+        try:
+            with open(SCREENSHOT_TASK_FILE, 'r', encoding='utf-8') as f:
+                self.screenshot_tasks = json.load(f)
+            self.log(f"已加载 {len(self.screenshot_tasks)} 个截屏任务")
+            if hasattr(self, 'screenshot_tree'):
+                self.update_screenshot_list()
+        except Exception as e:
+            self.log(f"加载截屏任务失败: {e}")
+            self.screenshot_tasks = []
+
+    def save_screenshot_tasks(self):
+        try:
+            with open(SCREENSHOT_TASK_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.screenshot_tasks, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log(f"保存截屏任务失败: {e}")
+
+    def load_execute_tasks(self):
+        if not os.path.exists(EXECUTE_TASK_FILE): return
+        try:
+            with open(EXECUTE_TASK_FILE, 'r', encoding='utf-8') as f:
+                self.execute_tasks = json.load(f)
+            self.log(f"已加载 {len(self.execute_tasks)} 个运行任务")
+            if hasattr(self, 'execute_tree'):
+                self.update_execute_list()
+        except Exception as e:
+            self.log(f"加载运行任务失败: {e}")
+            self.execute_tasks = []
+
+    def save_execute_tasks(self):
+        try:
+            with open(EXECUTE_TASK_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.execute_tasks, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log(f"保存运行任务失败: {e}")
+
 #第12部分
     def update_todo_list(self):
         if not hasattr(self, 'todo_tree') or not self.todo_tree.winfo_exists(): return
