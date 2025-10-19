@@ -2194,13 +2194,14 @@ class TimedBroadcastApp:
         dialog.minsize(800, 600)
         dialog.transient(self.root); dialog.grab_set()
 
-        # 1. 创建 ScrolledFrame，并禁用水平滚动条
-        scroll_container = ScrolledFrame(dialog, autohide=True, scrollheight=None, scrollwidth=0)
+        # 1. 创建 ScrolledFrame 作为最外层容器
+        scroll_container = ScrolledFrame(dialog, autohide=True)
         scroll_container.pack(fill=BOTH, expand=True)
 
-        # 2. 在 ScrolledFrame 的 .scrollable_frame 内部创建用于放置所有内容的 main_frame
-        main_frame = ttk.Frame(scroll_container.scrollable_frame, padding=15)
-        main_frame.pack(fill=X, expand=True)
+        # 2. 获取 ScrolledFrame 内部的可滚动区域，所有控件都将放置在这里
+        # <--- 这是最关键的修正！
+        main_frame = scroll_container.scrollable_frame
+        main_frame.configure(padding=15)
 
         # --- 后续所有代码的父容器都是 main_frame ---
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
@@ -2392,7 +2393,7 @@ class TimedBroadcastApp:
         dialog.transient(self.root)
         dialog.grab_set()
 
-        scroll_container = ScrolledFrame(dialog, autohide=True, scrollheight=None, scrollwidth=0)
+        scroll_container = ScrolledFrame(dialog, autohide=True)
         scroll_container.pack(fill=BOTH, expand=True)
 
         main_frame = ttk.Frame(scroll_container.scrollable_frame, padding=15)
@@ -2650,7 +2651,7 @@ class TimedBroadcastApp:
         dialog.minsize(800, 700)
         dialog.transient(self.root); dialog.grab_set()
 
-        scroll_container = ScrolledFrame(dialog, autohide=True, scrollheight=None, scrollwidth=0)
+        scroll_container = ScrolledFrame(dialog, autohide=True)
         scroll_container.pack(fill=BOTH, expand=True)
 
         # <--- 关键修正：父容器是 scroll_container.scrollable_frame
