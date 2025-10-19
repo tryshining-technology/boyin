@@ -132,7 +132,7 @@ class TimedBroadcastApp:
     def __init__(self, root):
         self.root = root
         self.root.title(" 创翔多功能定时播音旗舰版")
-        self.root.geometry("1280x720")
+        # self.root.geometry("1280x720")
         self.root.minsize(800, 600)
 
         if os.path.exists(ICON_FILE):
@@ -183,6 +183,21 @@ class TimedBroadcastApp:
 
         self.create_folder_structure()
         self.load_settings()
+
+        # --- ↓↓↓ 新增代码：加载并应用窗口位置和大小 ↓↓↓ ---
+        saved_geometry = self.settings.get("window_geometry")
+        if saved_geometry:
+            try:
+                # 检查几何信息是否有效，防止因配置文件损坏导致启动失败
+                self.root.geometry(saved_geometry)
+            except tk.TclError:
+                # 如果信息无效，则使用默认大小
+                self.root.geometry("1280x720")
+        else:
+            # 首次启动或无记录时，设置一个默认大小
+            self.root.geometry("1280x720")
+        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+
         self.load_lock_password()
 
         self._apply_global_font()
@@ -2195,19 +2210,23 @@ class TimedBroadcastApp:
         dialog.transient(self.root); dialog.grab_set()
 
         # 1. 创建 ScrolledFrame 作为最外层容器
-        scroll_container = ScrolledFrame(dialog, autohide=True)
+        scroll_container = ScrolledFrame(dialog, autohide=True, padding=15)
         scroll_container.pack(fill=BOTH, expand=True)
 
-        # 2. 获取 ScrolledFrame 内部的可滚动区域，所有控件都将放置在这里
-        # <--- 这是最关键的修正！
-        main_frame = scroll_container.scrollable_frame
-        main_frame.configure(padding=15)
-
-        # --- 后续所有代码的父容器都是 main_frame ---
-        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
-        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
+        # 2. 直接将所有内容框架 pack 到 scroll_container 中
+        content_frame = ttk.LabelFrame(scroll_container, text="内容", padding=10)
+        content_frame.pack(fill=X, expand=True, pady=2)
         content_frame.columnconfigure(1, weight=1)
 
+        time_frame = ttk.LabelFrame(scroll_container, text="时间", padding=15)
+        time_frame.pack(fill=X, expand=True, pady=4)
+        time_frame.columnconfigure(1, weight=1)
+
+        other_frame = ttk.LabelFrame(scroll_container, text="其它", padding=10)
+        other_frame.pack(fill=X, expand=True, pady=5)
+        other_frame.columnconfigure(1, weight=1)
+
+        # --- 填充 content_frame ---
         ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -2270,10 +2289,7 @@ class TimedBroadcastApp:
         volume_entry.pack(side=LEFT, padx=5)
         ttk.Label(volume_frame, text="0-100").pack(side=LEFT, padx=5)
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
-        time_frame.grid(row=1, column=0, sticky='ew', pady=4)
-        time_frame.columnconfigure(1, weight=1)
-        
+        # --- 填充 time_frame ---
         ttk.Label(time_frame, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         start_time_entry = ttk.Entry(time_frame, font=self.font_11)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
@@ -2308,10 +2324,7 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=4, column=3, padx=5)
 
-        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=10)
-        other_frame.grid(row=2, column=0, sticky='ew', pady=5)
-        other_frame.columnconfigure(1, weight=1)
-        
+        # --- 填充 other_frame ---
         delay_var = tk.StringVar(value="ontime")
         ttk.Label(other_frame, text="模式:").grid(row=0, column=0, sticky='nw', padx=5, pady=2)
         delay_frame = ttk.Frame(other_frame)
@@ -2323,6 +2336,7 @@ class TimedBroadcastApp:
         dialog_button_frame = ttk.Frame(other_frame)
         dialog_button_frame.grid(row=0, column=2, sticky='se', padx=20, pady=10)
 
+        # --- 数据加载和保存逻辑 (不变) ---
         if is_edit_mode:
             task = task_to_edit
             name_entry.insert(0, task.get('name', ''))
@@ -2393,16 +2407,27 @@ class TimedBroadcastApp:
         dialog.transient(self.root)
         dialog.grab_set()
 
-        scroll_container = ScrolledFrame(dialog, autohide=True)
+        scroll_container = ScrolledFrame(dialog, autohide=True, padding=15)
         scroll_container.pack(fill=BOTH, expand=True)
 
-        main_frame = ttk.Frame(scroll_container.scrollable_frame, padding=15)
-        main_frame.pack(fill=X, expand=True)
+        main_frame = scroll_container.scrollable_frame
 
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
-        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
+        content_frame.pack(fill=X, expand=True, pady=2)
         content_frame.columnconfigure(1, weight=1)
 
+        playback_frame = ttk.LabelFrame(main_frame, text="播放选项", padding=10)
+        playback_frame.pack(fill=X, expand=True, pady=4)
+
+        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
+        time_frame.pack(fill=X, expand=True, pady=4)
+        time_frame.columnconfigure(1, weight=1)
+
+        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=10)
+        other_frame.pack(fill=X, expand=True, pady=5)
+        other_frame.columnconfigure(1, weight=1)
+
+        # --- 填充 content_frame ---
         ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -2453,9 +2478,7 @@ class TimedBroadcastApp:
         volume_entry.pack(side=LEFT, padx=5)
         ttk.Label(volume_frame, text="0-100").pack(side=LEFT, padx=5)
 
-        playback_frame = ttk.LabelFrame(main_frame, text="播放选项", padding=10)
-        playback_frame.grid(row=1, column=0, sticky='ew', pady=4)
-
+        # --- 填充 playback_frame ---
         playback_mode_var = tk.StringVar(value="fullscreen")
         resolutions = ["640x480", "800x600", "1024x768", "1280x720", "1366x768", "1600x900", "1920x1080"]
         resolution_var = tk.StringVar(value=resolutions[2])
@@ -2487,10 +2510,7 @@ class TimedBroadcastApp:
 
         toggle_resolution_combo()
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
-        time_frame.grid(row=2, column=0, sticky='ew', pady=4)
-        time_frame.columnconfigure(1, weight=1)
-
+        # --- 填充 time_frame ---
         ttk.Label(time_frame, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         start_time_entry = ttk.Entry(time_frame, font=self.font_11)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
@@ -2525,10 +2545,7 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=4, column=3, padx=5)
 
-        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=10)
-        other_frame.grid(row=3, column=0, sticky='ew', pady=5)
-        other_frame.columnconfigure(1, weight=1)
-
+        # --- 填充 other_frame ---
         delay_var = tk.StringVar(value="ontime")
         ttk.Label(other_frame, text="模式:").grid(row=0, column=0, sticky='nw', padx=5, pady=2)
         delay_frame = ttk.Frame(other_frame)
@@ -2540,6 +2557,7 @@ class TimedBroadcastApp:
         dialog_button_frame = ttk.Frame(other_frame)
         dialog_button_frame.grid(row=0, column=2, sticky='se', padx=20, pady=10)
 
+        # --- 数据加载和保存逻辑 (不变) ---
         if is_edit_mode:
             task = task_to_edit
             name_entry.insert(0, task.get('name', ''))
@@ -2651,18 +2669,25 @@ class TimedBroadcastApp:
         dialog.minsize(800, 700)
         dialog.transient(self.root); dialog.grab_set()
 
-        scroll_container = ScrolledFrame(dialog, autohide=True)
+        scroll_container = ScrolledFrame(dialog, autohide=True, padding=15)
         scroll_container.pack(fill=BOTH, expand=True)
 
-        # <--- 关键修正：父容器是 scroll_container.scrollable_frame
-        main_frame = ttk.Frame(scroll_container.scrollable_frame, padding=15)
-        main_frame.pack(fill=X, expand=True)
+        main_frame = scroll_container.scrollable_frame
         main_frame.columnconfigure(0, weight=1)
 
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
-        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
+        content_frame.pack(fill=X, expand=True, pady=2)
         content_frame.columnconfigure(1, weight=1)
+
+        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=10)
+        time_frame.pack(fill=X, expand=True, pady=2)
+        time_frame.columnconfigure(1, weight=1)
+
+        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=15)
+        other_frame.pack(fill=X, expand=True, pady=4)
+        other_frame.columnconfigure(1, weight=1)
         
+        # --- 填充 content_frame ---
         ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -2746,10 +2771,7 @@ class TimedBroadcastApp:
         ttk.Radiobutton(bg_image_btn_frame, text="顺序", variable=bg_image_order_var, value="sequential").pack(side=LEFT, padx=(10,0))
         ttk.Radiobutton(bg_image_btn_frame, text="随机", variable=bg_image_order_var, value="random").pack(side=LEFT)
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=10)
-        time_frame.grid(row=1, column=0, sticky='ew', pady=2)
-        time_frame.columnconfigure(1, weight=1)
-        
+        # --- 填充 time_frame ---
         ttk.Label(time_frame, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         start_time_entry = ttk.Entry(time_frame, font=self.font_11)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
@@ -2772,10 +2794,7 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=3, column=3, padx=5)
 
-        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=15)
-        other_frame.grid(row=2, column=0, sticky='ew', pady=4)
-        other_frame.columnconfigure(1, weight=1)
-        
+        # --- 填充 other_frame ---
         delay_var = tk.StringVar(value="delay")
         ttk.Label(other_frame, text="模式:").grid(row=0, column=0, sticky='nw', padx=5, pady=2)
         delay_frame = ttk.Frame(other_frame)
@@ -2787,6 +2806,7 @@ class TimedBroadcastApp:
         dialog_button_frame = ttk.Frame(other_frame)
         dialog_button_frame.grid(row=0, column=2, sticky='se', padx=20, pady=10)
 
+        # --- 数据加载和保存逻辑 (不变) ---
         if is_edit_mode:
             task = task_to_edit
             name_entry.insert(0, task.get('name', ''))
@@ -4524,16 +4544,21 @@ class TimedBroadcastApp:
         self.running = False
         self.playback_command_queue.put(('STOP', None))
 
+        # --- ↓↓↓ 新增代码：在保存设置前，先记录当前窗口的几何信息 ↓↓↓ ---
+        # 只有当窗口不是最小化状态时才保存，避免保存一个看不见的位置
+        if self.root.state() == 'normal':
+            self.settings["window_geometry"] = self.root.geometry()
+        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+
         self.save_tasks()
-        self.save_settings()
+        self.save_settings() # 这个函数会把包含新窗口位置的整个设置字典写入文件
         self.save_holidays()
         self.save_todos()
         self.save_screenshot_tasks()
         self.save_execute_tasks()
 
         if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
-        
-        # 修复 Bug 2 (退出): 使用 os._exit(0) 强制退出进程
+       
         # self.root.destroy()
         # sys.exit()
         os._exit(0)
