@@ -41,9 +41,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\pip\Cache
-          key: ${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements_nuitka.txt') }}
+          # --- ↓↓↓ 核心修改：在 key 的最前面增加一个版本号 "v1-" 来强制刷新缓存 ↓↓↓ ---
+          key: v1-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements_nuitka.txt') }}
           restore-keys: |
-            ${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
+            v1-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
 
       - name: Install dependencies
         run: |
@@ -55,19 +56,17 @@ jobs:
       - name: Build and Archive application with Nuitka
         run: |
           Write-Host "=== 构建 Nuitka 编译版本 (Standalone 文件夹模式) ==="
-          $outputDir = "boyin.dist" # Nuitka 默认的输出文件夹名
-          $exeName = "创翔多功能定时播音旗舰版.exe" # 文件夹内部的程序名可以简化
-          $zipName = "${{ matrix.artifact-name }}.zip" # 最终要上传的压缩包名
+          $outputDir = "boyin.dist"
+          $exeName = "创翔多功能定时播音旗舰版.exe"
+          $zipName = "${{ matrix.artifact-name }}.zip"
 
-          # 使用 PowerShell 数组定义所有参数
           $nuitkaArgs = @(
               "--standalone",
-              # "--onefile", # <--- [核心修改] 已移除 --onefile 参数
               "--windows-console-mode=disable",
               "--lto=yes",
               "--assume-yes-for-downloads",
-              "--output-dir=$outputDir", # 指定输出文件夹的名称
-              "--output-filename=$exeName", # 指定文件夹内的exe名称
+              "--output-dir=$outputDir",
+              "--output-filename=$exeName",
               "--windows-icon-from-ico=icon.ico",
               "--product-name=创翔多功能定时播音旗舰版",
               "--file-version=1.0.0",
@@ -82,10 +81,8 @@ jobs:
               "boyin.py"
           )
           
-          # 执行 Nuitka 命令
           python -m nuitka $nuitkaArgs
 
-          # [核心修改] 将构建好的文件夹压缩成 zip 文件
           Write-Host "=== 正在压缩构建产物... ==="
           Compress-Archive -Path "$outputDir\*" -DestinationPath $zipName -Force
         shell: pwsh
@@ -94,4 +91,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact-name }}
-          path: ${{ matrix.artifact-name }}.zip # <--- [核心修改] 上传路径已改为压缩包
+          path: ${{ matrix.artifact-name }}.zip
