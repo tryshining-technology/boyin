@@ -73,7 +73,7 @@ jobs:
               "--file-version=1.0.0",
               "--company-name=创翔",
               "--enable-plugin=tk-inter",
-              "--enable-plugin=pyside6",
+              "--enable-plugin=pillow",
               "--enable-plugin=anti-bloat",
               "--include-package-data=pygame",
               "--include-package-data=ttkbootstrap",
