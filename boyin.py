@@ -2729,7 +2729,31 @@ class TimedBroadcastApp:
         script_btn_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=(0, 2))
         ttk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text), bootstyle="outline").pack(side=LEFT)
         ttk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text, name_entry), bootstyle="outline").pack(side=LEFT, padx=10)
+
+        # --- ↓↓↓ 新增广告制作按钮 ↓↓↓ ---
+        # 创建一个专门的框架来容纳广告按钮
+        ad_btn_frame = ttk.Frame(script_btn_frame)
+        ad_btn_frame.pack(side=LEFT, padx=20)
+
+        # 按语音长度制作
+        self.ad_by_voice_btn = ttk.Button(ad_btn_frame, text="按语音长度制作广告", 
+                                          command=lambda: self._create_advertisement('voice'))
+        self.ad_by_voice_btn.pack(side=LEFT)
+
+        # 按背景音乐长度制作
+        self.ad_by_bgm_btn = ttk.Button(ad_btn_frame, text="按背景音乐长度制作广告", 
+                                        command=lambda: self._create_advertisement('bgm'))
+        self.ad_by_bgm_btn.pack(side=LEFT, padx=10)
+
+        # 权限控制
+        if self.auth_info['status'] != 'Permanent':
+            self.ad_by_voice_btn.config(state=DISABLED)
+            self.ad_by_bgm_btn.config(state=DISABLED)
+            # 可以在按钮旁边加一个提示
+            #ttk.Label(ad_btn_frame, text="(永久授权可用)", font=self.font_9, bootstyle="secondary").pack(side=LEFT)
         
+        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---        
+
         # --- [修改 2: 调整语速/音调/音量布局] ---
         ttk.Label(content_frame, text="播音员:").grid(row=3, column=0, sticky='w', padx=5, pady=3)
         voice_frame = ttk.Frame(content_frame)
@@ -2867,6 +2891,27 @@ class TimedBroadcastApp:
             prompt_var.set(0); prompt_volume_var.set("80"); bgm_var.set(0); bgm_volume_var.set("40")
             repeat_entry.insert(0, "1"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
 
+        # 将所有需要用到的控件变量收集到 ad_params 字典中
+        ad_params = {
+            'dialog': dialog,
+            'name_entry': name_entry,
+            'content_text': content_text,
+            'voice_var': voice_var,
+            'speed_entry': speed_entry,
+            'pitch_entry': pitch_entry,
+            'volume_entry': volume_entry,
+            'prompt_var': prompt_var,
+            'prompt_file_var': prompt_file_var,
+            'prompt_volume_var': prompt_volume_var,
+            'bgm_var': bgm_var,
+            'bgm_file_var': bgm_file_var,
+            'bgm_volume_var': bgm_volume_var,
+        }
+
+        # 现在为按钮配置正确的 command，并传入 ad_params 字典
+        self.ad_by_voice_btn.config(command=lambda: self._create_advertisement('voice', ad_params))
+        self.ad_by_bgm_btn.config(command=lambda: self._create_advertisement('bgm', ad_params))
+
         def save_task():
             # ... (在所有代码的最前面)
 
@@ -2960,6 +3005,172 @@ class TimedBroadcastApp:
         button_text = "保存修改" if is_edit_mode else "添加"
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
         ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
+
+    def _create_advertisement(self, mode, params):
+        """
+        核心广告制作函数
+        mode: 'voice' 或 'bgm'
+        params: 包含所有UI控件变量的字典
+        """
+        # --- ↓↓↓ 核心修改：在函数开头指定 FFmpeg 路径 ↓↓↓ ---
+        try:
+            from pydub import AudioSegment
+            
+            # 构建 ffmpeg.exe 在软件根目录下的完整路径
+            ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
+
+            # 检查用户是否已经放置了 ffmpeg.exe
+            if not os.path.exists(ffmpeg_path):
+                messagebox.showerror("依赖缺失", 
+                                     "错误：未在软件根目录找到 ffmpeg.exe。\n\n"
+                                     "请下载 FFmpeg，并将其中的 ffmpeg.exe 文件放置到本软件所在的文件夹内，然后重试。",
+                                     parent=params['dialog'])
+                return
+
+            # 显式告诉 pydub FFmpeg 的位置
+            AudioSegment.converter = ffmpeg_path
+        except ImportError:
+            messagebox.showerror("依赖缺失", "错误: pydub 库未安装，无法使用此功能。", parent=params['dialog'])
+            return
+        except Exception as e:
+            messagebox.showerror("初始化失败", f"加载音频处理组件时出错: {e}", parent=params['dialog'])
+            return
+        # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
+
+        # 1. 数据验证
+        if not params['bgm_var'].get() or not params['bgm_file_var'].get().strip():
+            messagebox.showerror("错误", "必须选择背景音乐才能制作广告。", parent=params['dialog'])
+            return
+
+        bgm_path = params['bgm_file_var'].get().strip()
+        if not os.path.exists(bgm_path):
+            messagebox.showerror("错误", f"背景音乐文件不存在：\n{bgm_path}", parent=params['dialog'])
+            return
+
+        text_content = params['content_text'].get('1.0', 'end').strip()
+        if not text_content:
+            messagebox.showerror("错误", "播音文字内容不能为空。", parent=params['dialog'])
+            return
+            
+        try:
+            voice_volume = int(params['volume_entry'].get().strip() or '80')
+            bgm_volume = int(params['bgm_volume_var'].get().strip() or '40')
+            # 此处省略了对语速/音调的范围验证，假设已在保存时完成
+        except ValueError:
+            messagebox.showerror("错误", "音量必须是有效的整数。", parent=params['dialog'])
+            return
+
+        # 2. 显示进度窗口
+        progress_dialog = ttk.Toplevel(params['dialog'])
+        progress_dialog.title("正在制作广告")
+        progress_dialog.resizable(False, False)
+        progress_dialog.transient(params['dialog']); progress_dialog.grab_set()
+        
+        progress_label = ttk.Label(progress_dialog, text="正在准备...", font=self.font_11)
+        progress_label.pack(pady=10, padx=20)
+        progress = ttk.Progressbar(progress_dialog, length=300, mode='determinate')
+        progress.pack(pady=10, padx=20)
+        self.center_window(progress_dialog, parent=params['dialog'])
+
+        # 3. 在后台线程中执行耗时操作
+        def worker():
+            try:
+                # --- 步骤 A: 生成或加载语音文件 ---
+                self.root.after(0, lambda: progress_label.config(text="步骤1/4: 生成语音..."))
+                self.root.after(0, lambda: progress.config(value=10))
+
+                temp_wav_filename = f"temp_ad_{int(time.time())}.wav"
+                temp_wav_path = os.path.join(AUDIO_FOLDER, temp_wav_filename)
+                
+                voice_params = {
+                    'voice': params['voice_var'].get(),
+                    'speed': params['speed_entry'].get().strip() or "0",
+                    'pitch': params['pitch_entry'].get().strip() or "0",
+                    'volume': '100'
+                }
+                
+                success = self._synthesize_text_to_wav(text_content, voice_params, temp_wav_path)
+                if not success:
+                    raise Exception("语音合成失败！")
+
+                # --- 步骤 B: 加载音频并获取时长 ---
+                self.root.after(0, lambda: progress_label.config(text="步骤2/4: 分析音频..."))
+                self.root.after(0, lambda: progress.config(value=30))
+
+                voice_audio = AudioSegment.from_wav(temp_wav_path)
+                bgm_audio = AudioSegment.from_file(bgm_path)
+
+                voice_duration_ms = len(voice_audio)
+                bgm_duration_ms = len(bgm_audio)
+                
+                # --- 步骤 C: 根据模式进行逻辑判断和处理 ---
+                self.root.after(0, lambda: progress_label.config(text="步骤3/4: 拼接与混合音频..."))
+                self.root.after(0, lambda: progress.config(value=60))
+
+                final_voice_track = None
+                silence_5_sec = AudioSegment.silent(duration=5000)
+
+                if mode == 'voice':
+                    if bgm_duration_ms < voice_duration_ms:
+                        raise ValueError("背景音乐长度小于语音长度，无法制作。")
+                    final_voice_track = voice_audio
+                    final_bgm_track = bgm_audio[:voice_duration_ms]
+
+                elif mode == 'bgm':
+                    # 计算需要重复的次数，确保至少重复一次
+                    repeat_count = int(bgm_duration_ms // (voice_duration_ms + 5000)) + 1
+                    
+                    voice_with_silence = voice_audio + silence_5_sec
+                    repeated_voice = voice_with_silence * repeat_count
+                    
+                    final_voice_track = repeated_voice[:bgm_duration_ms]
+                    final_bgm_track = bgm_audio
+
+                # --- 步骤 D: 调整音量并混合 ---
+                # pydub的音量调整使用分贝(dB)。+6dB音量翻倍, -6dB音量减半。
+                # 这是一个简化的百分比到dB的转换，效果不错。
+                def volume_to_db(vol_percent):
+                    if vol_percent == 0: return -120  # 接近静音
+                    return 20 * (vol_percent / 100.0) - 20
+
+                # pydub apply_gain() 是相对调整，我们需要先将音频恢复到基准
+                # AudioSegment.from_...() 加载的音频已经是基准了，所以直接调整即可
+                final_voice_track = final_voice_track + volume_to_db(voice_volume)
+                final_bgm_track = final_bgm_track + volume_to_db(bgm_volume)
+
+                final_output = final_bgm_track.overlay(final_voice_track)
+
+                # --- 步骤 E: 导出为MP3 ---
+                self.root.after(0, lambda: progress_label.config(text="步骤4/4: 导出MP3文件..."))
+                self.root.after(0, lambda: progress.config(value=90))
+                
+                ad_folder = os.path.join(application_path, "导出的广告")
+                if not os.path.exists(ad_folder):
+                    os.makedirs(ad_folder)
+                
+                safe_filename = re.sub(r'[\\/*?:"<>|]', "", params['name_entry'].get().strip() or '未命名广告')
+                output_filename = f"{safe_filename}_{int(time.time())}.mp3"
+                output_path = os.path.join(ad_folder, output_filename)
+
+                final_output.export(
+                    output_path,
+                    format="mp3",
+                    bitrate="256k",
+                    parameters=["-ar", "44100"]
+                )
+
+                self.root.after(0, lambda: progress.config(value=100))
+                self.root.after(100, lambda: messagebox.showinfo("成功", f"广告制作成功！\n\n已保存至：\n{output_path}", parent=params['dialog']))
+
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("制作失败", f"发生错误：\n{e}", parent=params['dialog']))
+            
+            finally:
+                if 'temp_wav_path' in locals() and os.path.exists(temp_wav_path):
+                    os.remove(temp_wav_path)
+                self.root.after(0, progress_dialog.destroy)
+
+        threading.Thread(target=worker, daemon=True).start()
         
 #第7部分
     def _import_voice_script(self, text_widget):
@@ -5234,25 +5445,18 @@ class TimedBroadcastApp:
         self.update_todo_list()
         self.save_todos()
 
-    def open_todo_dialog(self, todo_to_edit=None, index=None):
+        def open_todo_dialog(self, todo_to_edit=None, index=None):
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
         dialog.resizable(True, True)
+        dialog.minsize(640, 550)
         dialog.transient(self.root)
-        
-        # 关键点1: 先将窗口“藏”起来，不让用户看到计算过程
-        dialog.withdraw()
+        dialog.grab_set()
 
-        # 关键点2: 使用 ScrolledFrame 作为唯一的主容器
-        scroll_container = ScrolledFrame(dialog, autohide=True)
-        scroll_container.pack(fill=BOTH, expand=True)
-
-        # 获取内部可滚动的框架，所有内容都将放在这里
-        main_frame = scroll_container.scrollable_frame
-        main_frame.configure(padding=20)
+        main_frame = ttk.Frame(dialog, padding=20)
+        main_frame.pack(fill=BOTH, expand=True)
         main_frame.columnconfigure(1, weight=1)
 
-        # --- 后续所有控件的父容器都是 main_frame，布局逻辑不变 ---
         ttk.Label(main_frame, text="名称:").grid(row=0, column=0, sticky='e', pady=5, padx=5)
         name_entry = ttk.Entry(main_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', pady=5)
@@ -5308,17 +5512,12 @@ class TimedBroadcastApp:
         ttk.Label(interval_frame, text="分钟 (0表示仅在'开始时间'提醒)", font=self.font_10).pack(side=LEFT, padx=5)
 
         def toggle_frames(*args):
-            # 简化后的 toggle_frames，只负责显示和隐藏
             if type_var.get() == 'onetime':
                 recurring_lf.grid_forget()
                 onetime_lf.grid(row=3, column=0, columnspan=4, sticky='ew', padx=5, pady=5)
             else:
                 onetime_lf.grid_forget()
                 recurring_lf.grid(row=3, column=0, columnspan=4, sticky='ew', padx=5, pady=5)
-            
-            # 关键点3: 每次切换后，都让窗口重新计算并居中
-            dialog.update_idletasks()
-            self.center_window(dialog)
 
         type_var.trace_add("write", toggle_frames)
 
@@ -5345,7 +5544,6 @@ class TimedBroadcastApp:
             recurring_daterange_entry.insert(0, '2000-01-01 ~ 2099-12-31')
             recurring_interval_entry.insert(0, '0')
 
-        # 首次手动调用，确保初始状态正确
         toggle_frames()
 
         def save():
@@ -5403,14 +5601,7 @@ class TimedBroadcastApp:
         button_frame.grid(row=4, column=0, columnspan=4, pady=20)
         ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
         ttk.Button(button_frame, text="取消", command=dialog.destroy, width=10).pack(side=LEFT, padx=10)
-        
-        # --- 关键点4: 在所有内容都设置好后，才居中并显示 ---
-        dialog.update_idletasks() 
-        self.center_window(dialog) 
-        dialog.deiconify() 
-        
-        dialog.grab_set()
-        self.root.wait_window(dialog)
+
 
 #第13部分
     def show_todo_context_menu(self, event):
