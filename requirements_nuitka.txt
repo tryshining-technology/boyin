@@ -1,0 +1,17 @@
+# requirements.txt
+
+# --- 核心功能与系统交互 ---
+pygame>=2.5.0
+pywin32>=306
+psutil>=5.9.0
+
+# --- UI、界面美化与图像处理 ---
+ttkbootstrap>=1.10.1  # 新增：用于实现Win11风格
+Pillow>=10.0.0
+
+# --- 系统托盘功能 ---
+pystray>=0.19.0
+
+# --- 视频播放 ---
+python-vlc>=3.0.18
+PySide6
