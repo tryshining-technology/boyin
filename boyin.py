@@ -1,6 +1,6 @@
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
-from ttkbootstrap.scrolled import ScrolledText, ScrolledFrame
+ffrom ttkbootstrap.scrolled import ScrolledText, ScrolledFrame
 from tkinter import messagebox, filedialog, simpledialog, font
 import tkinter as tk
 import subprocess
@@ -133,7 +133,7 @@ class TimedBroadcastApp:
         self.root = root
         self.root.title(" 创翔多功能定时播音旗舰版")
         self.root.geometry("1280x720")
-        self.root.minsize(800, 600) # 将最小尺寸调整为800x600以适应低分辨率
+        self.root.minsize(1024, 600)
 
         if os.path.exists(ICON_FILE):
             try:
@@ -569,8 +569,8 @@ class TimedBroadcastApp:
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
 
-        main_frame = ScrolledFrame(dialog, autohide=True)
-        main_frame.pack(fill=BOTH, expand=True, padx=15, pady=15)
+        main_frame = ttk.Frame(dialog, padding=15)
+        main_frame.pack(fill=BOTH, expand=True)
 
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
@@ -617,8 +617,8 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=3, column=3, padx=5)
 
-        dialog_button_frame = ttk.Frame(main_frame)
-        dialog_button_frame.grid(row=2, column=0, pady=15)
+        dialog_button_frame = ttk.Frame(dialog)
+        dialog_button_frame.pack(pady=15)
 
         if task_to_edit:
             name_entry.insert(0, task_to_edit.get('name', ''))
@@ -874,8 +874,8 @@ class TimedBroadcastApp:
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
 
-        main_frame = ScrolledFrame(dialog, autohide=True)
-        main_frame.pack(fill=BOTH, expand=True, padx=15, pady=15)
+        main_frame = ttk.Frame(dialog, padding=15)
+        main_frame.pack(fill=BOTH, expand=True)
 
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
@@ -933,8 +933,8 @@ class TimedBroadcastApp:
         ttk.Label(warning_frame, text="请确保您完全信任所要运行的程序。运行未知或恶意程序可能对计算机安全造成威胁。\n设置“停止时间”将强制终止进程，可能导致数据未保存或文件损坏。", 
                   bootstyle="inverse-danger", wraplength=450, justify=LEFT).pack(fill=X)
 
-        dialog_button_frame = ttk.Frame(main_frame)
-        dialog_button_frame.grid(row=3, column=0, pady=15)
+        dialog_button_frame = ttk.Frame(dialog)
+        dialog_button_frame.pack(pady=15)
 
         if task_to_edit:
             name_entry.insert(0, task_to_edit.get('name', ''))
@@ -1037,6 +1037,7 @@ class TimedBroadcastApp:
 
         return page_frame
         
+#第2部分
     def cancel_registration(self):
         if not messagebox.askyesno("确认操作", "您确定要取消当前注册吗？\n取消后，软件将恢复到试用或过期状态。", parent=self.root):
             return
@@ -1490,11 +1491,12 @@ class TimedBroadcastApp:
             messagebox.showinfo("重置成功", "软件已恢复到初始状态。\n\n请点击“确定”后手动关闭并重新启动软件。", parent=self.root)
         except Exception as e:
             self.log(f"重置失败: {e}"); messagebox.showerror("重置失败", f"发生错误: {e}", parent=self.root)
-#第2部分
+
     def create_scheduled_broadcast_page(self):
         page_frame = self.pages["定时广播"]
+        # 使用 grid 布局并为可伸缩行设置权重
         page_frame.columnconfigure(0, weight=1)
-        page_frame.rowconfigure(2, weight=1) # 让包含 Treeview 的行可以扩展
+        page_frame.rowconfigure(2, weight=1) 
 
         top_frame = ttk.Frame(page_frame, padding=(10, 10))
         top_frame.grid(row=0, column=0, sticky='ew')
@@ -1535,15 +1537,17 @@ class TimedBroadcastApp:
         self.stats_label = ttk.Label(stats_frame, text="节目单：0", font=self.font_11, bootstyle="secondary")
         self.stats_label.pack(side=LEFT, fill=X, expand=True)
 
-        # 使用 PanedWindow 优化布局
+        # 创建一个垂直方向的可拖动分隔窗格
         main_paned_window = ttk.PanedWindow(page_frame, orient=VERTICAL)
         main_paned_window.grid(row=2, column=0, sticky='nsew', padx=10, pady=5)
 
+        # 创建用于放置列表和日志的框架
         table_frame = ttk.Frame(main_paned_window)
         log_frame = ttk.LabelFrame(main_paned_window, text="", padding=(10, 5))
 
-        main_paned_window.add(table_frame, weight=4)
-        main_paned_window.add(log_frame, weight=1)
+        # 将两个框架添加到分隔窗格中，weight决定初始比例
+        main_paned_window.add(table_frame, weight=3) # 列表占大部分空间
+        main_paned_window.add(log_frame, weight=1)   # 日志占小部分空间
 
         columns = ('节目名称', '状态', '开始时间', '模式', '文件或内容', '音量', '周几/几号', '日期范围')
         self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12, selectmode='extended', bootstyle="primary")
@@ -1594,13 +1598,9 @@ class TimedBroadcastApp:
                                                   wrap=WORD, state='disabled')
         self.log_text.pack(fill=BOTH, expand=True)
 
+#第3部分
     def create_settings_page(self):
-        # 使用 ScrolledFrame 作为根容器，以支持滚动
-        scroll_container = ScrolledFrame(self.page_container, autohide=True)
-        
-        # 在 ScrolledFrame 内部创建一个带 padding 的 Frame，用于放置所有内容
-        settings_frame = ttk.Frame(scroll_container, padding=20)
-        settings_frame.pack(fill=BOTH, expand=True)
+        settings_frame = ttk.Frame(self.page_container, padding=20)
 
         title_label = ttk.Label(settings_frame, text="系统设置", font=self.font_14_bold, bootstyle="primary")
         title_label.pack(anchor=W, pady=(0, 10))
@@ -1738,7 +1738,7 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(weekly_reboot_time_entry, self._handle_time_scroll)
         ttk.Button(reboot_frame, text="设置", bootstyle="primary-outline", command=lambda: self.show_power_week_time_dialog("设置每周重启", self.weekly_reboot_days_var, self.weekly_reboot_time_var)).grid(row=0, column=3, sticky='e', padx=5)
 
-        return scroll_container
+        return settings_frame
 
     def _restore_all_video_speeds(self):
         if not self.tasks:
@@ -1932,7 +1932,7 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"删除整点报时文件失败: {e}")
             self.root.after(0, messagebox.showerror, "错误", f"删除报时文件失败：{e}", parent=self.root)
-#第3部分
+
     def toggle_lock_state(self):
         if self.is_locked:
             self._prompt_for_password_unlock()
@@ -2063,6 +2063,7 @@ class TimedBroadcastApp:
             self._perform_password_clear_logic()
             messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root)
 
+#第4部分
     def _handle_lock_on_start_toggle(self):
         if not self.lock_password_b64:
             if self.lock_on_start_var.get():
@@ -2175,7 +2176,7 @@ class TimedBroadcastApp:
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(expand=True, fill=X)
 
-        audio_btn = ttk.Button(btn_frame, text="🎵  音频节目",
+        audio_btn = ttk.Button(btn_frame, text="🎵 音频节目",
                              bootstyle="primary", width=20, command=lambda: self.open_audio_dialog(choice_dialog))
         audio_btn.pack(pady=8, ipady=8, fill=X)
 
@@ -2183,14 +2184,14 @@ class TimedBroadcastApp:
                              bootstyle="info", width=20, command=lambda: self.open_voice_dialog(choice_dialog))
         voice_btn.pack(pady=8, ipady=8, fill=X)
 
-        video_btn = ttk.Button(btn_frame, text="🎬  视频节目",
+        video_btn = ttk.Button(btn_frame, text="🎬 视频节目",
                              bootstyle="success", width=20, command=lambda: self.open_video_dialog(choice_dialog))
         video_btn.pack(pady=8, ipady=8, fill=X)
         if not VLC_AVAILABLE:
-            video_btn.config(state=DISABLED, text="🎬  视频节目 (VLC未安装)")
+            video_btn.config(state=DISABLED, text="🎬 视频节目 (VLC未安装)")
 
         self.center_window(choice_dialog, parent=self.root)
-#第4部分
+#第5部分
     def open_audio_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
@@ -2379,9 +2380,8 @@ class TimedBroadcastApp:
                 self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
 
         button_text = "保存修改" if is_edit_mode else "添加"
-        ttk.Button(main_frame, text=button_text, command=save_task, bootstyle="primary").grid(row=3, column=0, pady=10)
-        ttk.Button(main_frame, text="取消", command=dialog.destroy).grid(row=3, column=0, pady=10, sticky='e')
-
+        ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
+        ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
 
     def open_video_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
@@ -2637,7 +2637,8 @@ class TimedBroadcastApp:
         button_text = "保存修改" if is_edit_mode else "添加"
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
         ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
-#第5部分
+
+#第6部分
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
@@ -2874,7 +2875,8 @@ class TimedBroadcastApp:
         button_text = "保存修改" if is_edit_mode else "添加"
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
         ttk.Button(dialog_button_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=10, ipady=5)
-#第6部分
+        
+#第7部分
     def _import_voice_script(self, text_widget):
         filename = filedialog.askopenfilename(
             title="选择要导入的文稿",
@@ -3117,7 +3119,8 @@ class TimedBroadcastApp:
         count = sum(1 for i in selection if self.tasks[self.task_tree.index(i)]['status'] != status)
         for i in selection: self.tasks[self.task_tree.index(i)]['status'] = status
         if count > 0: self.update_task_list(); self.save_tasks(); self.log(f"已{status} {count} 个节目")
-#第7部分
+
+#第8部分
     def _set_tasks_status_by_type(self, task_type, status):
         if not self.tasks: return
 
@@ -3329,7 +3332,8 @@ class TimedBroadcastApp:
         ttk.Button(bottom_frame, text="取消", command=dialog.destroy).pack(side=LEFT, padx=5, ipady=5)
 
         self.center_window(dialog, parent=self.root)
-#第8部分
+
+#第9部分
     def show_daterange_settings_dialog(self, date_range_entry):
         dialog = ttk.Toplevel(self.root)
         dialog.title("日期范围")
@@ -3474,7 +3478,7 @@ class TimedBroadcastApp:
         self.status_labels[0].config(text=f"当前时间: {time_str}")
         self.status_labels[1].config(text="系统状态: 运行中")
         self.root.after(1000, self.update_status_bar)
-#第9部分
+
     def start_background_threads(self):
         threading.Thread(target=self._scheduler_worker, daemon=True).start()
         threading.Thread(target=self._playback_worker, daemon=True).start()
@@ -3575,6 +3579,7 @@ class TimedBroadcastApp:
                 self.log(f"触发运行任务: {task['name']}")
                 threading.Thread(target=self._execute_program_task, args=(task, trigger_time), daemon=True).start()
     
+    # 找到 _execute_screenshot_task 函数并替换为以下内容：
     def _execute_screenshot_task(self, task, trigger_time):
         if not IMAGE_AVAILABLE:
             self.log(f"错误：Pillow库未安装，无法执行截屏任务 '{task['name']}'。")
@@ -3586,12 +3591,14 @@ class TimedBroadcastApp:
             stop_time_str = task.get('stop_time') # 获取停止时间
 
             for i in range(repeat_count):
+                # --- 【核心修复】在这里增加停止时间的判断 ---
                 if stop_time_str:
                     current_time_str = datetime.now().strftime('%H:%M:%S')
                     if current_time_str >= stop_time_str:
                         self.log(f"任务 '{task['name']}' 已到达停止时间 '{stop_time_str}'，提前中止截屏。")
-                        break
-                
+                        break # 退出循环
+                # --- 修复结束 ---
+
                 screenshot = ImageGrab.grab()
                 filename = f"Screenshot_{task['name']}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]}.png"
                 save_path = os.path.join(SCREENSHOT_FOLDER, filename)
@@ -3604,7 +3611,7 @@ class TimedBroadcastApp:
             task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
             self.save_screenshot_tasks()
 
-        except Exception as e:
+        except Exception as e: # <--- 修正：已将 except 块正确地配对到 try 之后
             self.log(f"执行截屏任务 '{task['name']}' 失败: {e}")
 
     def _execute_program_task(self, task, trigger_time):
@@ -3769,6 +3776,7 @@ class TimedBroadcastApp:
                 while not self.playback_command_queue.empty():
                     try: self.playback_command_queue.get_nowait()
                     except queue.Empty: break
+
 #第10部分
     def _execute_broadcast(self, task, trigger_time):
         self.update_playing_text(f"[{task['name']}] 正在准备播放...")
@@ -4300,7 +4308,7 @@ class TimedBroadcastApp:
             self.fullscreen_window = None
             self.fullscreen_label = None
             self.image_tk_ref = None
-#第11部分
+
     def log(self, message): self.root.after(0, lambda: self._log_threadsafe(message))
     
     def _log_threadsafe(self, message):
@@ -4518,6 +4526,9 @@ class TimedBroadcastApp:
 
         if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
         
+        # 修复 Bug 2 (退出): 使用 os._exit(0) 强制退出进程
+        # self.root.destroy()
+        # sys.exit()
         os._exit(0)
 
     def setup_tray_icon(self):
@@ -4571,7 +4582,6 @@ class TimedBroadcastApp:
     def create_holiday_page(self):
         page_frame = ttk.Frame(self.page_container, padding=10)
         page_frame.columnconfigure(0, weight=1)
-        page_frame.rowconfigure(2, weight=1)
 
         top_frame = ttk.Frame(page_frame)
         top_frame.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 10))
@@ -4584,8 +4594,7 @@ class TimedBroadcastApp:
 
         table_frame = ttk.Frame(page_frame)
         table_frame.grid(row=2, column=0, sticky='nsew')
-        table_frame.columnconfigure(0, weight=1)
-        table_frame.rowconfigure(0, weight=1)
+        page_frame.rowconfigure(2, weight=1)
 
         columns = ('名称', '状态', '开始时间', '结束时间')
         self.holiday_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended', bootstyle="primary")
@@ -4653,6 +4662,7 @@ class TimedBroadcastApp:
             self.log(f"加载节假日失败: {e}")
             self.holidays = []
 
+#第11部分
     def update_holiday_list(self):
         if not hasattr(self, 'holiday_tree') or not self.holiday_tree.winfo_exists(): return
         selection = self.holiday_tree.selection()
@@ -4712,8 +4722,8 @@ class TimedBroadcastApp:
         dialog.resizable(False, False)
         dialog.transient(self.root); dialog.grab_set()
 
-        main_frame = ScrolledFrame(dialog, autohide=True)
-        main_frame.pack(fill=BOTH, expand=True, padx=20, pady=20)
+        main_frame = ttk.Frame(dialog, padding=20)
+        main_frame.pack(fill=BOTH, expand=True)
         main_frame.columnconfigure(1, weight=1)
 
         ttk.Label(main_frame, text="名称:").grid(row=0, column=0, sticky='w', pady=5)
@@ -4918,7 +4928,6 @@ class TimedBroadcastApp:
     def create_todo_page(self):
         page_frame = ttk.Frame(self.page_container, padding=10)
         page_frame.columnconfigure(0, weight=1)
-        page_frame.rowconfigure(2, weight=1)
 
         top_frame = ttk.Frame(page_frame)
         top_frame.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 10))
@@ -4930,8 +4939,7 @@ class TimedBroadcastApp:
 
         table_frame = ttk.Frame(page_frame)
         table_frame.grid(row=2, column=0, sticky='nsew')
-        table_frame.columnconfigure(0, weight=1)
-        table_frame.rowconfigure(0, weight=1)
+        page_frame.rowconfigure(2, weight=1)
 
         columns = ('待办事项名称', '状态', '类型', '内容', '提醒规则')
         self.todo_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended', bootstyle="primary")
@@ -5014,6 +5022,7 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"加载待办事项失败: {e}")
             self.todos = []
+#增加部分
     def load_screenshot_tasks(self):
         if not os.path.exists(SCREENSHOT_TASK_FILE): return
         try:
@@ -5051,7 +5060,8 @@ class TimedBroadcastApp:
                 json.dump(self.execute_tasks, f, ensure_ascii=False, indent=2)
         except Exception as e:
             self.log(f"保存运行任务失败: {e}")
-
+#增加部分结束
+            
 #第12部分
     def update_todo_list(self):
         if not hasattr(self, 'todo_tree') or not self.todo_tree.winfo_exists(): return
@@ -5142,8 +5152,8 @@ class TimedBroadcastApp:
         dialog.transient(self.root)
         dialog.grab_set()
 
-        main_frame = ScrolledFrame(dialog, autohide=True)
-        main_frame.pack(fill=BOTH, expand=True, padx=20, pady=20)
+        main_frame = ttk.Frame(dialog, padding=20)
+        main_frame.pack(fill=BOTH, expand=True)
         main_frame.columnconfigure(1, weight=1)
 
         ttk.Label(main_frame, text="名称:").grid(row=0, column=0, sticky='e', pady=5, padx=5)
@@ -5290,6 +5300,7 @@ class TimedBroadcastApp:
         button_frame.grid(row=4, column=0, columnspan=4, pady=20)
         ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
         ttk.Button(button_frame, text="取消", command=dialog.destroy, width=10).pack(side=LEFT, padx=10)
+
 #第13部分
     def show_todo_context_menu(self, event):
         if self.is_locked: return
@@ -5493,8 +5504,11 @@ class TimedBroadcastApp:
         reminder_win = ttk.Toplevel(self.root)
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
         
+        # --- 核心修改：完全按照您的要求，设置一个固定的窗口尺寸 ---
         reminder_win.geometry("640x480")
+        # 为了防止窗口被意外缩小，我们禁止调整大小
         reminder_win.resizable(False, False)
+        # --- 修改结束 ---
 
         reminder_win.attributes('-topmost', True)
         reminder_win.lift()
@@ -5504,6 +5518,7 @@ class TimedBroadcastApp:
         original_index = todo.get('original_index')
         task_type = todo.get('type')
 
+        # --- 使用我们已验证过可以稳定显示所有组件的 Grid 布局 ---
         reminder_win.columnconfigure(0, weight=1)
         reminder_win.rowconfigure(1, weight=1)
 
@@ -5518,6 +5533,7 @@ class TimedBroadcastApp:
         content_frame.rowconfigure(0, weight=1)
         content_frame.columnconfigure(0, weight=1)
 
+        # 使用原始的 Text 和 Scrollbar 组件，这是最可靠的组合
         content_text_widget = tk.Text(content_frame, font=self.font_11, wrap=WORD, bd=0, highlightthickness=0)
         content_text_widget.grid(row=0, column=0, sticky='nsew')
         
@@ -5529,6 +5545,7 @@ class TimedBroadcastApp:
         content_text_widget.insert('1.0', todo.get('content', ''))
         content_text_widget.config(state='disabled')
 
+        # 在按钮区内部配置按钮
         if task_type == 'onetime':
             btn_frame.columnconfigure((0, 1, 2), weight=1)
             ttk.Button(btn_frame, text="已完成", bootstyle="success", command=lambda: handle_complete()).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
@@ -5539,6 +5556,7 @@ class TimedBroadcastApp:
             ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=lambda: close_and_release()).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
             ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=lambda: handle_delete()).grid(row=0, column=1, padx=5, ipady=4, sticky='ew')
         
+        # --- 逻辑处理部分（没有变化） ---
         def close_and_release():
             self.is_reminder_active = False
             reminder_win.destroy()
@@ -5706,4 +5724,5 @@ if __name__ == "__main__":
             print("错误: psutil 库未安装，无法显示图形化错误消息。")
         sys.exit(1)
     main()
+
 #第14部分
