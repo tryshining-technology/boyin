@@ -133,7 +133,7 @@ class TimedBroadcastApp:
         self.root = root
         self.root.title(" 创翔多功能定时播音旗舰版")
         self.root.geometry("1280x720")
-        self.root.minsize(1024, 600)
+        self.root.minsize(800, 600)
 
         if os.path.exists(ICON_FILE):
             try:
@@ -2194,19 +2194,15 @@ class TimedBroadcastApp:
         dialog.minsize(800, 600)
         dialog.transient(self.root); dialog.grab_set()
 
-        # --- ↓↓↓ 核心修改区域开始 ↓↓↓ ---
-        
-        # 1. 创建一个 ScrolledFrame，并禁用水平滚动条
+        # 1. 创建 ScrolledFrame，并禁用水平滚动条
         scroll_container = ScrolledFrame(dialog, autohide=True, scrollheight=None, scrollwidth=0)
         scroll_container.pack(fill=BOTH, expand=True)
 
-        # 2. 在滚动容器内部，创建一个普通的 Frame 来放置所有控件，它负责水平扩展
-        main_frame = ttk.Frame(scroll_container, padding=15)
+        # 2. 在 ScrolledFrame 的 .scrollable_frame 内部创建用于放置所有内容的 main_frame
+        main_frame = ttk.Frame(scroll_container.scrollable_frame, padding=15)
         main_frame.pack(fill=X, expand=True)
 
-        # --- ↑↑↑ 核心修改区域结束 ↑↑↑ ---
-
-        # 后续所有控件的父容器都是 main_frame，这部分逻辑与您的原始代码完全相同
+        # --- 后续所有代码的父容器都是 main_frame ---
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
@@ -2399,7 +2395,7 @@ class TimedBroadcastApp:
         scroll_container = ScrolledFrame(dialog, autohide=True, scrollheight=None, scrollwidth=0)
         scroll_container.pack(fill=BOTH, expand=True)
 
-        main_frame = ttk.Frame(scroll_container, padding=15)
+        main_frame = ttk.Frame(scroll_container.scrollable_frame, padding=15)
         main_frame.pack(fill=X, expand=True)
 
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
@@ -2657,7 +2653,8 @@ class TimedBroadcastApp:
         scroll_container = ScrolledFrame(dialog, autohide=True, scrollheight=None, scrollwidth=0)
         scroll_container.pack(fill=BOTH, expand=True)
 
-        main_frame = ttk.Frame(scroll_container, padding=15)
+        # <--- 关键修正：父容器是 scroll_container.scrollable_frame
+        main_frame = ttk.Frame(scroll_container.scrollable_frame, padding=15)
         main_frame.pack(fill=X, expand=True)
         main_frame.columnconfigure(0, weight=1)
 
@@ -2665,7 +2662,6 @@ class TimedBroadcastApp:
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
         
-        # ... [省略后续完全相同的控件创建和逻辑代码] ...
         ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
