@@ -5445,7 +5445,7 @@ class TimedBroadcastApp:
         self.update_todo_list()
         self.save_todos()
 
-        def open_todo_dialog(self, todo_to_edit=None, index=None):
+    def open_todo_dialog(self, todo_to_edit=None, index=None):
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
         dialog.resizable(True, True)
