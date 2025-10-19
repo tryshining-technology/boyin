@@ -151,6 +151,7 @@ class TimedBroadcastApp:
         self.running = True
         self.tray_icon = None
         self.is_locked = False
+        self.is_window_pinned = False  # <--- 新增这一行，用于跟踪置顶状态
         self.is_app_locked_down = False
 
         self.auth_info = {'status': 'Unregistered', 'message': '正在验证授权...'}
@@ -1520,31 +1521,53 @@ class TimedBroadcastApp:
         add_btn = ttk.Button(top_frame, text="添加节目", command=self.add_task, bootstyle="primary")
         add_btn.pack(side=LEFT, padx=10)
 
-        self.top_right_btn_frame = ttk.Frame(top_frame)
-        self.top_right_btn_frame.pack(side=RIGHT)
+        # --- ↓↓↓ 核心修改区域开始 ↓↓↓ ---
 
-        batch_buttons = [
+        # 创建一个总的按钮容器，放置在最右侧
+        top_right_container = ttk.Frame(top_frame)
+        top_right_container.pack(side=RIGHT)
+
+        # 创建第一行按钮的容器
+        button_row_1 = ttk.Frame(top_right_container)
+        button_row_1.pack(fill=X, anchor='e')
+
+        # 创建第二行按钮的容器
+        button_row_2 = ttk.Frame(top_right_container)
+        button_row_2.pack(fill=X, anchor='e', pady=(5, 0))
+
+        # 定义第一行的按钮
+        batch_buttons_row1 = [
             ("全部启用", self.enable_all_tasks, 'success'),
             ("全部禁用", self.disable_all_tasks, 'warning'),
             ("禁音频节目", lambda: self._set_tasks_status_by_type('audio', '禁用'), 'warning-outline'),
             ("禁语音节目", lambda: self._set_tasks_status_by_type('voice', '禁用'), 'warning-outline'),
             ("禁视频节目", lambda: self._set_tasks_status_by_type('video', '禁用'), 'warning-outline'),
-            ("统一音量", self.set_uniform_volume, 'info'),
-            ("清空节目", self.clear_all_tasks, 'danger')
         ]
-        for text, cmd, style in batch_buttons:
-            btn = ttk.Button(self.top_right_btn_frame, text=text, command=cmd, bootstyle=style)
+        for text, cmd, style in batch_buttons_row1:
+            btn = ttk.Button(button_row_1, text=text, command=cmd, bootstyle=style)
             btn.pack(side=LEFT, padx=3)
 
-        self.lock_button = ttk.Button(self.top_right_btn_frame, text="锁定", command=self.toggle_lock_state, bootstyle='danger')
+        # 定义第二行的按钮
+        batch_buttons_row2 = [
+            ("统一音量", self.set_uniform_volume, 'info'),
+            ("清空节目", self.clear_all_tasks, 'danger'),
+            ("导入节目单", self.import_tasks, 'info-outline'),
+            ("导出节目单", self.export_tasks, 'info-outline'),
+        ]
+        for text, cmd, style in batch_buttons_row2:
+            btn = ttk.Button(button_row_2, text=text, command=cmd, bootstyle=style)
+            btn.pack(side=LEFT, padx=3)
+            
+        # 在第二行末尾单独添加“置顶”和“锁定”按钮
+        self.pin_button = ttk.Button(button_row_2, text="置顶", command=self.toggle_pin_state, bootstyle="info-outline")
+        self.pin_button.pack(side=LEFT, padx=3)
+        
+        self.lock_button = ttk.Button(button_row_2, text="锁定", command=self.toggle_lock_state, bootstyle='danger')
         self.lock_button.pack(side=LEFT, padx=3)
         if not WIN32_AVAILABLE:
             self.lock_button.config(state=DISABLED, text="锁定(Win)")
 
-        io_buttons = [("导入节目单", self.import_tasks, 'info-outline'), ("导出节目单", self.export_tasks, 'info-outline')]
-        for text, cmd, style in io_buttons:
-            btn = ttk.Button(self.top_right_btn_frame, text=text, command=cmd, bootstyle=style)
-            btn.pack(side=LEFT, padx=3)
+        # --- ↑↑↑ 核心修改区域结束 ↑↑↑ ---
 
         stats_frame = ttk.Frame(page_frame, padding=(10, 5))
         stats_frame.pack(side=TOP, fill=X)
@@ -1552,26 +1575,21 @@ class TimedBroadcastApp:
         self.stats_label.pack(side=LEFT, fill=X, expand=True)
 
         # --- 底部控件 (采用逆序 pack 技巧) ---
-        # 先 pack 最底部的日志区，它有固定高度
         log_frame = ttk.LabelFrame(page_frame, text="", padding=(10, 5))
         log_frame.pack(side=BOTTOM, fill=X, padx=10, pady=5)
 
-        # 再 pack 它上面的“正在播”区域，它也有固定高度
         playing_frame = ttk.LabelFrame(page_frame, text="正在播：", padding=(10, 5))
         playing_frame.pack(side=BOTTOM, fill=X, padx=10, pady=5)
         
-        # --- 中间可伸缩的列表区域 ---
-        # 最后 pack 列表区，并设置 expand=True，它会自动填充所有剩余空间
         table_frame = ttk.Frame(page_frame, padding=(10, 5))
         table_frame.pack(side=TOP, fill=BOTH, expand=True)
 
-        # --- 填充各个区域的内容 (这部分和您原始代码一致) ---
+        # --- 填充各个区域的内容 ---
         columns = ('节目名称', '状态', '开始时间', '模式', '文件或内容', '音量', '周几/几号', '日期范围')
         self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12, selectmode='extended', bootstyle="primary")
 
         self.task_tree.heading('节目名称', text='节目名称')
         self.task_tree.column('节目名称', width=200, anchor='w')
-        # ... (省略其他列定义，保持原样)
         self.task_tree.heading('状态', text='状态'); self.task_tree.column('状态', width=70, anchor='center', stretch=NO)
         self.task_tree.heading('开始时间', text='开始时间'); self.task_tree.column('开始时间', width=100, anchor='center', stretch=NO)
         self.task_tree.heading('模式', text='模式'); self.task_tree.column('模式', width=70, anchor='center', stretch=NO)
@@ -1599,7 +1617,7 @@ class TimedBroadcastApp:
         log_label = ttk.Label(log_header_frame, text="日志：", font=self.font_11_bold)
         log_label.pack(side=LEFT)
         self.clear_log_btn = ttk.Button(log_header_frame, text="清除日志", command=self.clear_log,
-                                        bootstyle="light-outline")
+                                        bootstyle="secondary-outline")
         self.clear_log_btn.pack(side=LEFT, padx=10)
 
         self.log_text = ScrolledText(log_frame, height=6, font=self.font_11,
@@ -1940,6 +1958,24 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"删除整点报时文件失败: {e}")
             self.root.after(0, messagebox.showerror, "错误", f"删除报时文件失败：{e}", parent=self.root)
+
+    def toggle_pin_state(self):
+        """切换窗口的置顶状态"""
+        # 翻转当前的置顶状态
+        self.is_window_pinned = not self.is_window_pinned
+        
+        if self.is_window_pinned:
+            # 如果是True，则执行置顶操作
+            self.root.attributes('-topmost', True)
+            # 更新按钮的文本和样式，以便用户知道下一步是“取消置顶”
+            self.pin_button.config(text="取消置顶", bootstyle="info")
+            self.log("窗口已置顶显示。")
+        else:
+            # 如果是False，则执行取消置顶操作
+            self.root.attributes('-topmost', False)
+            # 恢复按钮的初始状态
+            self.pin_button.config(text="置顶", bootstyle="info-outline")
+            self.log("窗口已取消置顶。")
 
     def toggle_lock_state(self):
         if self.is_locked:
@@ -2832,6 +2868,27 @@ class TimedBroadcastApp:
             repeat_entry.insert(0, "1"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
 
         def save_task():
+            # ... (在所有代码的最前面)
+
+            # --- ↓↓↓ 新增的验证逻辑 ↓↓↓ ---
+            try:
+                speed = int(speed_entry.get().strip() or '0')
+                pitch = int(pitch_entry.get().strip() or '0')
+                volume = int(volume_entry.get().strip() or '80')
+
+                if not (-10 <= speed <= 10):
+                    messagebox.showerror("输入错误", "语速必须在 -10 到 10 之间。", parent=dialog)
+                    return # 中断保存
+                if not (-10 <= pitch <= 10):
+                    messagebox.showerror("输入错误", "音调必须在 -10 到 10 之间。", parent=dialog)
+                    return # 中断保存
+                if not (0 <= volume <= 100):
+                    messagebox.showerror("输入错误", "音量必须在 0 到 100 之间。", parent=dialog)
+                    return # 中断保存
+            except ValueError:
+                messagebox.showerror("输入错误", "语速、音调、音量必须是有效的整数。", parent=dialog)
+                return # 中断保存
+            # --- ↑↑↑ 验证逻辑结束 ↑↑↑ ---
             text_content = content_text.get('1.0', END).strip()
             if not text_content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
