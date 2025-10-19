@@ -5238,7 +5238,8 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
         dialog.resizable(True, True)
-        dialog.minsize(600, 550)
+        # minsize 暂时去掉，让窗口自由计算
+        # dialog.minsize(700, 550) 
         dialog.transient(self.root)
         dialog.grab_set()
 
@@ -5307,6 +5308,10 @@ class TimedBroadcastApp:
             else:
                 onetime_lf.grid_forget()
                 recurring_lf.grid(row=3, column=0, columnspan=4, sticky='ew', padx=5, pady=5)
+            
+            # --- ↓↓↓ 关键修正：在切换后，让窗口重新适应内容大小 ↓↓↓ ---
+            dialog.update_idletasks() # 强制计算新布局
+            self.center_window(dialog) # 重新居中（这也会调整窗口大小）
 
         type_var.trace_add("write", toggle_frames)
 
@@ -5390,7 +5395,7 @@ class TimedBroadcastApp:
         button_frame.grid(row=4, column=0, columnspan=4, pady=20)
         ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
         ttk.Button(button_frame, text="取消", command=dialog.destroy, width=10).pack(side=LEFT, padx=10)
-
+        
         self.center_window(dialog)
 
 #第13部分
