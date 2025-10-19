@@ -20,6 +20,28 @@ import shutil
 import re
 import ctypes
 
+# --- ↓↓↓ 新增代码：全局隐藏 subprocess 调用的控制台窗口 ↓↓↓ ---
+
+# 仅在 Windows 平台上执行此操作
+if sys.platform == "win32":
+    # 创建一个 STARTUPINFO 结构体实例
+    startupinfo = subprocess.STARTUPINFO()
+    # 设置 dwFlags 来指定 wShowWindow 成员有效
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    # 设置 wShowWindow 为 SW_HIDE (0)，这将隐藏窗口
+    startupinfo.wShowWindow = 0 
+else:
+    startupinfo = None
+
+# 重写 subprocess.Popen 的默认行为
+# 我们用一个 lambda 函数来包装原始的 Popen，并传入新的 startupinfo
+_original_popen = subprocess.Popen
+subprocess.Popen = lambda *args, **kwargs: _original_popen(
+    *args,
+    **kwargs,
+    startupinfo=startupinfo
+)
+
 # --- 全局修复：启用高DPI感知 ---
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
