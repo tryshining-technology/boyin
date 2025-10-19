@@ -5240,13 +5240,19 @@ class TimedBroadcastApp:
         dialog.resizable(True, True)
         dialog.transient(self.root)
         
-        # 关键点1: 先将窗口“藏”起来
+        # 关键点1: 先将窗口“藏”起来，不让用户看到计算过程
         dialog.withdraw()
 
-        main_frame = ttk.Frame(dialog, padding=20)
-        main_frame.pack(fill=BOTH, expand=True)
+        # 关键点2: 使用 ScrolledFrame 作为唯一的主容器
+        scroll_container = ScrolledFrame(dialog, autohide=True)
+        scroll_container.pack(fill=BOTH, expand=True)
+
+        # 获取内部可滚动的框架，所有内容都将放在这里
+        main_frame = scroll_container.scrollable_frame
+        main_frame.configure(padding=20)
         main_frame.columnconfigure(1, weight=1)
 
+        # --- 后续所有控件的父容器都是 main_frame，布局逻辑不变 ---
         ttk.Label(main_frame, text="名称:").grid(row=0, column=0, sticky='e', pady=5, padx=5)
         name_entry = ttk.Entry(main_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', pady=5)
@@ -5309,7 +5315,10 @@ class TimedBroadcastApp:
             else:
                 onetime_lf.grid_forget()
                 recurring_lf.grid(row=3, column=0, columnspan=4, sticky='ew', padx=5, pady=5)
-            # 不再调用 center_window
+            
+            # 关键点3: 每次切换后，都让窗口重新计算并居中
+            dialog.update_idletasks()
+            self.center_window(dialog)
 
         type_var.trace_add("write", toggle_frames)
 
@@ -5395,10 +5404,10 @@ class TimedBroadcastApp:
         ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
         ttk.Button(button_frame, text="取消", command=dialog.destroy, width=10).pack(side=LEFT, padx=10)
         
-        # --- [核心修正 3]: 调整显示和居中的时机 ---
-        dialog.update_idletasks() # 强制计算一次最终布局
-        self.center_window(dialog) # 根据最终布局居中
-        dialog.deiconify() # 将窗口从“隐藏”状态恢复，显示在正确位置
+        # --- 关键点4: 在所有内容都设置好后，才居中并显示 ---
+        dialog.update_idletasks() 
+        self.center_window(dialog) 
+        dialog.deiconify() 
         
         dialog.grab_set()
         self.root.wait_window(dialog)
