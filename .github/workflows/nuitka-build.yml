@@ -13,17 +13,18 @@ jobs:
           - python-version: '3.8.10'
             architecture: 'x86'
             artifact-name: 'boyin-Windows-x86-for-Win7'
-            output-dir-name: '创翔多功能定时播音旗舰版_x86_for_Win7'
+            # --- 核心修正 1：使用简单的 ASCII 目录名 ---
+            output-dir-name: 'boyin_win32'
 
           - python-version: '3.8.10'
             architecture: 'x64'
             artifact-name: 'boyin-Windows-x64-for-Win7'
-            output-dir-name: '创翔多功能定时播音旗舰版_x64_for_Win7'
+            output-dir-name: 'boyin_win64_py38'
 
           - python-version: '3.11'
             architecture: 'x64'
             artifact-name: 'boyin-Windows-x64-for-Win8.1+'
-            output-dir-name: '创翔多功能定时播音旗舰版_x64_for_Win8.1+'
+            output-dir-name: 'boyin_win64_py311'
 
     runs-on: windows-latest
 
@@ -49,18 +50,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements_nuitka.txt
-          # --- 核心修正：修正 pywin32 脚本的拼写错误 ---
           python (Get-Command pywin32_postinstall.py).Source -install
         shell: pwsh
 
-      # 核心步骤: Nuitka 编译，不包含 VLC
+      # 核心步骤: Nuitka 编译
       - name: Build application with Nuitka
         run: |
           python -m nuitka --standalone --windows-disable-console `
             --output-dir="${{ matrix.output-dir-name }}" `
             --windows-icon-from-ico="icon.ico" `
             --include-data-file="icon.ico=icon.ico" `
+            # --- 核心修正 2：根据 Nuitka 警告，加回 tk-inter 插件 ---
+            --enable-plugin=tk-inter `
             --product-name="创翔多功能定时播音旗舰版" `
+            --output-filename="创翔多功能定时播音旗舰版.exe" `
             boyin.py
         shell: pwsh
 
