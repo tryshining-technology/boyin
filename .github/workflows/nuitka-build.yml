@@ -52,7 +52,7 @@ jobs:
           python (Get-Command pywin32_postinstall.py).Source -install
         shell: pwsh
 
-      # 步骤 1: Nuitka 编译
+      # 步骤 1: Nuitka 编译 (干净的、无内部注释的版本)
       - name: Build application with Nuitka
         run: |
           python -m nuitka --standalone --windows-disable-console `
@@ -61,7 +61,6 @@ jobs:
             --include-data-file="icon.ico=icon.ico" `
             --enable-plugin=tk-inter `
             --product-name="创翔多功能定时播音旗舰版" `
-            # --- 核心修正：添加必不可少的版本号信息 ---
             --product-version="1.0.0.0" `
             --file-version="1.0.0.0" `
             boyin.py
