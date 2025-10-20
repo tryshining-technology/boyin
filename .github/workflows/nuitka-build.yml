@@ -51,7 +51,6 @@ jobs:
       - name: Install dependencies and configure pywin32
         run: |
           python -m pip install --upgrade pip
-          # requirements_nuitka.txt 中已包含 Nuitka，不再需要单独安装 PyInstaller
           pip install -r requirements_nuitka.txt
           python (Get-Command pywin32_postinstall.py).Source -install
         shell: pwsh
@@ -64,8 +63,10 @@ jobs:
             --windows-icon-from-ico="icon.ico" `
             --include-data-file="icon.ico=icon.ico" `
             --include-data-dir="${{ matrix.vlc-folder }}=." `
-            --plugin-enable=pygame `
-            --plugin-enable=tk-inter `
+            # --- 核心修正 ---
+            # 移除 --plugin-enable=pygame 和 tk-inter，让 Nuitka 自动检测
+            # 新增 --enable-plugin=vlc 确保 vlc 库被正确处理
+            --enable-plugin=vlc `
             --product-name="创翔多功能定时播音旗舰版" `
             boyin.py
         shell: pwsh
