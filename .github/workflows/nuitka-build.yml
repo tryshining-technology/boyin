@@ -1,4 +1,4 @@
-name: Build with Nuitka (Standalone Folder Mode - 64bit Only)
+name: Build with Nuitka and PyInstaller
 
 on:
   push:
@@ -10,17 +10,25 @@ jobs:
     strategy:
       matrix:
         include:
-          # Python 3.8 for Windows 7/8/10 (64-bit)
+          # --- 32-bit build using PyInstaller + PyArmor ---
+          - python-version: '3.8.10'
+            architecture: 'x86'
+            artifact-name: 'boyin-Windows-x86-for-Win7-PYARMOR'
+            vlc-folder: 'vlc_lib_x86'
+            build-tool: 'pyarmor'
+
+          # --- 64-bit builds using Nuitka ---
           - python-version: '3.8.10'
             architecture: 'x64'
             artifact-name: 'boyin-Windows-x64-for-Win7-NUITKA'
             vlc-folder: 'vlc_lib_x64'
+            build-tool: 'nuitka'
 
-          # Python 3.11 for Windows 8.1/10/11 (64-bit)
           - python-version: '3.11'
             architecture: 'x64'
             artifact-name: 'boyin-Windows-x64-for-Win8.1+-NUITKA'
             vlc-folder: 'vlc_lib_x64'
+            build-tool: 'nuitka'
 
     runs-on: windows-latest
 
@@ -38,63 +46,73 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\pip\Cache
-          # 使用 v4 版本号强制刷新缓存
-          key: v4-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements_nuitka.txt') }}
+          key: v5-${{ runner.os }}-${{ matrix.build-tool }}-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements*.txt') }}
           restore-keys: |
-            v4-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
+            v5-${{ runner.os }}-${{ matrix.build-tool }}-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
 
-      - name: Install dependencies with Strict Error Checking
+      - name: Install Nuitka dependencies
+        if: matrix.build-tool == 'nuitka'
         run: |
-          # 强制 PowerShell 在遇到任何错误时立即停止
           $ErrorActionPreference = "Stop"
-
           python -m pip install --upgrade pip
-          Write-Host "=== Installing from requirements_nuitka.txt ==="
           pip install -r requirements_nuitka.txt
-          
-          Write-Host "=== Listing all installed packages for verification ==="
-          pip list
-          
-          Write-Host "=== Installing Nuitka ==="
           pip install nuitka
+          Write-Host "=== Nuitka dependencies installed ==="
+          pip list
         shell: pwsh
 
-      - name: Build and Archive application with Nuitka
+      - name: Install PyInstaller dependencies
+        if: matrix.build-tool == 'pyarmor'
         run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          pip install -r requirements_pyinstaller.txt
+          pip install pyinstaller
+          Write-Host "=== PyInstaller/PyArmor dependencies installed ==="
+          pip list
+        shell: pwsh
+
+      - name: Build with Nuitka
+        if: matrix.build-tool == 'nuitka'
+        run: |
+          # ... (Nuitka build script remains the same)
           $ErrorActionPreference = "Stop"
           Write-Host "=== 构建 Nuitka 编译版本 (Standalone 文件夹模式) ==="
           $outputDir = "boyin.dist"
           $exeName = "创翔多功能定时播音旗舰版.exe"
           $zipName = "${{ matrix.artifact-name }}.zip"
-
-          $nuitkaArgs = @(
-              "--standalone",
-              "--windows-console-mode=disable",
-              "--lto=yes",
-              "--assume-yes-for-downloads",
-              "--output-dir=$outputDir",
-              "--output-filename=$exeName",
-              "--windows-icon-from-ico=icon.ico",
-              "--product-name=创翔多功能定时播音旗舰版",
-              "--file-version=1.0.0",
-              "--company-name=创翔",
-              "--enable-plugin=tk-inter",
-              "--enable-plugin=pyside6",
-              "--enable-plugin=anti-bloat",
-              "--include-package-data=pygame",
-              "--include-package-data=ttkbootstrap",
-              "--include-data-file=icon.ico=icon.ico",
-              "--include-data-dir=${{ matrix.vlc-folder }}=${{ matrix.vlc-folder }}",
-              "boyin.py"
-          )
-          
+          $nuitkaArgs = @( "--standalone", "--windows-console-mode=disable", "--lto=yes", "--assume-yes-for-downloads", "--output-dir=$outputDir", "--output-filename=$exeName", "--windows-icon-from-ico=icon.ico", "--product-name=创翔多功能定时播音旗舰版", "--file-version=1.0.0", "--company-name=创翔", "--enable-plugin=tk-inter", "--enable-plugin=pyside6", "--enable-plugin=anti-bloat", "--include-package-data=pygame", "--include-package-data=ttkbootstrap", "--include-data-file=icon.ico=icon.ico", "--include-data-dir=${{ matrix.vlc-folder }}=${{ matrix.vlc-folder }}", "boyin.py" )
           python -m nuitka $nuitkaArgs
-
-          Write-Host "=== 正在压缩构建产物... ==="
+          Write-Host "=== 正在压缩 Nuitka 构建产物... ==="
           Compress-Archive -Path "$outputDir\*" -DestinationPath $zipName -Force
         shell: pwsh
 
-      - name: Upload Nuitka artifact
+      - name: Build with PyArmor and PyInstaller
+        if: matrix.build-tool == 'pyarmor'
+        run: |
+          $ErrorActionPreference = "Stop"
+          Write-Host "=== 构建 PyInstaller + PyArmor 保护版本 (OneFile 模式) ==="
+          $outputDir = "dist" # PyInstaller 默认输出文件夹
+          $zipName = "${{ matrix.artifact-name }}.zip"
+          
+          # 定义 PyInstaller 的参数
+          $pyinstallerOpts = @(
+              "--onefile",
+              "--noconsole",
+              "--icon=icon.ico",
+              "--add-data '${{ matrix.vlc-folder }};${{ matrix.vlc-folder }}'",
+              "--add-data 'icon.ico;.'"
+          )
+          
+          # 使用 pyarmor pack 命令，它会自动调用 PyInstaller
+          pyarmor pack -e "$($pyinstallerOpts -join ' ')" boyin.py
+
+          Write-Host "=== 正在压缩 PyArmor 构建产物... ==="
+          # PyArmor + OneFile 会在 dist 文件夹下生成 exe
+          Compress-Archive -Path "$outputDir\*" -DestinationPath $zipName -Force
+        shell: pwsh
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact-name }}
