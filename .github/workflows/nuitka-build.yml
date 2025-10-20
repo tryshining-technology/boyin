@@ -1,4 +1,4 @@
-name: Build with Nuitka (Standalone Folder Mode)
+name: Build with Nuitka (Standalone Folder Mode - Diagnostic)
 
 on:
   push:
@@ -41,15 +41,23 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\pip\Cache
-          # --- ↓↓↓ 核心修改：在 key 的最前面增加一个版本号 "v1-" 来强制刷新缓存 ↓↓↓ ---
-          key: v1-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements_nuitka.txt') }}
+          key: v2-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements_nuitka.txt') }}
           restore-keys: |
-            v1-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
+            v2-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
 
-      - name: Install dependencies
+      - name: Install dependencies with diagnostics
         run: |
           python -m pip install --upgrade pip
+          Write-Host "=== Installing from requirements_nuitka.txt ==="
           pip install -r requirements_nuitka.txt
+          
+          Write-Host "=== Forcing PySide6 installation separately ==="
+          pip install PySide6
+          
+          Write-Host "=== Listing all installed packages for verification ==="
+          pip list
+          
+          Write-Host "=== Installing Nuitka ==="
           pip install nuitka
         shell: pwsh
 
