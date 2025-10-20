@@ -17,4 +17,4 @@ python-vlc>=3.0.18
 pydub
 
 # --- 构建工具 ---
-Nuitka>=1.8.0 # 新增：用于编译和打包，替代PyInstaller
+Nuitka==2.2 # 新增：用于编译和打包，替代PyInstaller
