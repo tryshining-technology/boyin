@@ -1664,35 +1664,46 @@ class TimedBroadcastApp:
         ttk.Checkbutton(general_frame, text="登录windows后自动启动", variable=self.autostart_var, bootstyle="round-toggle", command=self._handle_autostart_setting).pack(fill=X, pady=5)
         ttk.Checkbutton(general_frame, text="启动后最小化到系统托盘", variable=self.start_minimized_var, bootstyle="round-toggle", command=self.save_settings).pack(fill=X, pady=5)
 
-        lock_and_buttons_frame = ttk.Frame(general_frame)
-        lock_and_buttons_frame.pack(fill=X, pady=5)
+        # --- ↓↓↓ 核心修改区域 1 开始 ↓↓↓ ---
+        
+        # 使用一个新的 Frame 来容纳“启动锁定”和它的提示
+        lock_on_start_frame = ttk.Frame(general_frame)
+        lock_on_start_frame.pack(fill=X, pady=5)
 
-        self.lock_on_start_cb = ttk.Checkbutton(lock_and_buttons_frame, text="启动软件后立即锁定", variable=self.lock_on_start_var, bootstyle="round-toggle", command=self._handle_lock_on_start_toggle)
-        self.lock_on_start_cb.grid(row=0, column=0, sticky='w')
+        self.lock_on_start_cb = ttk.Checkbutton(lock_on_start_frame, text="启动软件后立即锁定", variable=self.lock_on_start_var, bootstyle="round-toggle", command=self._handle_lock_on_start_toggle)
+        self.lock_on_start_cb.pack(side=LEFT)
         if not WIN32_AVAILABLE:
             self.lock_on_start_cb.config(state=DISABLED)
 
-        ttk.Label(lock_and_buttons_frame, text="(请先在主界面设置锁定密码)", font=self.font_9, bootstyle="secondary").grid(row=1, column=0, sticky='w', padx=20)
+        # 将提示标签放在 Checkbutton 右侧
+        ttk.Label(lock_on_start_frame, text="(请先在主界面设置锁定密码)", font=self.font_9, bootstyle="secondary").pack(side=LEFT, padx=10, anchor='w')
 
-        self.clear_password_btn = ttk.Button(lock_and_buttons_frame, text="清除锁定密码", command=self.clear_lock_password, bootstyle="warning-outline")
-        self.clear_password_btn.grid(row=0, column=1, padx=20)
+        # “清除密码”按钮保持不变，单独一行
+        self.clear_password_btn = ttk.Button(general_frame, text="清除锁定密码", command=self.clear_lock_password, bootstyle="warning-outline", width=15)
+        self.clear_password_btn.pack(pady=(0, 8), anchor='w', padx=20)
 
-        action_buttons_frame = ttk.Frame(general_frame)
-        action_buttons_frame.pack(fill=X, pady=8)
+        # --- ↑↑↑ 核心修改区域 1 结束 ↑↑↑ ---
 
-        self.cancel_bg_images_btn = ttk.Button(action_buttons_frame, text="取消所有节目背景图片", command=self._cancel_all_background_images, bootstyle="info-outline")
-        self.cancel_bg_images_btn.pack(side=LEFT, padx=5)
+
+        # --- ↓↓↓ 核心修改区域 2 开始 ↓↓↓ ---
         
-        self.restore_video_speed_btn = ttk.Button(action_buttons_frame, text="恢复所有视频节目播放速度", command=self._restore_all_video_speeds, bootstyle="info-outline")
-        self.restore_video_speed_btn.pack(side=LEFT, padx=5)
-
         bg_interval_frame = ttk.Frame(general_frame)
         bg_interval_frame.pack(fill=X, pady=8)
+        
         ttk.Label(bg_interval_frame, text="背景图片切换间隔:").pack(side=LEFT)
         interval_entry = ttk.Entry(bg_interval_frame, textvariable=self.bg_image_interval_var, font=self.font_11, width=5)
         interval_entry.pack(side=LEFT, padx=5)
         ttk.Label(bg_interval_frame, text="秒 (范围: 5-60)", font=self.font_10, bootstyle="secondary").pack(side=LEFT)
         ttk.Button(bg_interval_frame, text="确定", command=self._validate_bg_interval, bootstyle="primary-outline").pack(side=LEFT, padx=10)
+
+        # 将两个操作按钮放在“确定”按钮的右侧
+        self.cancel_bg_images_btn = ttk.Button(bg_interval_frame, text="取消所有节目背景图片", command=self._cancel_all_background_images, bootstyle="info-outline")
+        self.cancel_bg_images_btn.pack(side=LEFT, padx=5)
+        
+        self.restore_video_speed_btn = ttk.Button(bg_interval_frame, text="恢复所有视频节目播放速度", command=self._restore_all_video_speeds, bootstyle="info-outline")
+        self.restore_video_speed_btn.pack(side=LEFT, padx=5)
+
+        # --- ↑↑↑ 核心修改区域 2 结束 ↑↑↑ ---
 
         font_frame = ttk.Frame(general_frame)
         font_frame.pack(fill=X, pady=8)
