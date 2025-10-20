@@ -104,8 +104,8 @@ jobs:
           )
           
           # --- ↓↓↓ 核心修改在这里 ↓↓↓ ---
-          # 使用 python -m pyarmor.cli.core pack 命令，这是调用 PyArmor 7.x 的标准方式
-          python -m pyarmor.cli.core pack -e "$($pyinstallerOpts -join ' ')" boyin.pyy
+          # 使用 python -m pyarmor pack，并确保安装的是 PyArmor 7.x
+          python -m pyarmor pack -e "$($pyinstallerOpts -join ' ')" boyin.py
 
           Write-Host "=== 正在压缩 PyArmor 构建产物... ==="
           # PyArmor + OneFile 会在 dist 文件夹下生成 exe
