@@ -17,4 +17,4 @@ python-vlc>=3.0.18
 
 # --- 其他 ---
 pydub
-pyarmor.cli.core<8.0  # <--- [核心修正] 使用正确的包名和版本约束
+pyarmor==7.7.4  # <--- [核心修正] 锁定到 PyArmor 7 的最后一个稳定版本
