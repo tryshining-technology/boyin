@@ -1,4 +1,4 @@
-name: Build with Nuitka (Standalone Folder Mode - Diagnostic)
+name: Build with Nuitka (Standalone Folder Mode - Final Diagnostic)
 
 on:
   push:
@@ -41,19 +41,19 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\pip\Cache
-          # --- [修改] 强制刷新缓存版本到 v2 ---
-          key: v2-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements_nuitka.txt') }}
+          # 强制刷新缓存到 v3
+          key: v3-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements_nuitka.txt') }}
           restore-keys: |
-            v2-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
+            v3-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
 
-      - name: Install dependencies with diagnostics
+      - name: Install dependencies with Strict Error Checking
         run: |
+          # --- ↓↓↓ 核心修改：强制 PowerShell 在遇到任何错误时立即停止 ↓↓↓ ---
+          $ErrorActionPreference = "Stop"
+
           python -m pip install --upgrade pip
           Write-Host "=== Installing from requirements_nuitka.txt ==="
           pip install -r requirements_nuitka.txt
-          
-          Write-Host "=== Forcing PySide6 installation separately ==="
-          pip install PySide6
           
           Write-Host "=== Listing all installed packages for verification ==="
           pip list
@@ -64,6 +64,7 @@ jobs:
 
       - name: Build and Archive application with Nuitka
         run: |
+          $ErrorActionPreference = "Stop"
           Write-Host "=== 构建 Nuitka 编译版本 (Standalone 文件夹模式) ==="
           $outputDir = "boyin.dist"
           $exeName = "创翔多功能定时播音旗舰版.exe"
