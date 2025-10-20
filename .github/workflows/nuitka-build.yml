@@ -52,7 +52,7 @@ jobs:
           python (Get-Command pywin32_postinstall.py).Source -install
         shell: pwsh
 
-      # 步骤 1: 使用纯 ASCII 文件名进行 Nuitka 编译
+      # 步骤 1: Nuitka 编译
       - name: Build application with Nuitka
         run: |
           python -m nuitka --standalone --windows-disable-console `
@@ -61,16 +61,19 @@ jobs:
             --include-data-file="icon.ico=icon.ico" `
             --enable-plugin=tk-inter `
             --product-name="创翔多功能定时播音旗舰版" `
+            # --- 核心修正：添加必不可少的版本号信息 ---
+            --product-version="1.0.0.0" `
+            --file-version="1.0.0.0" `
             boyin.py
         shell: pwsh
 
-      # 步骤 2: 将生成的文件重命名为中文名称
+      # 步骤 2: 重命名可执行文件
       - name: Rename executable
         run: |
           Rename-Item -Path "${{ matrix.output-dir-name }}/boyin.exe" -NewName "创翔多功能定时播音旗舰版.exe"
         shell: pwsh
 
-      # 步骤 3: 上传最终的产物
+      # 步骤 3: 上传产物
       - name: Upload artifact (${{ matrix.artifact-name }})
         uses: actions/upload-artifact@v4
         with:
