@@ -41,6 +41,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\pip\Cache
+          # --- [修改] 强制刷新缓存版本到 v2 ---
           key: v2-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements_nuitka.txt') }}
           restore-keys: |
             v2-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
