@@ -1,4 +1,4 @@
-name: Build with Nuitka and PyInstaller
+name: Build Python Application with Nuitka
 
 on:
   push:
@@ -10,25 +10,23 @@ jobs:
     strategy:
       matrix:
         include:
-          # --- 32-bit build using PyInstaller + PyArmor ---
           - python-version: '3.8.10'
             architecture: 'x86'
-            artifact-name: 'boyin-Windows-x86-for-Win7-PYARMOR'
+            artifact-name: 'boyin-Windows-x86-for-Win7'
+            output-dir-name: '创翔多功能定时播音旗舰版_x86_for_Win7'
             vlc-folder: 'vlc_lib_x86'
-            build-tool: 'pyarmor'
 
-          # --- 64-bit builds using Nuitka ---
           - python-version: '3.8.10'
             architecture: 'x64'
-            artifact-name: 'boyin-Windows-x64-for-Win7-NUITKA'
+            artifact-name: 'boyin-Windows-x64-for-Win7'
+            output-dir-name: '创翔多功能定时播音旗舰版_x64_for_Win7'
             vlc-folder: 'vlc_lib_x64'
-            build-tool: 'nuitka'
 
           - python-version: '3.11'
             architecture: 'x64'
-            artifact-name: 'boyin-Windows-x64-for-Win8.1+-NUITKA'
+            artifact-name: 'boyin-Windows-x64-for-Win8.1+'
+            output-dir-name: '创翔多功能定时播音旗舰版_x64_for_Win8.1+'
             vlc-folder: 'vlc_lib_x64'
-            build-tool: 'nuitka'
 
     runs-on: windows-latest
 
@@ -46,74 +44,35 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\pip\Cache
-          key: v5-${{ runner.os }}-${{ matrix.build-tool }}-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          key: ${{ runner.os }}-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements_nuitka.txt') }}
           restore-keys: |
-            v5-${{ runner.os }}-${{ matrix.build-tool }}-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
+            ${{ runner.os }}-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
 
-      - name: Install Nuitka dependencies
-        if: matrix.build-tool == 'nuitka'
+      - name: Install dependencies and configure pywin32
         run: |
-          $ErrorActionPreference = "Stop"
           python -m pip install --upgrade pip
+          # requirements_nuitka.txt 中已包含 Nuitka，不再需要单独安装 PyInstaller
           pip install -r requirements_nuitka.txt
-          pip install nuitka
-          Write-Host "=== Nuitka dependencies installed ==="
-          pip list
+          python (Get-Command pywin32_postinstall.py).Source -install
         shell: pwsh
 
-      - name: Install PyInstaller dependencies
-        if: matrix.build-tool == 'pyarmor'
+      # 核心步骤: 使用 Nuitka 编译和打包成 standalone 文件夹
+      - name: Build application with Nuitka
         run: |
-          $ErrorActionPreference = "Stop"
-          python -m pip install --upgrade pip
-          pip install -r requirements_pyinstaller.txt
-          pip install pyinstaller
-          Write-Host "=== PyInstaller/PyArmor dependencies installed ==="
-          pip list
+          python -m nuitka --standalone --windows-disable-console `
+            --output-dir="${{ matrix.output-dir-name }}" `
+            --windows-icon-from-ico="icon.ico" `
+            --include-data-file="icon.ico=icon.ico" `
+            --include-data-dir="${{ matrix.vlc-folder }}=." `
+            --plugin-enable=pygame `
+            --plugin-enable=tk-inter `
+            --product-name="创翔多功能定时播音旗舰版" `
+            boyin.py
         shell: pwsh
 
-      - name: Build with Nuitka
-        if: matrix.build-tool == 'nuitka'
-        run: |
-          $ErrorActionPreference = "Stop"
-          Write-Host "=== 构建 Nuitka 编译版本 (Standalone 文件夹模式) ==="
-          $outputDir = "boyin.dist"
-          $exeName = "创翔多功能定时播音旗舰版.exe"
-          $zipName = "${{ matrix.artifact-name }}.zip"
-          $nuitkaArgs = @( "--standalone", "--windows-console-mode=disable", "--lto=yes", "--assume-yes-for-downloads", "--output-dir=$outputDir", "--output-filename=$exeName", "--windows-icon-from-ico=icon.ico", "--product-name=创翔多功能定时播音旗舰版", "--file-version=1.0.0", "--company-name=创翔", "--enable-plugin=tk-inter", "--enable-plugin=pyside6", "--enable-plugin=anti-bloat", "--include-package-data=pygame", "--include-package-data=ttkbootstrap", "--include-data-file=icon.ico=icon.ico", "--include-data-dir=${{ matrix.vlc-folder }}=${{ matrix.vlc-folder }}", "boyin.py" )
-          python -m nuitka $nuitkaArgs
-          Write-Host "=== 正在压缩 Nuitka 构建产物... ==="
-          Compress-Archive -Path "$outputDir\*" -DestinationPath $zipName -Force
-        shell: pwsh
-
-      - name: Build with PyArmor and PyInstaller
-        if: matrix.build-tool == 'pyarmor'
-        run: |
-          $ErrorActionPreference = "Stop"
-          Write-Host "=== 构建 PyInstaller + PyArmor 保护版本 (OneFile 模式) ==="
-          $outputDir = "dist" # PyInstaller 默认输出文件夹
-          $zipName = "${{ matrix.artifact-name }}.zip"
-          
-          # 定义 PyInstaller 的参数
-          $pyinstallerOpts = @(
-              "--onefile",
-              "--noconsole",
-              "--icon=icon.ico",
-              "--add-data '${{ matrix.vlc-folder }};${{ matrix.vlc-folder }}'",
-              "--add-data 'icon.ico;.'"
-          )
-          
-          # --- ↓↓↓ 核心修改在这里 ↓↓↓ ---
-          # 使用 python -m pyarmor pack，并确保安装的是 PyArmor 7.x
-          python -m pyarmor pack -e "$($pyinstallerOpts -join ' ')" boyin.py
-
-          Write-Host "=== 正在压缩 PyArmor 构建产物... ==="
-          # PyArmor + OneFile 会在 dist 文件夹下生成 exe
-          Compress-Archive -Path "$outputDir\*" -DestinationPath $zipName -Force
-        shell: pwsh
-
-      - name: Upload Artifact
+      # 上传打包好的整个文件夹
+      - name: Upload artifact (${{ matrix.artifact-name }})
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact-name }}
-          path: ${{ matrix.artifact-name }}.zip
+          path: ${{ matrix.output-dir-name }}/
