@@ -1,4 +1,4 @@
-name: Build with Nuitka (Standalone Folder Mode - Final Diagnostic)
+name: Build with Nuitka (Standalone Folder Mode - 64bit Only)
 
 on:
   push:
@@ -10,16 +10,13 @@ jobs:
     strategy:
       matrix:
         include:
-          - python-version: '3.8.10'
-            architecture: 'x86'
-            artifact-name: 'boyin-Windows-x86-for-Win7-NUITKA'
-            vlc-folder: 'vlc_lib_x86'
-
+          # Python 3.8 for Windows 7/8/10 (64-bit)
           - python-version: '3.8.10'
             architecture: 'x64'
             artifact-name: 'boyin-Windows-x64-for-Win7-NUITKA'
             vlc-folder: 'vlc_lib_x64'
 
+          # Python 3.11 for Windows 8.1/10/11 (64-bit)
           - python-version: '3.11'
             architecture: 'x64'
             artifact-name: 'boyin-Windows-x64-for-Win8.1+-NUITKA'
@@ -41,14 +38,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\pip\Cache
-          # 强制刷新缓存到 v3
-          key: v3-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements_nuitka.txt') }}
+          # 使用 v4 版本号强制刷新缓存
+          key: v4-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements_nuitka.txt') }}
           restore-keys: |
-            v3-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
+            v4-${{ runner.os }}-nuitka-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
 
       - name: Install dependencies with Strict Error Checking
         run: |
-          # --- ↓↓↓ 核心修改：强制 PowerShell 在遇到任何错误时立即停止 ↓↓↓ ---
+          # 强制 PowerShell 在遇到任何错误时立即停止
           $ErrorActionPreference = "Stop"
 
           python -m pip install --upgrade pip
