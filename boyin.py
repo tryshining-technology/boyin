@@ -3034,14 +3034,11 @@ class TimedBroadcastApp:
         mode: 'voice' 或 'bgm'
         params: 包含所有UI控件变量的字典
         """
-        # --- ↓↓↓ 核心修改：在函数开头指定 FFmpeg 路径 ↓↓↓ ---
         try:
             from pydub import AudioSegment
             
-            # 构建 ffmpeg.exe 在软件根目录下的完整路径
             ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
 
-            # 检查用户是否已经放置了 ffmpeg.exe
             if not os.path.exists(ffmpeg_path):
                 messagebox.showerror("依赖缺失", 
                                      "错误：未在软件根目录找到 ffmpeg.exe。\n\n"
@@ -3049,7 +3046,6 @@ class TimedBroadcastApp:
                                      parent=params['dialog'])
                 return
 
-            # 显式告诉 pydub FFmpeg 的位置
             AudioSegment.converter = ffmpeg_path
         except ImportError:
             messagebox.showerror("依赖缺失", "错误: pydub 库未安装，无法使用此功能。", parent=params['dialog'])
@@ -3057,7 +3053,6 @@ class TimedBroadcastApp:
         except Exception as e:
             messagebox.showerror("初始化失败", f"加载音频处理组件时出错: {e}", parent=params['dialog'])
             return
-        # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
 
         # 1. 数据验证
         if not params['bgm_var'].get() or not params['bgm_file_var'].get().strip():
@@ -3077,7 +3072,6 @@ class TimedBroadcastApp:
         try:
             voice_volume = int(params['volume_entry'].get().strip() or '80')
             bgm_volume = int(params['bgm_volume_var'].get().strip() or '40')
-            # 此处省略了对语速/音调的范围验证，假设已在保存时完成
         except ValueError:
             messagebox.showerror("错误", "音量必须是有效的整数。", parent=params['dialog'])
             return
@@ -3096,6 +3090,7 @@ class TimedBroadcastApp:
 
         # 3. 在后台线程中执行耗时操作
         def worker():
+            temp_wav_path = None
             try:
                 # --- 步骤 A: 生成或加载语音文件 ---
                 self.root.after(0, lambda: progress_label.config(text="步骤1/4: 生成语音..."))
@@ -3124,43 +3119,73 @@ class TimedBroadcastApp:
 
                 voice_duration_ms = len(voice_audio)
                 bgm_duration_ms = len(bgm_audio)
-                
-                # --- 步骤 C: 根据模式进行逻辑判断和处理 ---
-                self.root.after(0, lambda: progress_label.config(text="步骤3/4: 拼接与混合音频..."))
+
+                if voice_duration_ms == 0:
+                    raise ValueError("合成的语音长度为0，无法制作广告。")
+
+                # --- ↓↓↓ 核心算法修改区域 (版本3) ↓↓↓ ---
+                self.root.after(0, lambda: progress_label.config(text="步骤3/4: 计算并混合音频..."))
                 self.root.after(0, lambda: progress.config(value=60))
 
-                final_voice_track = None
-                silence_5_sec = AudioSegment.silent(duration=5000)
-
-                if mode == 'voice':
-                    if bgm_duration_ms < voice_duration_ms:
-                        raise ValueError("背景音乐长度小于语音长度，无法制作。")
-                    final_voice_track = voice_audio
-                    final_bgm_track = bgm_audio[:voice_duration_ms]
-
-                elif mode == 'bgm':
-                    # 计算需要重复的次数，确保至少重复一次
-                    repeat_count = int(bgm_duration_ms // (voice_duration_ms + 5000)) + 1
-                    
-                    voice_with_silence = voice_audio + silence_5_sec
-                    repeated_voice = voice_with_silence * repeat_count
-                    
-                    final_voice_track = repeated_voice[:bgm_duration_ms]
-                    final_bgm_track = bgm_audio
-
-                # --- 步骤 D: 调整音量并混合 ---
-                # pydub的音量调整使用分贝(dB)。+6dB音量翻倍, -6dB音量减半。
-                # 这是一个简化的百分比到dB的转换，效果不错。
+                # 定义音量转换函数
                 def volume_to_db(vol_percent):
-                    if vol_percent == 0: return -120  # 接近静音
+                    if vol_percent <= 0: return -120
                     return 20 * (vol_percent / 100.0) - 20
 
-                # pydub apply_gain() 是相对调整，我们需要先将音频恢复到基准
-                # AudioSegment.from_...() 加载的音频已经是基准了，所以直接调整即可
-                final_voice_track = final_voice_track + volume_to_db(voice_volume)
-                final_bgm_track = final_bgm_track + volume_to_db(bgm_volume)
+                # 先调整好各自的音量
+                adjusted_voice = voice_audio + volume_to_db(voice_volume)
+                adjusted_bgm = bgm_audio + volume_to_db(bgm_volume)
 
-                final_output = final_bgm_track.overlay(final_voice_track)
+                final_output = None
+
+                if mode == 'voice':
+                    # 按语音长度模式：只播报一次
+                    if bgm_duration_ms < voice_duration_ms:
+                        raise ValueError("背景音乐长度小于语音长度，无法制作。")
+                    
+                    # 截取背景音乐，然后叠加
+                    final_bgm_segment = adjusted_bgm[:voice_duration_ms]
+                    final_output = final_bgm_segment.overlay(adjusted_voice)
+
+                elif mode == 'bgm':
+                    # 按背景音乐长度模式：在BGM总时长内重复播报
+                    silence_5_sec = AudioSegment.silent(duration=5000)
+                    
+                    # 定义一个播报单元 = 语音 + 尾部静音
+                    unit_audio = adjusted_voice + silence_5_sec
+                    unit_duration_ms = len(unit_audio)
+
+                    if bgm_duration_ms < voice_duration_ms:
+                         raise ValueError(f"背景音乐太短（{bgm_duration_ms/1000.0:.1f}秒），无法容纳一次完整的语音（需要 {voice_duration_ms/1000.0:.1f} 秒）。")
+
+                    # 计算可以完整播报多少次
+                    repeat_count = int(bgm_duration_ms // unit_duration_ms)
+                    
+                    # 如果连一次完整的“语音+静音”都放不下，就只放一次语音
+                    if repeat_count == 0:
+                        repeat_count = 1
+                        unit_audio = adjusted_voice # 此时单元不带静音
+                    
+                    # 创建一个与背景音乐等长的空白“画布”
+                    voice_canvas = AudioSegment.silent(duration=bgm_duration_ms)
+                    
+                    # 在画布上依次叠加播报单元
+                    current_pos_ms = 0
+                    for i in range(repeat_count):
+                        # 确保下一次叠加不会超出画布范围
+                        if current_pos_ms + len(unit_audio) <= bgm_duration_ms:
+                            voice_canvas = voice_canvas.overlay(unit_audio, position=current_pos_ms)
+                            current_pos_ms += len(unit_audio)
+                        else:
+                            # 如果加上静音会超出，就尝试只加语音
+                            if current_pos_ms + len(adjusted_voice) <= bgm_duration_ms:
+                                voice_canvas = voice_canvas.overlay(adjusted_voice, position=current_pos_ms)
+                            break # 空间不足，停止添加
+
+                    # 将填充好语音的画布与原始背景音乐混合
+                    final_output = adjusted_bgm.overlay(voice_canvas)
+
+                # --- ↑↑↑ 核心算法修改区域结束 ↑↑↑ ---
 
                 # --- 步骤 E: 导出为MP3 ---
                 self.root.after(0, lambda: progress_label.config(text="步骤4/4: 导出MP3文件..."))
@@ -3178,7 +3203,8 @@ class TimedBroadcastApp:
                     output_path,
                     format="mp3",
                     bitrate="256k",
-                    parameters=["-ar", "44100"]
+                    parameters=["-ar", "44100", "-id3v2_version", "3"],
+                    codec="libmp3lame"
                 )
 
                 self.root.after(0, lambda: progress.config(value=100))
@@ -3188,8 +3214,11 @@ class TimedBroadcastApp:
                 self.root.after(0, lambda: messagebox.showerror("制作失败", f"发生错误：\n{e}", parent=params['dialog']))
             
             finally:
-                if 'temp_wav_path' in locals() and os.path.exists(temp_wav_path):
-                    os.remove(temp_wav_path)
+                if temp_wav_path and os.path.exists(temp_wav_path):
+                    try:
+                        os.remove(temp_wav_path)
+                    except Exception as e_del:
+                        self.log(f"删除临时文件 {temp_wav_path} 失败: {e_del}")
                 self.root.after(0, progress_dialog.destroy)
 
         threading.Thread(target=worker, daemon=True).start()
