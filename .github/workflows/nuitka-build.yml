@@ -75,7 +75,6 @@ jobs:
       - name: Build with Nuitka
         if: matrix.build-tool == 'nuitka'
         run: |
-          # ... (Nuitka build script remains the same)
           $ErrorActionPreference = "Stop"
           Write-Host "=== 构建 Nuitka 编译版本 (Standalone 文件夹模式) ==="
           $outputDir = "boyin.dist"
@@ -104,8 +103,9 @@ jobs:
               "--add-data 'icon.ico;.'"
           )
           
-          # 使用 pyarmor pack 命令，它会自动调用 PyInstaller
-          pyarmor pack -e "$($pyinstallerOpts -join ' ')" boyin.py
+          # --- ↓↓↓ 核心修改在这里 ↓↓↓ ---
+          # 使用 python -m pyarmor pack 命令，确保能找到 pyarmor
+          python -m pyarmor pack -e "$($pyinstallerOpts -join ' ')" boyin.py
 
           Write-Host "=== 正在压缩 PyArmor 构建产物... ==="
           # PyArmor + OneFile 会在 dist 文件夹下生成 exe
