@@ -5783,7 +5783,7 @@ class TimedBroadcastApp:
             cleanup_and_destroy()
 
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=4, column=0, columnspan=4, pady=20)
+        button_frame.grid(row=5, column=0, columnspan=4, pady=20)
         ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
         ttk.Button(button_frame, text="取消", command=cleanup_and_destroy, width=10).pack(side=LEFT, padx=10)
         
@@ -6001,7 +6001,7 @@ class TimedBroadcastApp:
         reminder_win = ttk.Toplevel(self.root)
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
         
-        reminder_win.geometry("640x480")
+        reminder_win.geometry("600x480")
         reminder_win.resizable(False, False)
 
         # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
