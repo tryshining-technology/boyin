@@ -225,8 +225,8 @@ class TimedBroadcastApp:
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
         self.start_tray_icon_thread()
 
-# --- ↓↓↓ 【BUG修复】新增：绑定更可靠的Configure事件 ↓↓↓ ---
-        self.root.bind("<Configure>", self._on_root_configure)
+        # --- ↓↓↓ 【BUG修复】新增：启动状态监视器 ↓↓↓ ---
+        self.root.after(250, self._poll_window_state)
         # --- ↑↑↑ 【BUG修复】结束 ↑↑↑ ---
 
         if self.settings.get("lock_on_start", False) and self.lock_password_b64:
@@ -236,23 +236,37 @@ class TimedBroadcastApp:
         if self.is_app_locked_down:
             self.root.after(100, self.perform_lockdown)
 
-# --- ↓↓↓ 【BUG修复】新增：新的事件处理函数 ↓↓↓ ---
-    def _on_root_configure(self, event):
-        """当主窗口配置改变时（包括最小化/恢复），同步模态对话框的状态。"""
-        # 检查是否有活动的模态对话框，并且它仍然存在
-        if self.active_modal_dialog and self.active_modal_dialog.winfo_exists():
-            
-            # 如果主窗口被最小化了
-            if self.root.state() == 'iconic':
-                # 并且模态对话框当前不是隐藏状态，则隐藏它
-                if self.active_modal_dialog.state() != 'withdrawn':
+    # --- ↓↓↓ 【BUG修复】新增：主动轮询状态的监视器函数 ↓↓↓ ---
+    def _poll_window_state(self):
+        """
+        通过主动轮询来监视主窗口状态，并同步模态对话框。
+        这是一个比事件绑定更可靠的方法，可以绕过 grab_set() 的事件阻塞。
+        """
+        try:
+            current_state = self.root.state()
+        except tk.TclError:
+            # 在程序关闭过程中，winfo_exists() 可能还返回True，但state()会失败
+            return
+
+        # 只有当状态发生变化时才执行操作
+        if current_state != self._last_root_state:
+            # 检查是否有活动的模态对话框
+            if self.active_modal_dialog and self.active_modal_dialog.winfo_exists():
+                
+                # 如果主窗口被最小化了
+                if current_state == 'iconic':
                     self.active_modal_dialog.withdraw()
-            
-            # 如果主窗口恢复正常了
-            elif self.root.state() == 'normal':
-                # 并且模态对话框当前是隐藏状态，则恢复它
-                if self.active_modal_dialog.state() == 'withdrawn':
+                
+                # 如果主窗口恢复正常了
+                elif current_state == 'normal':
                     self.active_modal_dialog.deiconify()
+            
+            # 更新最后的状态记录
+            self._last_root_state = current_state
+
+        # 安排下一次检查
+        if self.running:
+            self.root.after(250, self._poll_window_state)
     # --- ↑↑↑ 【BUG修复】结束 ↑↑↑ ---
 
     def _apply_global_font(self):
