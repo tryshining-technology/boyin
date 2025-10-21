@@ -4875,6 +4875,26 @@ class TimedBroadcastApp:
             self.autostart_var.set(not enable); self.save_settings()
             messagebox.showerror("错误", f"操作失败: {e}", parent=self.root)
 
+    # --- ↓↓↓ 【最终BUG修复 V4.2】新增：一个更可靠的对话框居中函数 ↓↓↓ ---
+    def _center_dialog(self, dialog, width, height):
+        """
+        一个专门为固定尺寸对话框设计的、可靠的居中函数，能正确处理DPI缩放。
+        它不再询问窗口尺寸，而是直接使用给定的尺寸进行计算和设置。
+        """
+        parent = self.root
+        
+        parent_x = parent.winfo_x()
+        parent_y = parent.winfo_y()
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+
+        x = parent_x + (parent_width // 2) - (width // 2)
+        y = parent_y + (parent_height // 2) - (height // 2)
+        
+        # 直接命令窗口在计算好的位置以指定的尺寸出现
+        dialog.geometry(f'{width}x{height}+{x}+{y}')
+    # --- ↑↑↑ 【最终BUG修复 V4.2】核心修改结束 ↑↑↑ ---
+
     def center_window(self, win, parent=None):
         win.update_idletasks()
         width = win.winfo_width()
@@ -5618,12 +5638,11 @@ class TimedBroadcastApp:
         dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
         
         # --- ↓↓↓ 【最终BUG修复 V4.2】核心修改 ↓↓↓ ---
-        # 1. 设置一个固定的尺寸，避免切换时窗口大小变化
-        dialog.geometry("640x550") 
-        dialog.resizable(False, False) # 禁止调整大小以保持布局稳定
+        dialog_width = 640
+        dialog_height = 550
+        dialog.resizable(False, False)
         dialog.transient(self.root)
 
-        # 2. 采用模拟模态，禁用主窗口
         dialog.attributes('-topmost', True)
         self.root.attributes('-disabled', True)
         
@@ -5637,7 +5656,6 @@ class TimedBroadcastApp:
         main_frame.pack(fill=BOTH, expand=True)
         main_frame.columnconfigure(1, weight=1)
 
-        # --- 布局保持不变，确保 button_frame 是 main_frame 的子组件 ---
         ttk.Label(main_frame, text="名称:").grid(row=0, column=0, sticky='e', pady=5, padx=5)
         name_entry = ttk.Entry(main_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', pady=5)
@@ -5783,12 +5801,11 @@ class TimedBroadcastApp:
         ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
         ttk.Button(button_frame, text="取消", command=cleanup_and_destroy, width=10).pack(side=LEFT, padx=10)
         
-        # --- ↓↓↓ 【最终BUG修复 V4.2】核心修改：在所有组件都放置好之后再居中 ↓↓↓ ---
-        self.center_window(dialog, parent=self.root)
-        # --- ↑↑↑ 【最终BUG修复 V4.2】核心修改结束 ↑↑↑ ---
-
         dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
-
+        
+        # --- ↓↓↓ 【最终BUG修复 V4.2】核心修改：使用新的居中函数 ↓↓↓ ---
+        self._center_dialog(dialog, dialog_width, dialog_height)
+        # --- ↑↑↑ 【最终BUG修复 V4.2】核心修改结束 ↑↑↑ ---
 #第13部分
 #第13部分
     def show_todo_context_menu(self, event):
