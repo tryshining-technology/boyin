@@ -52,20 +52,6 @@ except Exception:
         print("警告: 无法设置DPI感知，在高分屏下布局可能出现问题。")
 # --- DPI修复结束 ---
 
-# --- Nuitka/PyInstaller 打包 VLC 的关键修复 ---
-if getattr(sys, 'frozen', False):
-    if sys.maxsize > 2**32:
-        vlc_lib_folder = "vlc_lib_x64"
-    else:
-        vlc_lib_folder = "vlc_lib_x86"
-    
-    vlc_dll_path = os.path.join(os.path.dirname(sys.executable), vlc_lib_folder)
-    
-    if os.path.isdir(vlc_dll_path):
-        os.environ['PYTHON_VLC_LIB_PATH'] = vlc_dll_path
-        os.environ['PYTHON_VLC_PLUGIN_PATH'] = os.path.join(vlc_dll_path, 'plugins')
-# --- 修复结束 ---
-
 # 尝试导入所需库
 TRAY_AVAILABLE = False
 try:
@@ -108,54 +94,15 @@ try:
 except ImportError:
     print("警告: psutil 未安装，无法获取机器码、强制结束进程，注册功能将受限。")
 
-# ... (在所有 import 的最后)
-
 VLC_AVAILABLE = False
 try:
-    # --- ↓↓↓ 增强版诊断代码开始 ↓↓↓ ---
-    print("--- 开始VLC诊断 (增强版) ---")
-    
-    # 统一判断架构和期望的文件夹名称
-    is_64bits = sys.maxsize > 2**32
-    arch = 'x64' if is_64bits else 'x86'
-    vlc_lib_folder = f"vlc_lib_{arch}"
-    print(f"当前运行环境架构: {arch}")
-
-    # 统一获取基础路径
-    # 如果是打包后的程序，基础路径是 .exe 所在目录
-    # 如果是开发环境，基础路径是当前工作目录 (脚本所在目录)
-    base_path = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.abspath(".")
-    vlc_dll_path = os.path.join(base_path, vlc_lib_folder)
-    
-    print(f"正在检查本地VLC路径: {vlc_dll_path}")
-
-    if os.path.isdir(vlc_dll_path):
-        print(">>> 本地VLC文件夹已找到。将强制使用此路径。")
-        os.environ['PYTHON_VLC_LIB_PATH'] = vlc_dll_path
-        os.environ['PYTHON_VLC_PLUGIN_PATH'] = os.path.join(vlc_dll_path, 'plugins')
-        print(f"已设置环境变量 PYTHON_VLC_LIB_PATH = {os.environ['PYTHON_VLC_LIB_PATH']}")
-    else:
-        print(">>> 本地VLC文件夹未找到，将尝试搜索系统安装。")
-    
-    print("正在尝试 'import vlc'...")
-    # --- 诊断代码结束 ---
-
     import vlc
     VLC_AVAILABLE = True
-    print("'import vlc' 成功！VLC可用。")
-
-except (ImportError, OSError) as e: 
-    print(f"!!! 'import vlc' 失败 !!!")
-    print(f"捕获到的异常类型: {type(e).__name__}")
-    print(f"详细错误信息: {e}")
-    print("警告: 未能加载VLC核心库。视频播放功能将不可用。")
-    print("提示: 如果错误是 OSError 且包含 'The specified module could not be found'，请务必先安装 Microsoft Visual C++ Redistributable (vc_redist.x64.exe 或 vc_redist.x86.exe)。")
+except (ImportError, OSError):
+    print("警告: 未能在系统中找到VLC核心库。")
+    print("提示: 请在电脑上安装官方VLC播放器以启用视频播放功能。")
 except Exception as e:
-    print(f"!!! vlc 初始化时发生未知错误 !!!")
-    print(f"捕获到的异常类型: {type(e).__name__}")
-    print(f"详细错误信息: {e}")
-
-print("--- VLC诊断结束 ---")
+    print(f"警告: vlc 初始化时发生未知错误 - {e}，视频播放功能不可用。")
 
 def resource_path(relative_path):
     try:
@@ -278,9 +225,8 @@ class TimedBroadcastApp:
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
         self.start_tray_icon_thread()
 
-        # --- ↓↓↓ 【BUG修复】新增：绑定窗口状态变化事件 ↓↓↓ ---
-        self.root.bind("<Unmap>", self._on_window_state_change)
-        self.root.bind("<Map>", self._on_window_state_change)
+# --- ↓↓↓ 【BUG修复】新增：绑定更可靠的Configure事件 ↓↓↓ ---
+        self.root.bind("<Configure>", self._on_root_configure)
         # --- ↑↑↑ 【BUG修复】结束 ↑↑↑ ---
 
         if self.settings.get("lock_on_start", False) and self.lock_password_b64:
@@ -290,14 +236,23 @@ class TimedBroadcastApp:
         if self.is_app_locked_down:
             self.root.after(100, self.perform_lockdown)
 
-    # --- ↓↓↓ 【BUG修复】新增：窗口状态变化处理函数 ↓↓↓ ---
-    def _on_window_state_change(self, event):
-        """当主窗口状态改变（最小化/恢复）时，同步模态对话框的状态。"""
+# --- ↓↓↓ 【BUG修复】新增：新的事件处理函数 ↓↓↓ ---
+    def _on_root_configure(self, event):
+        """当主窗口配置改变时（包括最小化/恢复），同步模态对话框的状态。"""
+        # 检查是否有活动的模态对话框，并且它仍然存在
         if self.active_modal_dialog and self.active_modal_dialog.winfo_exists():
+            
+            # 如果主窗口被最小化了
             if self.root.state() == 'iconic':
-                self.active_modal_dialog.withdraw()
-            else:
-                self.active_modal_dialog.deiconify()
+                # 并且模态对话框当前不是隐藏状态，则隐藏它
+                if self.active_modal_dialog.state() != 'withdrawn':
+                    self.active_modal_dialog.withdraw()
+            
+            # 如果主窗口恢复正常了
+            elif self.root.state() == 'normal':
+                # 并且模态对话框当前是隐藏状态，则恢复它
+                if self.active_modal_dialog.state() == 'withdrawn':
+                    self.active_modal_dialog.deiconify()
     # --- ↑↑↑ 【BUG修复】结束 ↑↑↑ ---
 
     def _apply_global_font(self):
