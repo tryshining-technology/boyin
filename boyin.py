@@ -225,9 +225,11 @@ class TimedBroadcastApp:
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
         self.start_tray_icon_thread()
 
-        # --- ↓↓↓ 【BUG修复】新增：启动状态监视器 ↓↓↓ ---
-        self.root.after(250, self._poll_window_state)
-        # --- ↑↑↑ 【BUG修复】结束 ↑↑↑ ---
+        # --- ↓↓↓ 【最终BUG修复】新增：启动独立的窗口状态监视线程 ↓↓↓ ---
+        self._last_root_state = self.root.state() # 记录窗口初始状态
+        monitor_thread = threading.Thread(target=self._threaded_window_state_monitor, daemon=True)
+        monitor_thread.start()
+        # --- ↑↑↑ 【最终BUG修复】结束 ↑↑↑ ---
 
         if self.settings.get("lock_on_start", False) and self.lock_password_b64:
             self.root.after(100, self.perform_initial_lock)
@@ -236,38 +238,46 @@ class TimedBroadcastApp:
         if self.is_app_locked_down:
             self.root.after(100, self.perform_lockdown)
 
-    # --- ↓↓↓ 【BUG修复】新增：主动轮询状态的监视器函数 ↓↓↓ ---
-    def _poll_window_state(self):
+# --- ↓↓↓ 【最终BUG修复】新增：在独立线程中运行的监视器函数 ↓↓↓ ---
+    def _threaded_window_state_monitor(self):
         """
-        通过主动轮询来监视主窗口状态，并同步模态对话框。
-        这是一个比事件绑定更可靠的方法，可以绕过 grab_set() 的事件阻塞。
+        在一个独立的后台线程中运行，以绕过 grab_set() 对主UI线程事件循环的冻结。
+        这是解决此问题的最可靠方法。
         """
-        try:
-            current_state = self.root.state()
-        except tk.TclError:
-            # 在程序关闭过程中，winfo_exists() 可能还返回True，但state()会失败
-            return
+        while self.running:
+            try:
+                # 检查主窗口是否存在，以优雅地退出线程
+                if not self.root.winfo_exists():
+                    break
 
-        # 只有当状态发生变化时才执行操作
-        if current_state != self._last_root_state:
-            # 检查是否有活动的模态对话框
-            if self.active_modal_dialog and self.active_modal_dialog.winfo_exists():
-                
-                # 如果主窗口被最小化了
-                if current_state == 'iconic':
-                    self.active_modal_dialog.withdraw()
-                
-                # 如果主窗口恢复正常了
-                elif current_state == 'normal':
-                    self.active_modal_dialog.deiconify()
-            
-            # 更新最后的状态记录
-            self._last_root_state = current_state
+                current_state = self.root.state()
 
-        # 安排下一次检查
-        if self.running:
-            self.root.after(250, self._poll_window_state)
-    # --- ↑↑↑ 【BUG修复】结束 ↑↑↑ ---
+                # 只有当状态发生变化时才进行处理
+                if current_state != self._last_root_state:
+                    # 检查是否有活动的模态对话框
+                    if self.active_modal_dialog and self.active_modal_dialog.winfo_exists():
+                        
+                        # 定义一个线程安全的操作函数
+                        def safe_ui_update():
+                            if self.active_modal_dialog and self.active_modal_dialog.winfo_exists():
+                                if current_state == 'iconic':
+                                    self.active_modal_dialog.withdraw()
+                                elif current_state == 'normal':
+                                    self.active_modal_dialog.deiconify()
+
+                        # 使用 root.after(0, ...) 将UI更新操作安全地调度到主线程执行
+                        self.root.after(0, safe_ui_update)
+                    
+                    # 更新最后的状态记录
+                    self._last_root_state = current_state
+
+            except Exception as e:
+                # 在关闭程序等极端情况下可能会发生错误，打印日志但保持线程运行
+                print(f"窗口状态监视线程发生错误: {e}")
+
+            # 每 250 毫秒检查一次
+            time.sleep(0.25)
+    # --- ↑↑↑ 【最终BUG修复】结束 ↑↑↑ ---
 
     def _apply_global_font(self):
         font_name = self.settings.get("app_font", "Microsoft YaHei")
