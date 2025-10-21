@@ -108,14 +108,54 @@ try:
 except ImportError:
     print("警告: psutil 未安装，无法获取机器码、强制结束进程，注册功能将受限。")
 
+# ... (在所有 import 的最后)
+
 VLC_AVAILABLE = False
 try:
+    # --- ↓↓↓ 增强版诊断代码开始 ↓↓↓ ---
+    print("--- 开始VLC诊断 (增强版) ---")
+    
+    # 统一判断架构和期望的文件夹名称
+    is_64bits = sys.maxsize > 2**32
+    arch = 'x64' if is_64bits else 'x86'
+    vlc_lib_folder = f"vlc_lib_{arch}"
+    print(f"当前运行环境架构: {arch}")
+
+    # 统一获取基础路径
+    # 如果是打包后的程序，基础路径是 .exe 所在目录
+    # 如果是开发环境，基础路径是当前工作目录 (脚本所在目录)
+    base_path = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.abspath(".")
+    vlc_dll_path = os.path.join(base_path, vlc_lib_folder)
+    
+    print(f"正在检查本地VLC路径: {vlc_dll_path}")
+
+    if os.path.isdir(vlc_dll_path):
+        print(">>> 本地VLC文件夹已找到。将强制使用此路径。")
+        os.environ['PYTHON_VLC_LIB_PATH'] = vlc_dll_path
+        os.environ['PYTHON_VLC_PLUGIN_PATH'] = os.path.join(vlc_dll_path, 'plugins')
+        print(f"已设置环境变量 PYTHON_VLC_LIB_PATH = {os.environ['PYTHON_VLC_LIB_PATH']}")
+    else:
+        print(">>> 本地VLC文件夹未找到，将尝试搜索系统安装。")
+    
+    print("正在尝试 'import vlc'...")
+    # --- 诊断代码结束 ---
+
     import vlc
     VLC_AVAILABLE = True
-except ImportError:
-    print("警告: python-vlc 未安装，视频播放功能不可用。")
+    print("'import vlc' 成功！VLC可用。")
+
+except (ImportError, OSError) as e: 
+    print(f"!!! 'import vlc' 失败 !!!")
+    print(f"捕获到的异常类型: {type(e).__name__}")
+    print(f"详细错误信息: {e}")
+    print("警告: 未能加载VLC核心库。视频播放功能将不可用。")
+    print("提示: 如果错误是 OSError 且包含 'The specified module could not be found'，请务必先安装 Microsoft Visual C++ Redistributable (vc_redist.x64.exe 或 vc_redist.x86.exe)。")
 except Exception as e:
-    print(f"警告: vlc 初始化失败 - {e}，视频播放功能不可用。")
+    print(f"!!! vlc 初始化时发生未知错误 !!!")
+    print(f"捕获到的异常类型: {type(e).__name__}")
+    print(f"详细错误信息: {e}")
+
+print("--- VLC诊断结束 ---")
 
 def resource_path(relative_path):
     try:
