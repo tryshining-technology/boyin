@@ -225,11 +225,10 @@ class TimedBroadcastApp:
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
         self.start_tray_icon_thread()
 
-        # --- ↓↓↓ 【最终BUG修复】新增：启动独立的窗口状态监视线程 ↓↓↓ ---
-        self._last_root_state = self.root.state() # 记录窗口初始状态
-        monitor_thread = threading.Thread(target=self._threaded_window_state_monitor, daemon=True)
+        # --- ↓↓↓ 【最终BUG修复 V3】新增：启动独立的 Win32 API 监视线程 ↓↓↓ ---
+        monitor_thread = threading.Thread(target=self._win32_state_monitor, daemon=True)
         monitor_thread.start()
-        # --- ↑↑↑ 【最终BUG修复】结束 ↑↑↑ ---
+        # --- ↑↑↑ 【最终BUG修复 V3】结束 ↑↑↑ ---
 
         if self.settings.get("lock_on_start", False) and self.lock_password_b64:
             self.root.after(100, self.perform_initial_lock)
@@ -238,46 +237,54 @@ class TimedBroadcastApp:
         if self.is_app_locked_down:
             self.root.after(100, self.perform_lockdown)
 
-# --- ↓↓↓ 【最终BUG修复】新增：在独立线程中运行的监视器函数 ↓↓↓ ---
-    def _threaded_window_state_monitor(self):
+    # --- ↓↓↓ 【最终BUG修复 V3】新增：在独立线程中通过 Win32 API 监视窗口状态 ↓↓↓ ---
+    def _win32_state_monitor(self):
         """
-        在一个独立的后台线程中运行，以绕过 grab_set() 对主UI线程事件循环的冻结。
-        这是解决此问题的最可靠方法。
+        在一个独立的后台线程中，使用 pywin32 直接与 Windows API 交互来监控和同步窗口状态。
+        这个方法完全绕过了被 grab_set() 冻结的 Tkinter 事件循环，是解决此问题的最终方案。
         """
+        # 等待主窗口完全创建并获取句柄
+        time.sleep(1) 
+        root_hwnd = None
+        try:
+            root_hwnd = self.root.winfo_id()
+        except tk.TclError:
+            return # 窗口在线程启动前就关闭了
+
+        last_is_minimized = win32gui.IsIconic(root_hwnd)
+
         while self.running:
             try:
-                # 检查主窗口是否存在，以优雅地退出线程
-                if not self.root.winfo_exists():
+                # 检查主窗口是否存在
+                if not win32gui.IsWindow(root_hwnd):
                     break
 
-                current_state = self.root.state()
+                is_minimized = win32gui.IsIconic(root_hwnd)
 
-                # 只有当状态发生变化时才进行处理
-                if current_state != self._last_root_state:
-                    # 检查是否有活动的模态对话框
-                    if self.active_modal_dialog and self.active_modal_dialog.winfo_exists():
-                        
-                        # 定义一个线程安全的操作函数
-                        def safe_ui_update():
-                            if self.active_modal_dialog and self.active_modal_dialog.winfo_exists():
-                                if current_state == 'iconic':
-                                    self.active_modal_dialog.withdraw()
-                                elif current_state == 'normal':
-                                    self.active_modal_dialog.deiconify()
-
-                        # 使用 root.after(0, ...) 将UI更新操作安全地调度到主线程执行
-                        self.root.after(0, safe_ui_update)
+                # 只有当最小化状态发生变化时才处理
+                if is_minimized != last_is_minimized:
+                    dialog = self.active_modal_dialog
+                    if dialog and dialog.winfo_exists():
+                        dialog_hwnd = dialog.winfo_id()
+                        if win32gui.IsWindow(dialog_hwnd):
+                            if is_minimized:
+                                # 如果主窗口最小化了，隐藏对话框
+                                win32gui.ShowWindow(dialog_hwnd, win32con.SW_HIDE)
+                            else:
+                                # 如果主窗口恢复了，显示并激活对话框
+                                win32gui.ShowWindow(dialog_hwnd, win32con.SW_SHOW)
+                                win32gui.SetForegroundWindow(dialog_hwnd)
                     
-                    # 更新最后的状态记录
-                    self._last_root_state = current_state
+                    last_is_minimized = is_minimized
 
+            except (tk.TclError, pywintypes.error):
+                # 在窗口关闭等过渡状态下可能会抛出异常，安全地跳过
+                pass
             except Exception as e:
-                # 在关闭程序等极端情况下可能会发生错误，打印日志但保持线程运行
-                print(f"窗口状态监视线程发生错误: {e}")
+                print(f"Win32 状态监视线程发生错误: {e}")
 
-            # 每 250 毫秒检查一次
             time.sleep(0.25)
-    # --- ↑↑↑ 【最终BUG修复】结束 ↑↑↑ ---
+    # --- ↑↑↑ 【最终BUG修复 V3】结束 ↑↑↑ ---
 
     def _apply_global_font(self):
         font_name = self.settings.get("app_font", "Microsoft YaHei")
