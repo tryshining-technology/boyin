@@ -55,7 +55,7 @@ jobs:
       # 步骤 1: Nuitka 编译
       - name: Build application with Nuitka
         run: |
-          python -m nuitka --standalone `
+          python -m nuitka --standalone --windows-disable-console `
             --output-dir="${{ matrix.output-dir-name }}" `
             --windows-icon-from-ico="icon.ico" `
             --include-data-file="icon.ico=icon.ico" `
