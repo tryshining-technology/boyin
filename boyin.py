@@ -5617,10 +5617,12 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
         
-        # --- ↓↓↓ 【最终BUG修复 V4.3】DPI 缩放解决方案 ↓↓↓ ---
-        dialog.resizable(False, False) # 仍然禁止缩放以保证布局稳定
+        # --- ↓↓↓ 【最终BUG修复 V4.2】核心修改 ↓↓↓ ---
+        # 1. 不再预设尺寸，但禁止调整大小以保证布局稳定
+        dialog.resizable(False, False)
         dialog.transient(self.root)
 
+        # 2. 采用模拟模态，禁用主窗口
         dialog.attributes('-topmost', True)
         self.root.attributes('-disabled', True)
         
@@ -5628,13 +5630,13 @@ class TimedBroadcastApp:
             self.root.attributes('-disabled', False)
             dialog.destroy()
             self.root.focus_force()
-        # --- ↑↑↑ 【最终BUG修复 V4.3】核心修改结束 ↑↑↑ ---
+        # --- ↑↑↑ 【最终BUG修复 V4.2】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
         main_frame.columnconfigure(1, weight=1)
 
-        # --- 所有控件的布局代码保持不变 ---
+        # --- 布局保持不变，确保 button_frame 是 main_frame 的子组件 ---
         ttk.Label(main_frame, text="名称:").grid(row=0, column=0, sticky='e', pady=5, padx=5)
         name_entry = ttk.Entry(main_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', pady=5)
@@ -5706,14 +5708,79 @@ class TimedBroadcastApp:
 
         now = datetime.now()
         if todo_to_edit:
-            # ... (这部分数据填充代码保持不变) ...
-        else:
-            # ... (这部分数据填充代码保持不变) ...
+            name_entry.insert(0, todo_to_edit.get('name', ''))
+            content_text.insert('1.0', todo_to_edit.get('content', ''))
+            type_var.set(todo_to_edit.get('type', 'onetime'))
 
-        toggle_frames() # 初始调用
+            dt_str = todo_to_edit.get('remind_datetime', now.strftime('%Y-%m-%d %H:%M:%S'))
+            d, t = dt_str.split(' ') if ' ' in dt_str else ('', '')
+            onetime_date_entry.insert(0, d)
+            onetime_time_entry.insert(0, t)
+
+            recurring_time_entry.insert(0, todo_to_edit.get('start_times', ''))
+            recurring_weekday_entry.insert(0, todo_to_edit.get('weekday', '每周:1234567'))
+            recurring_daterange_entry.insert(0, todo_to_edit.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            recurring_interval_entry.insert(0, todo_to_edit.get('interval_minutes', '0'))
+        else:
+            onetime_date_entry.insert(0, now.strftime('%Y-%m-%d'))
+            onetime_time_entry.insert(0, (now + timedelta(minutes=5)).strftime('%H:%M:%S'))
+            recurring_time_entry.insert(0, now.strftime('%H:%M:%S'))
+            recurring_weekday_entry.insert(0, '每周:1234567')
+            recurring_daterange_entry.insert(0, '2000-01-01 ~ 2099-12-31')
+            recurring_interval_entry.insert(0, '0')
+
+        toggle_frames()
 
         def save():
-            # ... (save 函数内部逻辑保持不变) ...
+            name = name_entry.get().strip()
+            if not name:
+                messagebox.showerror("错误", "待办事项名称不能为空", parent=dialog)
+                return
+
+            new_todo_data = {
+                "name": name,
+                "content": content_text.get('1.0', END).strip(),
+                "type": type_var.get(),
+                "status": "启用" if not todo_to_edit else todo_to_edit.get('status', '启用'),
+                "last_run": {} if not todo_to_edit else todo_to_edit.get('last_run', {}),
+            }
+
+            if new_todo_data['type'] == 'onetime':
+                date_str = self._normalize_date_string(onetime_date_entry.get().strip())
+                time_str = self._normalize_time_string(onetime_time_entry.get().strip())
+                if not date_str or not time_str:
+                    messagebox.showerror("格式错误", "一次性任务的日期或时间格式不正确。", parent=dialog)
+                    return
+                new_todo_data['remind_datetime'] = f"{date_str} {time_str}"
+            else:
+                try:
+                    interval = int(recurring_interval_entry.get().strip() or '0')
+                    if not (0 <= interval <= 1440): raise ValueError
+                except ValueError:
+                    messagebox.showerror("格式错误", "循环间隔必须是 0-1440 之间的整数。", parent=dialog)
+                    return
+
+                is_valid_time, time_msg = self._normalize_multiple_times_string(recurring_time_entry.get().strip())
+                if not is_valid_time:
+                    messagebox.showerror("格式错误", time_msg, parent=dialog); return
+                is_valid_date, date_msg = self._normalize_date_range_string(recurring_daterange_entry.get().strip())
+                if not is_valid_date:
+                    messagebox.showerror("格式错误", date_msg, parent=dialog); return
+
+                new_todo_data['start_times'] = time_msg
+                new_todo_data['weekday'] = recurring_weekday_entry.get().strip()
+                new_todo_data['date_range'] = date_msg
+                new_todo_data['interval_minutes'] = interval
+                new_todo_data['last_interval_run'] = ""
+
+            if todo_to_edit:
+                self.todos[index] = new_todo_data
+            else:
+                self.todos.append(new_todo_data)
+
+            self.update_todo_list()
+            self.save_todos()
+            cleanup_and_destroy()
 
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=4, column=0, columnspan=4, pady=20)
