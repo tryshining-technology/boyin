@@ -5669,7 +5669,6 @@ class TimedBroadcastApp:
         # --- ↓↓↓ 【您的建议】为“一次性任务”界面添加占位空行，使其与“循环任务”界面等高 ↓↓↓ ---
         ttk.Label(onetime_lf, text="").grid(row=2, pady=13) # 模拟 “周几/几号” 的行高
         ttk.Label(onetime_lf, text="").grid(row=3, pady=13) # 模拟 “日期范围” 的行高
-        ttk.Label(onetime_lf, text="").grid(row=4, pady=13) # 模拟 “循环间隔” 的行高
         # --- ↑↑↑ 修改结束 ↑↑↑ ---
 
         # --- “循环任务”界面 ---
@@ -5778,8 +5777,8 @@ class TimedBroadcastApp:
             cleanup_and_destroy()
 
         button_frame = ttk.Frame(main_frame)
-        # --- ↓↓↓ 确保按钮在第 5 行，为动态内容留出足够空间 ↓↓↓ ---
-        button_frame.grid(row=5, column=0, columnspan=4, pady=20)
+        # --- ↓↓↓ 确保按钮在第 4 行，为动态内容留出足够空间 ↓↓↓ ---
+        button_frame.grid(row=4, column=0, columnspan=4, pady=20)
         # --- ↑↑↑ 修改结束 ↑↑↑ ---
         ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
         ttk.Button(button_frame, text="取消", command=cleanup_and_destroy, width=10).pack(side=LEFT, padx=10)
