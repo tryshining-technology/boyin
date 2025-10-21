@@ -141,7 +141,6 @@ class TimedBroadcastApp:
     def __init__(self, root):
         self.root = root
         self.root.title(" 创翔多功能定时播音旗舰版")
-        # self.root.geometry("1280x720")
         self.root.minsize(800, 600)
 
         if os.path.exists(ICON_FILE):
@@ -162,7 +161,7 @@ class TimedBroadcastApp:
         self.is_locked = False
         self.is_window_pinned = False
         self.is_app_locked_down = False
-        self.active_modal_dialog = None # <--- 【BUG修复】新增：追踪活动的模态对话框
+        self.active_modal_dialog = None
 
         self.auth_info = {'status': 'Unregistered', 'message': '正在验证授权...'}
         self.machine_code = None
@@ -195,19 +194,14 @@ class TimedBroadcastApp:
         self.create_folder_structure()
         self.load_settings()
 
-        # --- ↓↓↓ 新增代码：加载并应用窗口位置和大小 ↓↓↓ ---
         saved_geometry = self.settings.get("window_geometry")
         if saved_geometry:
             try:
-                # 检查几何信息是否有效，防止因配置文件损坏导致启动失败
                 self.root.geometry(saved_geometry)
             except tk.TclError:
-                # 如果信息无效，则使用默认大小
                 self.root.geometry("1280x720")
         else:
-            # 首次启动或无记录时，设置一个默认大小
             self.root.geometry("1280x720")
-        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
 
         self.load_lock_password()
 
@@ -225,66 +219,12 @@ class TimedBroadcastApp:
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
         self.start_tray_icon_thread()
 
-        # --- ↓↓↓ 【最终BUG修复 V3】新增：启动独立的 Win32 API 监视线程 ↓↓↓ ---
-        monitor_thread = threading.Thread(target=self._win32_state_monitor, daemon=True)
-        monitor_thread.start()
-        # --- ↑↑↑ 【最终BUG修复 V3】结束 ↑↑↑ ---
-
         if self.settings.get("lock_on_start", False) and self.lock_password_b64:
             self.root.after(100, self.perform_initial_lock)
         if self.settings.get("start_minimized", False):
             self.root.after(100, self.hide_to_tray)
         if self.is_app_locked_down:
             self.root.after(100, self.perform_lockdown)
-
-    # --- ↓↓↓ 【最终BUG修复 V3】新增：在独立线程中通过 Win32 API 监视窗口状态 ↓↓↓ ---
-    def _win32_state_monitor(self):
-        """
-        在一个独立的后台线程中，使用 pywin32 直接与 Windows API 交互来监控和同步窗口状态。
-        这个方法完全绕过了被 grab_set() 冻结的 Tkinter 事件循环，是解决此问题的最终方案。
-        """
-        # 等待主窗口完全创建并获取句柄
-        time.sleep(1) 
-        root_hwnd = None
-        try:
-            root_hwnd = self.root.winfo_id()
-        except tk.TclError:
-            return # 窗口在线程启动前就关闭了
-
-        last_is_minimized = win32gui.IsIconic(root_hwnd)
-
-        while self.running:
-            try:
-                # 检查主窗口是否存在
-                if not win32gui.IsWindow(root_hwnd):
-                    break
-
-                is_minimized = win32gui.IsIconic(root_hwnd)
-
-                # 只有当最小化状态发生变化时才处理
-                if is_minimized != last_is_minimized:
-                    dialog = self.active_modal_dialog
-                    if dialog and dialog.winfo_exists():
-                        dialog_hwnd = dialog.winfo_id()
-                        if win32gui.IsWindow(dialog_hwnd):
-                            if is_minimized:
-                                # 如果主窗口最小化了，隐藏对话框
-                                win32gui.ShowWindow(dialog_hwnd, win32con.SW_HIDE)
-                            else:
-                                # 如果主窗口恢复了，显示并激活对话框
-                                win32gui.ShowWindow(dialog_hwnd, win32con.SW_SHOW)
-                                win32gui.SetForegroundWindow(dialog_hwnd)
-                    
-                    last_is_minimized = is_minimized
-
-            except (tk.TclError, pywintypes.error):
-                # 在窗口关闭等过渡状态下可能会抛出异常，安全地跳过
-                pass
-            except Exception as e:
-                print(f"Win32 状态监视线程发生错误: {e}")
-
-            time.sleep(0.25)
-    # --- ↑↑↑ 【最终BUG修复 V3】结束 ↑↑↑ ---
 
     def _apply_global_font(self):
         font_name = self.settings.get("app_font", "Microsoft YaHei")
@@ -387,14 +327,10 @@ class TimedBroadcastApp:
         self.main_frame = ttk.Frame(self.page_container)
         self.pages["定时广播"] = self.main_frame
         self.create_scheduled_broadcast_page()
-        # vvvvvv 在这里添加下面的代码 vvvvvv
-        # --- 【核心修复】预创建高级功能页面 ---
+        
         advanced_page = self.create_advanced_features_page()
         self.pages["高级功能"] = advanced_page
-        # 预创建后立即隐藏它
         advanced_page.pack_forget()
-        # --- 修复结束 ---
-        # ^^^^^^ 在这里添加上面的代码 ^^^^^^
 
         self.current_page = self.main_frame
         self.switch_page("定时广播")
@@ -432,21 +368,16 @@ class TimedBroadcastApp:
             self.log("界面已锁定，请先解锁。")
             return
 
-        # 隐藏当前页面
         if self.current_page and self.current_page.winfo_exists():
             self.current_page.pack_forget()
 
-        # 取消所有按钮的高亮
         for title, btn in self.nav_buttons.items():
             btn.config(bootstyle="light")
 
-        # --- 【核心修复】简化页面切换逻辑 ---
         target_frame = None
-        # 首先，尝试从已经创建的页面字典中获取
         if page_name in self.pages and self.pages[page_name].winfo_exists():
             target_frame = self.pages[page_name]
         else:
-            # 如果字典里没有（只应该发生在节假日、设置等页面第一次被点击时），就创建它
             if page_name == "节假日":
                 target_frame = self.create_holiday_page()
             elif page_name == "待办事项":
@@ -458,26 +389,21 @@ class TimedBroadcastApp:
             elif page_name == "超级管理":
                 target_frame = self.create_super_admin_page()
             
-            # 创建后，存入字典以便下次使用
             if target_frame:
                 self.pages[page_name] = target_frame
 
-        # 如果最终没有找到页面，就回到默认页面
         if not target_frame:
             self.log(f"错误或开发中: 无法找到页面 '{page_name}'，返回主页。")
             target_frame = self.pages["定时广播"]
             page_name = "定时广播"
         
-        # 显示目标页面
         target_frame.pack(in_=self.page_container, fill=BOTH, expand=True)
         self.current_page = target_frame
         self.current_page_name = page_name
 
-        # 更新设置页面的UI（如果切换到设置页）
         if page_name == "设置":
             self._refresh_settings_ui()
 
-        # 高亮当前按钮
         selected_btn = self.nav_buttons.get(page_name)
         if selected_btn:
             selected_btn.config(bootstyle="primary")
@@ -489,17 +415,21 @@ class TimedBroadcastApp:
             return
 
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("身份验证")
         dialog.resizable(False, False)
         dialog.transient(self.root)
-        dialog.grab_set()
+        
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
+            dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         result = [None]
-
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
-            dialog.destroy()
 
         ttk.Label(dialog, text="请输入超级管理员密码:", font=self.font_11).pack(pady=20, padx=20)
         password_entry = ttk.Entry(dialog, show='*', font=self.font_11, width=25)
@@ -508,14 +438,14 @@ class TimedBroadcastApp:
 
         def on_confirm():
             result[0] = password_entry.get()
-            cleanup_and_destroy() # <--- 【BUG修复】
+            cleanup_and_destroy()
 
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(pady=20)
         ttk.Button(btn_frame, text="确定", command=on_confirm, bootstyle="primary", width=8).pack(side=LEFT, padx=10)
-        ttk.Button(btn_frame, text="取消", command=cleanup_and_destroy, width=8).pack(side=LEFT, padx=10) # <--- 【BUG修复】
+        ttk.Button(btn_frame, text="取消", command=cleanup_and_destroy, width=8).pack(side=LEFT, padx=10)
         dialog.bind('<Return>', lambda event: on_confirm())
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
 
         self.center_window(dialog, parent=self.root)
         self.root.wait_window(dialog)
@@ -554,7 +484,6 @@ class TimedBroadcastApp:
         return page_frame
 
     def enable_all_screenshot(self):
-        """启用所有的定时截屏任务"""
         if not self.screenshot_tasks: return
         for task in self.screenshot_tasks:
             task['status'] = '启用'
@@ -563,7 +492,6 @@ class TimedBroadcastApp:
         self.log("已将 *全部* 截屏任务的状态设置为: 启用")
 
     def disable_all_screenshot(self):
-        """禁用所有的定时截屏任务"""
         if not self.screenshot_tasks: return
         for task in self.screenshot_tasks:
             task['status'] = '禁用'
@@ -572,7 +500,6 @@ class TimedBroadcastApp:
         self.log("已将 *全部* 截屏任务的状态设置为: 禁用")
 
     def enable_all_execute(self):
-        """启用所有的定时运行任务"""
         if not self.execute_tasks: return
         for task in self.execute_tasks:
             task['status'] = '启用'
@@ -581,7 +508,6 @@ class TimedBroadcastApp:
         self.log("已将 *全部* 运行任务的状态设置为: 启用")
 
     def disable_all_execute(self):
-        """禁用所有的定时运行任务"""
         if not self.execute_tasks: return
         for task in self.execute_tasks:
             task['status'] = '禁用'
@@ -597,9 +523,9 @@ class TimedBroadcastApp:
                 task.get('name', ''),
                 task.get('status', '启用'),
                 task.get('time', ''),
-                task.get('stop_time', ''), # 确保这里有 stop_time
-                task.get('repeat_count', 1), # 确保这里有 repeat_count
-                task.get('interval_seconds', 0), # 确保这里有 interval_seconds
+                task.get('stop_time', ''),
+                task.get('repeat_count', 1),
+                task.get('interval_seconds', 0),
                 task.get('weekday', ''),
                 task.get('date_range', '')
             ))
@@ -648,14 +574,19 @@ class TimedBroadcastApp:
 
     def open_screenshot_dialog(self, task_to_edit=None, index=None):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("修改截屏任务" if task_to_edit else "添加截屏任务")
         dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.transient(self.root)
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
@@ -687,7 +618,6 @@ class TimedBroadcastApp:
         ttk.Label(time_frame, text="《可多个,用英文逗号,隔开》").grid(row=0, column=2, sticky='w', padx=5)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
 
-        # 增加停止时间输入框
         ttk.Label(time_frame, text="停止时间:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
         stop_time_entry = ttk.Entry(time_frame, font=self.font_11)
         stop_time_entry.grid(row=1, column=1, sticky='w', padx=5, pady=2)
@@ -749,12 +679,12 @@ class TimedBroadcastApp:
 
             self.update_screenshot_list()
             self.save_screenshot_tasks()
-            cleanup_and_destroy() # <--- 【BUG修复】
+            cleanup_and_destroy()
 
         button_text = "保存修改" if task_to_edit else "添加"
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
-        ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         
         self.center_window(dialog, parent=self.root)
 
@@ -960,14 +890,19 @@ class TimedBroadcastApp:
 
     def open_execute_dialog(self, task_to_edit=None, index=None):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("修改运行任务" if task_to_edit else "添加运行任务")
         dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.transient(self.root)
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
@@ -1082,12 +1017,12 @@ class TimedBroadcastApp:
 
             self.update_execute_list()
             self.save_execute_tasks()
-            cleanup_and_destroy() # <--- 【BUG修复】
+            cleanup_and_destroy()
 
         button_text = "保存修改" if task_to_edit else "添加"
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
-        ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         
         self.center_window(dialog, parent=self.root)
 
@@ -1343,17 +1278,21 @@ class TimedBroadcastApp:
 
     def _prompt_for_uninstall(self):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("卸载软件 - 身份验证")
         dialog.resizable(False, False)
         dialog.transient(self.root)
-        dialog.grab_set()
+        
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
+            dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         result = [None]
-
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
-            dialog.destroy()
 
         ttk.Label(dialog, text="请输入卸载密码:", font=self.font_11).pack(pady=20, padx=20)
         password_entry = ttk.Entry(dialog, show='*', font=self.font_11, width=25)
@@ -1362,14 +1301,14 @@ class TimedBroadcastApp:
 
         def on_confirm():
             result[0] = password_entry.get()
-            cleanup_and_destroy() # <--- 【BUG修复】
+            cleanup_and_destroy()
 
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(pady=20)
         ttk.Button(btn_frame, text="确定", command=on_confirm, bootstyle="primary", width=8).pack(side=LEFT, padx=10)
-        ttk.Button(btn_frame, text="取消", command=cleanup_and_destroy, width=8).pack(side=LEFT, padx=10) # <--- 【BUG修复】
+        ttk.Button(btn_frame, text="取消", command=cleanup_and_destroy, width=8).pack(side=LEFT, padx=10)
         dialog.bind('<Return>', lambda event: on_confirm())
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         
         self.center_window(dialog, parent=self.root)
         self.root.wait_window(dialog)
@@ -1595,7 +1534,6 @@ class TimedBroadcastApp:
     def create_scheduled_broadcast_page(self):
         page_frame = self.pages["定时广播"]
 
-        # --- 顶部控件 ---
         top_frame = ttk.Frame(page_frame, padding=(10, 10))
         top_frame.pack(side=TOP, fill=X)
         
@@ -1605,21 +1543,15 @@ class TimedBroadcastApp:
         add_btn = ttk.Button(top_frame, text="添加节目", command=self.add_task, bootstyle="primary")
         add_btn.pack(side=LEFT, padx=10)
 
-        # --- ↓↓↓ 核心修改区域开始 ↓↓↓ ---
-
-        # 创建一个总的按钮容器，放置在最右侧
         top_right_container = ttk.Frame(top_frame)
         top_right_container.pack(side=RIGHT)
 
-        # 创建第一行按钮的容器
         button_row_1 = ttk.Frame(top_right_container)
         button_row_1.pack(fill=X, anchor='e')
 
-        # 创建第二行按钮的容器
         button_row_2 = ttk.Frame(top_right_container)
         button_row_2.pack(fill=X, anchor='e', pady=(5, 0))
 
-        # 定义第一行的按钮
         batch_buttons_row1 = [
             ("全部启用", self.enable_all_tasks, 'success'),
             ("全部禁用", self.disable_all_tasks, 'warning'),
@@ -1631,7 +1563,6 @@ class TimedBroadcastApp:
             btn = ttk.Button(button_row_1, text=text, command=cmd, bootstyle=style)
             btn.pack(side=LEFT, padx=3)
 
-        # 定义第二行的按钮
         batch_buttons_row2 = [
             ("统一音量", self.set_uniform_volume, 'info'),
             ("清空节目", self.clear_all_tasks, 'danger'),
@@ -1642,7 +1573,6 @@ class TimedBroadcastApp:
             btn = ttk.Button(button_row_2, text=text, command=cmd, bootstyle=style)
             btn.pack(side=LEFT, padx=3)
             
-        # 在第二行末尾单独添加“置顶”和“锁定”按钮
         self.pin_button = ttk.Button(button_row_2, text="置顶", command=self.toggle_pin_state, bootstyle="info-outline")
         self.pin_button.pack(side=LEFT, padx=3)
         
@@ -1651,14 +1581,11 @@ class TimedBroadcastApp:
         if not WIN32_AVAILABLE:
             self.lock_button.config(state=DISABLED, text="锁定(Win)")
 
-        # --- ↑↑↑ 核心修改区域结束 ↑↑↑ ---
-
         stats_frame = ttk.Frame(page_frame, padding=(10, 5))
         stats_frame.pack(side=TOP, fill=X)
         self.stats_label = ttk.Label(stats_frame, text="节目单：0", font=self.font_11, bootstyle="secondary")
         self.stats_label.pack(side=LEFT, fill=X, expand=True)
 
-        # --- 底部控件 (采用逆序 pack 技巧) ---
         log_frame = ttk.LabelFrame(page_frame, text="", padding=(10, 5))
         log_frame.pack(side=BOTTOM, fill=X, padx=10, pady=5)
 
@@ -1668,7 +1595,6 @@ class TimedBroadcastApp:
         table_frame = ttk.Frame(page_frame, padding=(10, 5))
         table_frame.pack(side=TOP, fill=BOTH, expand=True)
 
-        # --- 填充各个区域的内容 ---
         columns = ('节目名称', '状态', '开始时间', '模式', '文件或内容', '音量', '周几/几号', '日期范围')
         self.task_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=12, selectmode='extended', bootstyle="primary")
 
@@ -1727,7 +1653,6 @@ class TimedBroadcastApp:
         ttk.Checkbutton(general_frame, text="登录windows后自动启动", variable=self.autostart_var, bootstyle="round-toggle", command=self._handle_autostart_setting).pack(fill=X, pady=5)
         ttk.Checkbutton(general_frame, text="启动后最小化到系统托盘", variable=self.start_minimized_var, bootstyle="round-toggle", command=self.save_settings).pack(fill=X, pady=5)
 
-        # 使用一个新的 Frame 来容纳“启动锁定”和它的提示
         lock_on_start_frame = ttk.Frame(general_frame)
         lock_on_start_frame.pack(fill=X, pady=5)
 
@@ -1736,22 +1661,15 @@ class TimedBroadcastApp:
         if not WIN32_AVAILABLE:
             self.lock_on_start_cb.config(state=DISABLED)
 
-        # 将提示标签放在 Checkbutton 右侧
         ttk.Label(lock_on_start_frame, text="(请先在主界面设置锁定密码)", font=self.font_9, bootstyle="secondary").pack(side=LEFT, padx=10, anchor='w')
 
-        # --- ↓↓↓ 修改部分 ↓↓↓ ---
-        # 将“清除密码”按钮移动到标签后面，并设置样式
         self.clear_password_btn = ttk.Button(
-            lock_on_start_frame,  # <--- 1. 父容器改为 lock_on_start_frame
+            lock_on_start_frame,
             text="清除锁定密码", 
             command=self.clear_lock_password, 
-            bootstyle="danger-link"  # <--- 2. 样式改为 danger-link 使文字变红
+            bootstyle="danger-link"
         )
-        self.clear_password_btn.pack(side=LEFT, padx=10) # <--- 3. 布局改为 side=LEFT
-        # --- ↑↑↑ 修改结束 ↑↑↑ ---
-
-
-        # --- ↓↓↓ 核心修改区域 2 开始 ↓↓↓ ---
+        self.clear_password_btn.pack(side=LEFT, padx=10)
         
         bg_interval_frame = ttk.Frame(general_frame)
         bg_interval_frame.pack(fill=X, pady=8)
@@ -1762,14 +1680,11 @@ class TimedBroadcastApp:
         ttk.Label(bg_interval_frame, text="秒 (范围: 5-60)", font=self.font_10, bootstyle="secondary").pack(side=LEFT)
         ttk.Button(bg_interval_frame, text="确定", command=self._validate_bg_interval, bootstyle="primary-outline").pack(side=LEFT, padx=10)
 
-        # 将两个操作按钮放在“确定”按钮的右侧
         self.cancel_bg_images_btn = ttk.Button(bg_interval_frame, text="取消所有节目背景图片", command=self._cancel_all_background_images, bootstyle="info-outline")
         self.cancel_bg_images_btn.pack(side=LEFT, padx=5)
         
         self.restore_video_speed_btn = ttk.Button(bg_interval_frame, text="恢复所有视频节目播放速度", command=self._restore_all_video_speeds, bootstyle="info-outline")
         self.restore_video_speed_btn.pack(side=LEFT, padx=5)
-
-        # --- ↑↑↑ 核心修改区域 2 结束 ↑↑↑ ---
 
         font_frame = ttk.Frame(general_frame)
         font_frame.pack(fill=X, pady=8)
@@ -1976,16 +1891,21 @@ class TimedBroadcastApp:
             self.log("准备启用/更新整点报时功能，开始生成语音文件...")
 
             progress_dialog = ttk.Toplevel(self.root)
-            self.active_modal_dialog = progress_dialog # <--- 【BUG修复】
             progress_dialog.title("请稍候")
             progress_dialog.resizable(False, False)
-            progress_dialog.transient(self.root); progress_dialog.grab_set()
+            progress_dialog.transient(self.root)
 
-            def cleanup_and_destroy(): # <--- 【BUG修复】
-                self.active_modal_dialog = None
+            # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+            progress_dialog.attributes('-topmost', True)
+            self.root.attributes('-disabled', True)
+            
+            def cleanup_and_destroy():
+                self.root.attributes('-disabled', False)
                 progress_dialog.destroy()
+                self.root.focus_force()
+            # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
-            progress_dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+            progress_dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
 
             ttk.Label(progress_dialog, text="正在生成整点报时文件 (0/24)...", font=self.font_11).pack(pady=10, padx=20)
             progress_label = ttk.Label(progress_dialog, text="", font=self.font_10)
@@ -2043,7 +1963,7 @@ class TimedBroadcastApp:
             self.root.after(0, messagebox.showerror, "错误", f"生成报时文件失败：{e}", parent=self.root)
         finally:
             self.root.after(0, progress_dialog.destroy)
-            self.root.after(1, lambda: setattr(self, 'active_modal_dialog', None)) # <--- 【BUG修复】
+            self.root.after(1, lambda: self.root.attributes('-disabled', False))
             if success:
                 self.log("全部整点报时文件生成完毕。")
                 if self.time_chime_enabled_var.get():
@@ -2067,20 +1987,14 @@ class TimedBroadcastApp:
             self.root.after(0, messagebox.showerror, "错误", f"删除报时文件失败：{e}", parent=self.root)
 
     def toggle_pin_state(self):
-        """切换窗口的置顶状态"""
-        # 翻转当前的置顶状态
         self.is_window_pinned = not self.is_window_pinned
         
         if self.is_window_pinned:
-            # 如果是True，则执行置顶操作
             self.root.attributes('-topmost', True)
-            # 更新按钮的文本和样式，以便用户知道下一步是“取消置顶”
             self.pin_button.config(text="取消置顶", bootstyle="info")
             self.log("窗口已置顶显示。")
         else:
-            # 如果是False，则执行取消置顶操作
             self.root.attributes('-topmost', False)
-            # 恢复按钮的初始状态
             self.pin_button.config(text="置顶", bootstyle="info-outline")
             self.log("窗口已取消置顶。")
 
@@ -2113,14 +2027,19 @@ class TimedBroadcastApp:
 
     def _prompt_for_password_set(self):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("首次锁定，请设置密码")
         dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.transient(self.root)
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         ttk.Label(dialog, text="请设置一个锁定密码 (最多6位)", font=self.font_11).pack(pady=10, padx=20)
 
@@ -2145,28 +2064,33 @@ class TimedBroadcastApp:
                 if "设置" in self.pages and hasattr(self, 'clear_password_btn'):
                     self.clear_password_btn.config(state=NORMAL)
                 messagebox.showinfo("成功", "密码设置成功，界面即将锁定。", parent=dialog)
-                cleanup_and_destroy() # <--- 【BUG修复】
+                cleanup_and_destroy()
                 self._apply_lock()
             else:
                 messagebox.showerror("功能受限", "无法保存密码。\n此功能仅在Windows系统上支持且需要pywin32库。", parent=dialog)
 
         btn_frame = ttk.Frame(dialog); btn_frame.pack(pady=20)
         ttk.Button(btn_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=10)
-        ttk.Button(btn_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        ttk.Button(btn_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         
         self.center_window(dialog, parent=self.root)
 
     def _prompt_for_password_unlock(self):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("解锁界面")
         dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.transient(self.root)
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         ttk.Label(dialog, text="请输入密码以解锁", font=self.font_11).pack(pady=10, padx=20)
 
@@ -2181,7 +2105,7 @@ class TimedBroadcastApp:
 
         def confirm():
             if is_password_correct():
-                cleanup_and_destroy() # <--- 【BUG修复】
+                cleanup_and_destroy()
                 self._apply_unlock()
             else:
                 messagebox.showerror("错误", "密码不正确！", parent=dialog)
@@ -2193,7 +2117,7 @@ class TimedBroadcastApp:
 
             if messagebox.askyesno("确认操作", "您确定要清除锁定密码吗？\n此操作不可恢复。", parent=dialog):
                 self._perform_password_clear_logic()
-                cleanup_and_destroy() # <--- 【BUG修复】
+                cleanup_and_destroy()
                 self.root.after(50, self._apply_unlock)
                 self.root.after(100, lambda: messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root))
 
@@ -2201,9 +2125,9 @@ class TimedBroadcastApp:
         btn_frame.columnconfigure((0, 1, 2), weight=1)
         ttk.Button(btn_frame, text="确定", command=confirm, bootstyle="primary").grid(row=0, column=0, padx=5, sticky='ew')
         ttk.Button(btn_frame, text="清除密码", command=clear_password_action, bootstyle="warning").grid(row=0, column=1, padx=5, sticky='ew')
-        ttk.Button(btn_frame, text="取消", command=cleanup_and_destroy).grid(row=0, column=2, padx=5, sticky='ew') # <--- 【BUG修复】
+        ttk.Button(btn_frame, text="取消", command=cleanup_and_destroy).grid(row=0, column=2, padx=5, sticky='ew')
         dialog.bind('<Return>', lambda event: confirm())
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         
         self.center_window(dialog, parent=self.root)
 
@@ -2328,17 +2252,21 @@ class TimedBroadcastApp:
 
     def add_task(self):
         choice_dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = choice_dialog # <--- 【BUG修复】
         choice_dialog.title("选择节目类型")
         choice_dialog.resizable(False, False)
-        choice_dialog.transient(self.root); choice_dialog.grab_set()
+        choice_dialog.transient(self.root)
         
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        choice_dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             choice_dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
-        def open_and_cleanup(dialog_opener_func): # <--- 【BUG修复】
-            # cleanup_and_destroy() # This is now handled by the new dialogs
+        def open_and_cleanup(dialog_opener_func):
             dialog_opener_func(choice_dialog)
 
         main_frame = ttk.Frame(choice_dialog, padding=20)
@@ -2363,7 +2291,7 @@ class TimedBroadcastApp:
         if not VLC_AVAILABLE:
             video_btn.config(state=DISABLED, text="🎬→视频节目 (VLC未安装)")
 
-        choice_dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        choice_dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         self.center_window(choice_dialog, parent=self.root)
 #第5部分
 #第5部分
@@ -2371,15 +2299,20 @@ class TimedBroadcastApp:
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("修改音频节目" if is_edit_mode else "添加音频节目")
         dialog.resizable(True, True)
         dialog.minsize(800, 580)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.transient(self.root)
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
@@ -2554,30 +2487,34 @@ class TimedBroadcastApp:
             if is_edit_mode: self.tasks[index] = new_task_data; self.log(f"已修改音频节目: {new_task_data['name']}")
             else: self.tasks.append(new_task_data); self.log(f"已添加音频节目: {new_task_data['name']}")
 
-            self.update_task_list(); self.save_tasks(); cleanup_and_destroy() # <--- 【BUG修复】
+            self.update_task_list(); self.save_tasks(); cleanup_and_destroy()
 
             if play_this_task_now:
                 self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
 
         button_text = "保存修改" if is_edit_mode else "添加"
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
-        ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
 
     def open_video_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("修改视频节目" if is_edit_mode else "添加视频节目")
         dialog.resizable(True, True)
         dialog.minsize(800, 580)
         dialog.transient(self.root)
-        dialog.grab_set()
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
@@ -2598,7 +2535,6 @@ class TimedBroadcastApp:
         other_frame.grid(row=3, column=0, sticky='ew', pady=5)
         other_frame.columnconfigure(1, weight=1)
 
-        # --- 填充 content_frame ---
         ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -2636,20 +2572,17 @@ class TimedBroadcastApp:
                 entry_widget.insert(0, foldername)
         ttk.Button(video_folder_frame, text="选取...", command=lambda: select_folder(video_folder_entry), bootstyle="outline").grid(row=0, column=2, padx=5)
 
-        # --- [修改 1: 调整音量布局] ---
         play_order_frame = ttk.Frame(content_frame)
         play_order_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=2)
         play_order_var = tk.StringVar(value="sequential")
         ttk.Radiobutton(play_order_frame, text="顺序播", variable=play_order_var, value="sequential").pack(side=LEFT, padx=10)
         ttk.Radiobutton(play_order_frame, text="随机播", variable=play_order_var, value="random").pack(side=LEFT, padx=10)
         
-        # 将音量控件放在同一行
         ttk.Label(play_order_frame, text="音量:").pack(side=LEFT, padx=(20, 2))
         volume_entry = ttk.Entry(play_order_frame, font=self.font_11, width=5)
         volume_entry.pack(side=LEFT)
         ttk.Label(play_order_frame, text="(0-100)").pack(side=LEFT, padx=2)
 
-        # --- 填充 playback_frame ---
         playback_mode_var = tk.StringVar(value="fullscreen")
         resolutions = ["640x480", "800x600", "1024x768", "1280x720", "1366x768", "1600x900", "1920x1080"]
         resolution_var = tk.StringVar(value=resolutions[2])
@@ -2657,7 +2590,6 @@ class TimedBroadcastApp:
         playback_rates = ['0.5x', '0.75x', '1.0x (正常)', '1.25x', '1.5x', '2.0x']
         playback_rate_var = tk.StringVar(value='1.0x (正常)')
 
-        # --- [修改 2: 调整播放倍速布局] ---
         mode_frame = ttk.Frame(playback_frame)
         mode_frame.grid(row=0, column=0, columnspan=3, sticky='w')
 
@@ -2673,7 +2605,6 @@ class TimedBroadcastApp:
         ttk.Radiobutton(mode_frame, text="非全屏", variable=playback_mode_var, value="windowed", command=toggle_resolution_combo).pack(side=LEFT, padx=5)
         resolution_combo.pack(side=LEFT, padx=(5, 10))
 
-        # 将播放倍速放在同一行
         ttk.Label(mode_frame, text="倍速:").pack(side=LEFT)
         rate_combo = ttk.Combobox(mode_frame, textvariable=playback_rate_var, values=playback_rates, font=self.font_11, width=10)
         rate_combo.pack(side=LEFT, padx=2)
@@ -2681,7 +2612,6 @@ class TimedBroadcastApp:
 
         toggle_resolution_combo()
 
-        # --- 后续布局保持不变 ---
         time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
         time_frame.grid(row=2, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
@@ -2827,15 +2757,15 @@ class TimedBroadcastApp:
 
             self.update_task_list()
             self.save_tasks()
-            cleanup_and_destroy() # <--- 【BUG修复】
+            cleanup_and_destroy()
 
             if play_this_task_now:
                 self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
 
         button_text = "保存修改" if is_edit_mode else "添加"
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
-        ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
 
 #第6部分
 #第6部分
@@ -2843,15 +2773,20 @@ class TimedBroadcastApp:
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
         dialog.resizable(True, True)
         dialog.minsize(800, 580)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.transient(self.root)
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
@@ -2865,13 +2800,12 @@ class TimedBroadcastApp:
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         
-        # --- [修改 1: 减少播音文字框高度] ---
         ttk.Label(content_frame, text="播音文字:").grid(row=1, column=0, sticky='nw', padx=5, pady=2)
         text_frame = ttk.Frame(content_frame)
         text_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         text_frame.columnconfigure(0, weight=1)
         text_frame.rowconfigure(0, weight=1)
-        content_text = ScrolledText(text_frame, height=3, font=self.font_11, wrap=WORD) # <-- 高度从5改为3
+        content_text = ScrolledText(text_frame, height=3, font=self.font_11, wrap=WORD)
         content_text.grid(row=0, column=0, sticky='nsew')
         
         script_btn_frame = ttk.Frame(content_frame)
@@ -2879,42 +2813,31 @@ class TimedBroadcastApp:
         ttk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text), bootstyle="outline").pack(side=LEFT)
         ttk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text, name_entry), bootstyle="outline").pack(side=LEFT, padx=10)
 
-        # --- ↓↓↓ 新增广告制作按钮 ↓↓↓ ---
-        # 创建一个专门的框架来容纳广告按钮
         ad_btn_frame = ttk.Frame(script_btn_frame)
         ad_btn_frame.pack(side=LEFT, padx=20)
 
-        # 按语音长度制作
         self.ad_by_voice_btn = ttk.Button(ad_btn_frame, text="按语音长度制作广告", 
                                           command=lambda: self._create_advertisement('voice'))
         self.ad_by_voice_btn.pack(side=LEFT)
 
-        # 按背景音乐长度制作
         self.ad_by_bgm_btn = ttk.Button(ad_btn_frame, text="按背景音乐长度制作广告", 
                                         command=lambda: self._create_advertisement('bgm'))
         self.ad_by_bgm_btn.pack(side=LEFT, padx=10)
 
-        # 权限控制
         if self.auth_info['status'] != 'Permanent':
             self.ad_by_voice_btn.config(state=DISABLED)
             self.ad_by_bgm_btn.config(state=DISABLED)
-            # 可以在按钮旁边加一个提示
-            #ttk.Label(ad_btn_frame, text="(永久授权可用)", font=self.font_9, bootstyle="secondary").pack(side=LEFT)
         
-        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---        
-
-        # --- [修改 2: 调整语速/音调/音量布局] ---
         ttk.Label(content_frame, text="播音员:").grid(row=3, column=0, sticky='w', padx=5, pady=3)
         voice_frame = ttk.Frame(content_frame)
         voice_frame.grid(row=3, column=1, columnspan=3, sticky='ew', padx=5, pady=3)
-        voice_frame.columnconfigure(0, weight=1) # 让播音员列表可以伸展
+        voice_frame.columnconfigure(0, weight=1)
         
         available_voices = self.get_available_voices()
         voice_var = tk.StringVar()
         voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, values=available_voices, font=self.font_11, state='readonly')
         voice_combo.grid(row=0, column=0, sticky='ew')
         
-        # 创建一个新的框架来容纳右侧的参数输入框
         speech_params_frame = ttk.Frame(voice_frame)
         speech_params_frame.grid(row=0, column=1, sticky='e', padx=(10, 0))
 
@@ -2925,9 +2848,7 @@ class TimedBroadcastApp:
         ttk.Label(speech_params_frame, text="音量:").pack(side=LEFT)
         volume_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=5); volume_entry.pack(side=LEFT, padx=(2, 0))
 
-        # --- 后续布局保持不变，只是行号可能需要调整 ---
         prompt_var = tk.IntVar(); prompt_frame = ttk.Frame(content_frame)
-        # 原来的 speech_params_frame 在第4行，现在被合并了，所以后续控件从第5行开始
         prompt_frame.grid(row=5, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         prompt_frame.columnconfigure(1, weight=1)
         ttk.Checkbutton(prompt_frame, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
@@ -3040,7 +2961,6 @@ class TimedBroadcastApp:
             prompt_var.set(0); prompt_volume_var.set("80"); bgm_var.set(0); bgm_volume_var.set("40")
             repeat_entry.insert(0, "1"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
 
-        # 将所有需要用到的控件变量收集到 ad_params 字典中
         ad_params = {
             'dialog': dialog,
             'name_entry': name_entry,
@@ -3057,38 +2977,31 @@ class TimedBroadcastApp:
             'bgm_volume_var': bgm_volume_var,
         }
 
-        # 现在为按钮配置正确的 command，并传入 ad_params 字典
         self.ad_by_voice_btn.config(command=lambda: self._create_advertisement('voice', ad_params))
         self.ad_by_bgm_btn.config(command=lambda: self._create_advertisement('bgm', ad_params))
 
         def save_task():
-            # ... (在所有代码的最前面)
-
-            # --- ↓↓↓ 新增的验证逻辑 ↓↓↓ ---
             try:
                 speed = int(speed_entry.get().strip() or '0')
                 pitch = int(pitch_entry.get().strip() or '0')
                 volume = int(volume_entry.get().strip() or '80')
 
                 if not (-10 <= speed <= 10):
-                    messagebox.showerror("输入错误", "语速必须在 -10 到 10 之间。", parent=dialog)
-                    return # 中断保存
+                    messagebox.showerror("输入错误", "语速必须在 -10 到 10 之间。", parent=dialog); return
                 if not (-10 <= pitch <= 10):
-                    messagebox.showerror("输入错误", "音调必须在 -10 到 10 之间。", parent=dialog)
-                    return # 中断保存
+                    messagebox.showerror("输入错误", "音调必须在 -10 到 10 之间。", parent=dialog); return
                 if not (0 <= volume <= 100):
-                    messagebox.showerror("输入错误", "音量必须在 0 到 100 之间。", parent=dialog)
-                    return # 中断保存
+                    messagebox.showerror("输入错误", "音量必须在 0 到 100 之间。", parent=dialog); return
             except ValueError:
-                messagebox.showerror("输入错误", "语速、音调、音量必须是有效的整数。", parent=dialog)
-                return # 中断保存
-            # --- ↑↑↑ 验证逻辑结束 ↑↑↑ ---
+                messagebox.showerror("输入错误", "语速、音调、音量必须是有效的整数。", parent=dialog); return
+            
             text_content = content_text.get('1.0', END).strip()
             if not text_content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
             if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
             is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
             if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
+            
             regeneration_needed = True
             if is_edit_mode:
                 original_task = task_to_edit
@@ -3122,20 +3035,25 @@ class TimedBroadcastApp:
                 new_task_data, play_now_flag = build_task_data(task_to_edit.get('content'), task_to_edit.get('wav_filename'))
                 if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
                 self.tasks[index] = new_task_data; self.log(f"已修改语音节目(未重新生成语音): {new_task_data['name']}")
-                self.update_task_list(); self.save_tasks(); cleanup_and_destroy() # <--- 【BUG修复】
+                self.update_task_list(); self.save_tasks(); cleanup_and_destroy()
                 if play_now_flag: self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
                 return
 
             progress_dialog = ttk.Toplevel(dialog)
-            self.active_modal_dialog = progress_dialog # <--- 【BUG修复】
             progress_dialog.title("请稍候")
-            progress_dialog.resizable(False, False); progress_dialog.transient(dialog); progress_dialog.grab_set()
+            progress_dialog.resizable(False, False); progress_dialog.transient(dialog)
             
-            def cleanup_progress(): # <--- 【BUG修复】
-                self.active_modal_dialog = dialog # Restore focus to the main dialog
+            # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+            progress_dialog.attributes('-topmost', True)
+            dialog.attributes('-disabled', True) # 禁用父对话框
+            
+            def cleanup_progress():
+                dialog.attributes('-disabled', False) # 恢复父对话框
                 progress_dialog.destroy()
+                dialog.focus_force()
+            # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
-            progress_dialog.protocol("WM_DELETE_WINDOW", cleanup_progress) # <--- 【BUG修复】
+            progress_dialog.protocol("WM_DELETE_WINDOW", cleanup_progress)
 
             ttk.Label(progress_dialog, text="语音文件生成中，请稍后...", font=self.font_11).pack(expand=True, padx=20, pady=20)
             self.center_window(progress_dialog, parent=dialog)
@@ -3143,8 +3061,9 @@ class TimedBroadcastApp:
             new_wav_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.wav"
             output_path = os.path.join(AUDIO_FOLDER, new_wav_filename)
             voice_params = {'voice': voice_var.get(), 'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0", 'volume': volume_entry.get().strip() or "80"}
+            
             def _on_synthesis_complete(result):
-                cleanup_progress() # <--- 【BUG修复】
+                cleanup_progress()
                 if not result['success']: messagebox.showerror("错误", f"无法生成语音文件: {result['error']}", parent=dialog); return
                 if is_edit_mode and 'wav_filename' in task_to_edit:
                     old_wav_path = os.path.join(AUDIO_FOLDER, task_to_edit['wav_filename'])
@@ -3155,22 +3074,18 @@ class TimedBroadcastApp:
                 if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
                 if is_edit_mode: self.tasks[index] = new_task_data; self.log(f"已修改语音节目(并重新生成语音): {new_task_data['name']}")
                 else: self.tasks.append(new_task_data); self.log(f"已添加语音节目: {new_task_data['name']}")
-                self.update_task_list(); self.save_tasks(); cleanup_and_destroy() # <--- 【BUG修复】
+                self.update_task_list(); self.save_tasks(); cleanup_and_destroy()
                 if play_now_flag: self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
+            
             synthesis_thread = threading.Thread(target=self._synthesis_worker, args=(text_content, voice_params, output_path, _on_synthesis_complete))
             synthesis_thread.daemon = True; synthesis_thread.start()
 
         button_text = "保存修改" if is_edit_mode else "添加"
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
-        ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
 
     def _create_advertisement(self, mode, params):
-        """
-        核心广告制作函数
-        mode: 'voice' 或 'bgm'
-        params: 包含所有UI控件变量的字典
-        """
         try:
             from pydub import AudioSegment
             
@@ -3191,40 +3106,36 @@ class TimedBroadcastApp:
             messagebox.showerror("初始化失败", f"加载音频处理组件时出错: {e}", parent=params['dialog'])
             return
 
-        # 1. 数据验证
         if not params['bgm_var'].get() or not params['bgm_file_var'].get().strip():
-            messagebox.showerror("错误", "必须选择背景音乐才能制作广告。", parent=params['dialog'])
-            return
-
+            messagebox.showerror("错误", "必须选择背景音乐才能制作广告。", parent=params['dialog']); return
         bgm_path = params['bgm_file_var'].get().strip()
         if not os.path.exists(bgm_path):
-            messagebox.showerror("错误", f"背景音乐文件不存在：\n{bgm_path}", parent=params['dialog'])
-            return
-
+            messagebox.showerror("错误", f"背景音乐文件不存在：\n{bgm_path}", parent=params['dialog']); return
         text_content = params['content_text'].get('1.0', 'end').strip()
         if not text_content:
-            messagebox.showerror("错误", "播音文字内容不能为空。", parent=params['dialog'])
-            return
-            
+            messagebox.showerror("错误", "播音文字内容不能为空。", parent=params['dialog']); return
         try:
             voice_volume = int(params['volume_entry'].get().strip() or '80')
             bgm_volume = int(params['bgm_volume_var'].get().strip() or '40')
         except ValueError:
-            messagebox.showerror("错误", "音量必须是有效的整数。", parent=params['dialog'])
-            return
+            messagebox.showerror("错误", "音量必须是有效的整数。", parent=params['dialog']); return
 
-        # 2. 显示进度窗口
         progress_dialog = ttk.Toplevel(params['dialog'])
-        self.active_modal_dialog = progress_dialog # <--- 【BUG修复】
         progress_dialog.title("正在制作广告")
         progress_dialog.resizable(False, False)
-        progress_dialog.transient(params['dialog']); progress_dialog.grab_set()
+        progress_dialog.transient(params['dialog'])
         
-        def cleanup_progress(): # <--- 【BUG修复】
-            self.active_modal_dialog = params['dialog']
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        progress_dialog.attributes('-topmost', True)
+        params['dialog'].attributes('-disabled', True)
+        
+        def cleanup_progress():
+            params['dialog'].attributes('-disabled', False)
             progress_dialog.destroy()
+            params['dialog'].focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
-        progress_dialog.protocol("WM_DELETE_WINDOW", cleanup_progress) # <--- 【BUG修复】
+        progress_dialog.protocol("WM_DELETE_WINDOW", cleanup_progress)
 
         progress_label = ttk.Label(progress_dialog, text="正在准备...", font=self.font_11)
         progress_label.pack(pady=10, padx=20)
@@ -3232,11 +3143,9 @@ class TimedBroadcastApp:
         progress.pack(pady=10, padx=20)
         self.center_window(progress_dialog, parent=params['dialog'])
 
-        # 3. 在后台线程中执行耗时操作
         def worker():
             temp_wav_path = None
             try:
-                # --- 步骤 A: 生成或加载语音文件 ---
                 self.root.after(0, lambda: progress_label.config(text="步骤1/4: 生成语音..."))
                 self.root.after(0, lambda: progress.config(value=10))
 
@@ -3250,11 +3159,9 @@ class TimedBroadcastApp:
                     'volume': '100'
                 }
                 
-                success = self._synthesize_text_to_wav(text_content, voice_params, temp_wav_path)
-                if not success:
+                if not self._synthesize_text_to_wav(text_content, voice_params, temp_wav_path):
                     raise Exception("语音合成失败！")
 
-                # --- 步骤 B: 加载音频并获取时长 ---
                 self.root.after(0, lambda: progress_label.config(text="步骤2/4: 分析音频..."))
                 self.root.after(0, lambda: progress.config(value=30))
 
@@ -3267,71 +3174,46 @@ class TimedBroadcastApp:
                 if voice_duration_ms == 0:
                     raise ValueError("合成的语音长度为0，无法制作广告。")
 
-                # --- ↓↓↓ 核心算法修改区域 (版本3) ↓↓↓ ---
                 self.root.after(0, lambda: progress_label.config(text="步骤3/4: 计算并混合音频..."))
                 self.root.after(0, lambda: progress.config(value=60))
 
-                # 定义音量转换函数
                 def volume_to_db(vol_percent):
                     if vol_percent <= 0: return -120
                     return 20 * (vol_percent / 100.0) - 20
 
-                # 先调整好各自的音量
                 adjusted_voice = voice_audio + volume_to_db(voice_volume)
                 adjusted_bgm = bgm_audio + volume_to_db(bgm_volume)
 
                 final_output = None
 
                 if mode == 'voice':
-                    # 按语音长度模式：只播报一次
                     if bgm_duration_ms < voice_duration_ms:
                         raise ValueError("背景音乐长度小于语音长度，无法制作。")
-                    
-                    # 截取背景音乐，然后叠加
                     final_bgm_segment = adjusted_bgm[:voice_duration_ms]
                     final_output = final_bgm_segment.overlay(adjusted_voice)
-
                 elif mode == 'bgm':
-                    # 按背景音乐长度模式：在BGM总时长内重复播报
                     silence_5_sec = AudioSegment.silent(duration=5000)
-                    
-                    # 定义一个播报单元 = 语音 + 尾部静音
                     unit_audio = adjusted_voice + silence_5_sec
-                    unit_duration_ms = len(unit_audio)
-
                     if bgm_duration_ms < voice_duration_ms:
                          raise ValueError(f"背景音乐太短（{bgm_duration_ms/1000.0:.1f}秒），无法容纳一次完整的语音（需要 {voice_duration_ms/1000.0:.1f} 秒）。")
 
-                    # 计算可以完整播报多少次
-                    repeat_count = int(bgm_duration_ms // unit_duration_ms)
-                    
-                    # 如果连一次完整的“语音+静音”都放不下，就只放一次语音
+                    repeat_count = int(bgm_duration_ms // len(unit_audio))
                     if repeat_count == 0:
                         repeat_count = 1
-                        unit_audio = adjusted_voice # 此时单元不带静音
+                        unit_audio = adjusted_voice
                     
-                    # 创建一个与背景音乐等长的空白“画布”
                     voice_canvas = AudioSegment.silent(duration=bgm_duration_ms)
-                    
-                    # 在画布上依次叠加播报单元
                     current_pos_ms = 0
                     for i in range(repeat_count):
-                        # 确保下一次叠加不会超出画布范围
                         if current_pos_ms + len(unit_audio) <= bgm_duration_ms:
                             voice_canvas = voice_canvas.overlay(unit_audio, position=current_pos_ms)
                             current_pos_ms += len(unit_audio)
                         else:
-                            # 如果加上静音会超出，就尝试只加语音
                             if current_pos_ms + len(adjusted_voice) <= bgm_duration_ms:
                                 voice_canvas = voice_canvas.overlay(adjusted_voice, position=current_pos_ms)
-                            break # 空间不足，停止添加
-
-                    # 将填充好语音的画布与原始背景音乐混合
+                            break
                     final_output = adjusted_bgm.overlay(voice_canvas)
 
-                # --- ↑↑↑ 核心算法修改区域结束 ↑↑↑ ---
-
-                # --- 步骤 E: 导出为MP3 ---
                 self.root.after(0, lambda: progress_label.config(text="步骤4/4: 导出MP3文件..."))
                 self.root.after(0, lambda: progress.config(value=90))
                 
@@ -3344,11 +3226,8 @@ class TimedBroadcastApp:
                 output_path = os.path.join(ad_folder, output_filename)
 
                 final_output.export(
-                    output_path,
-                    format="mp3",
-                    bitrate="256k",
-                    parameters=["-ar", "44100", "-id3v2_version", "3"],
-                    codec="libmp3lame"
+                    output_path, format="mp3", bitrate="256k",
+                    parameters=["-ar", "44100", "-id3v2_version", "3"], codec="libmp3lame"
                 )
 
                 self.root.after(0, lambda: progress.config(value=100))
@@ -3359,11 +3238,9 @@ class TimedBroadcastApp:
             
             finally:
                 if temp_wav_path and os.path.exists(temp_wav_path):
-                    try:
-                        os.remove(temp_wav_path)
-                    except Exception as e_del:
-                        self.log(f"删除临时文件 {temp_wav_path} 失败: {e_del}")
-                self.root.after(0, cleanup_progress) # <--- 【BUG修复】
+                    try: os.remove(temp_wav_path)
+                    except Exception as e_del: self.log(f"删除临时文件 {temp_wav_path} 失败: {e_del}")
+                self.root.after(0, cleanup_progress)
 
         threading.Thread(target=worker, daemon=True).start()
         
@@ -3499,9 +3376,14 @@ class TimedBroadcastApp:
         if len(selection) > 1: messagebox.showwarning("警告", "一次只能修改一个节目", parent=self.root); return
         index = self.task_tree.index(selection[0])
         task = self.tasks[index]
+        
         dummy_parent = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dummy_parent # <--- 【BUG修复】
         dummy_parent.withdraw()
+
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        # 不再追踪 dummy_parent，因为新的对话框会自己处理
+        # self.active_modal_dialog = dummy_parent 
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         task_type = task.get('type')
         if task_type == 'audio':
@@ -3512,16 +3394,6 @@ class TimedBroadcastApp:
             self.open_video_dialog(dummy_parent, task_to_edit=task, index=index)
         else:
              self.open_audio_dialog(dummy_parent, task_to_edit=task, index=index)
-
-        def check_dialog_closed():
-            try:
-                if not dummy_parent.winfo_children(): 
-                    self.active_modal_dialog = None # <--- 【BUG修复】
-                    dummy_parent.destroy()
-                else: self.root.after(100, check_dialog_closed)
-            except tk.TclError: 
-                self.active_modal_dialog = None # <--- 【BUG修复】
-        self.root.after(100, check_dialog_closed)
 
     def copy_task(self):
         selections = self.task_tree.selection()
@@ -3664,17 +3536,21 @@ class TimedBroadcastApp:
 
     def _create_custom_input_dialog(self, title, prompt, minvalue=None, maxvalue=None):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title(title)
         dialog.resizable(False, False)
         dialog.transient(self.root)
-        dialog.grab_set()
+
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
+            dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         result = [None]
-
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
-            dialog.destroy()
 
         ttk.Label(dialog, text=prompt, font=self.font_11).pack(pady=10, padx=20)
         entry = ttk.Entry(dialog, font=self.font_11, width=15, justify='center')
@@ -3689,7 +3565,7 @@ class TimedBroadcastApp:
                     messagebox.showerror("输入错误", f"请输入一个介于 {minvalue} 和 {maxvalue} 之间的整数。", parent=dialog)
                     return
                 result[0] = value
-                cleanup_and_destroy() # <--- 【BUG修复】
+                cleanup_and_destroy()
             except ValueError:
                 messagebox.showerror("输入错误", "请输入一个有效的整数。", parent=dialog)
 
@@ -3697,10 +3573,10 @@ class TimedBroadcastApp:
         btn_frame.pack(pady=15)
 
         ttk.Button(btn_frame, text="确定", command=on_confirm, bootstyle="primary", width=8).pack(side=LEFT, padx=10)
-        ttk.Button(btn_frame, text="取消", command=cleanup_and_destroy, width=8).pack(side=LEFT, padx=10) # <--- 【BUG修复】
+        ttk.Button(btn_frame, text="取消", command=cleanup_and_destroy, width=8).pack(side=LEFT, padx=10)
 
         dialog.bind('<Return>', lambda event: on_confirm())
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
 
         self.center_window(dialog, parent=self.root)
         self.root.wait_window(dialog)
@@ -3740,14 +3616,19 @@ class TimedBroadcastApp:
 
     def show_time_settings_dialog(self, time_entry):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("开始时间设置")
         dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.transient(self.root)
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
@@ -3794,23 +3675,28 @@ class TimedBroadcastApp:
             if isinstance(time_entry, ttk.Entry):
                 time_entry.delete(0, END)
                 time_entry.insert(0, result)
-            cleanup_and_destroy() # <--- 【BUG修复】
+            cleanup_and_destroy()
         ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=5, ipady=5)
-        ttk.Button(bottom_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=5, ipady=5) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        ttk.Button(bottom_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=5, ipady=5)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         
         self.center_window(dialog, parent=self.root)
 
     def show_weekday_settings_dialog(self, weekday_entry):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("周几或几号")
         dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.transient(self.root)
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
@@ -3840,10 +3726,10 @@ class TimedBroadcastApp:
             if week_type_var.get() == "week": result = "每周:" + "".join(sorted([str(n) for n, v in week_vars.items() if v.get()]))
             else: result = "每月:" + ",".join(sorted([f"{n:02d}" for n, v in day_vars.items() if v.get()]))
             if isinstance(weekday_entry, ttk.Entry): weekday_entry.delete(0, END); weekday_entry.insert(0, result)
-            cleanup_and_destroy() # <--- 【BUG修复】
+            cleanup_and_destroy()
         ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=5, ipady=5)
-        ttk.Button(bottom_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=5, ipady=5) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        ttk.Button(bottom_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=5, ipady=5)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
 
         self.center_window(dialog, parent=self.root)
 
@@ -3851,14 +3737,19 @@ class TimedBroadcastApp:
 #第9部分
     def show_daterange_settings_dialog(self, date_range_entry):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("日期范围")
         dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.transient(self.root)
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
@@ -3884,24 +3775,29 @@ class TimedBroadcastApp:
             if norm_start and norm_end:
                 date_range_entry.delete(0, END)
                 date_range_entry.insert(0, f"{norm_start} ~ {norm_end}")
-                cleanup_and_destroy() # <--- 【BUG修复】
+                cleanup_and_destroy()
             else: messagebox.showerror("格式错误", "日期格式不正确, 应为 YYYY-MM-DD", parent=dialog)
         ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=5, ipady=5)
-        ttk.Button(bottom_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=5, ipady=5) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        ttk.Button(bottom_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=5, ipady=5)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
 
         self.center_window(dialog, parent=self.root)
 
     def show_single_time_dialog(self, time_var):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("设置时间")
         dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.transient(self.root)
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
@@ -3915,25 +3811,30 @@ class TimedBroadcastApp:
             if normalized_time:
                 time_var.set(normalized_time)
                 self.save_settings()
-                cleanup_and_destroy() # <--- 【BUG修复】
+                cleanup_and_destroy()
             else: messagebox.showerror("格式错误", "请输入有效的时间格式 HH:MM:SS", parent=dialog)
         bottom_frame = ttk.Frame(main_frame); bottom_frame.pack(pady=10)
         ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=10)
-        ttk.Button(bottom_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        ttk.Button(bottom_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         
         self.center_window(dialog, parent=self.root)
 
     def show_power_week_time_dialog(self, title, days_var, time_var):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title(title)
         dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.transient(self.root)
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         week_frame = ttk.LabelFrame(dialog, text="选择周几", padding=10)
         week_frame.pack(fill=X, pady=10, padx=10)
@@ -3958,11 +3859,11 @@ class TimedBroadcastApp:
             days_var.set("每周:" + "".join(selected_days))
             time_var.set(normalized_time)
             self.save_settings()
-            cleanup_and_destroy() # <--- 【BUG修复】
+            cleanup_and_destroy()
         bottom_frame = ttk.Frame(dialog); bottom_frame.pack(pady=15)
         ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=10)
-        ttk.Button(bottom_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        ttk.Button(bottom_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
 
         self.center_window(dialog, parent=self.root)
 
@@ -4019,7 +3920,6 @@ class TimedBroadcastApp:
         self.root.after(1000, self._process_reminder_queue)
 
     def _check_running_processes_for_termination(self, now):
-        # 遍历活动进程字典的副本，因为我们可能会在循环中删除元素
         for task_id in list(self.active_processes.keys()):
             proc_info = self.active_processes.get(task_id)
             if not proc_info: continue
@@ -4028,23 +3928,20 @@ class TimedBroadcastApp:
             process = proc_info.get('process')
             stop_time_str = task.get('stop_time')
 
-            if not stop_time_str: continue  # 如果任务没有设置停止时间，则跳过
+            if not stop_time_str: continue
 
-            # 检查进程是否还在运行，如果已经自己退出了，就清理掉
             try:
                 if process.poll() is not None:
                     del self.active_processes[task_id]
                     continue
-            except Exception:  # 捕获所有可能的异常，例如进程不存在
+            except Exception:
                 del self.active_processes[task_id]
                 continue
 
-            # 核心判断：当前时间是否到达停止时间
             current_time_str = now.strftime("%H:%M:%S")
             if current_time_str >= stop_time_str:
                 self.log(f"到达停止时间，正在终止任务 '{task['name']}' (PID: {process.pid})...")
                 try:
-                    # 使用 psutil 强制结束进程及其所有子进程
                     parent = psutil.Process(process.pid)
                     for child in parent.children(recursive=True):
                         child.kill()
@@ -4055,7 +3952,6 @@ class TimedBroadcastApp:
                 except Exception as e:
                     self.log(f"终止任务 '{task['name']}' (PID: {process.pid}) 时发生错误: {e}")
                 finally:
-                    # 无论成功与否，都从监控列表中移除
                     if task_id in self.active_processes:
                         del self.active_processes[task_id]
 
@@ -4113,7 +4009,6 @@ class TimedBroadcastApp:
                 self.log(f"触发运行任务: {task['name']}")
                 threading.Thread(target=self._execute_program_task, args=(task, trigger_time), daemon=True).start()
     
-    # 找到 _execute_screenshot_task 函数并替换为以下内容：
     def _execute_screenshot_task(self, task, trigger_time):
         if not IMAGE_AVAILABLE:
             self.log(f"错误：Pillow库未安装，无法执行截屏任务 '{task['name']}'。")
@@ -4122,17 +4017,15 @@ class TimedBroadcastApp:
         try:
             repeat_count = task.get('repeat_count', 1)
             interval_seconds = task.get('interval_seconds', 0)
-            stop_time_str = task.get('stop_time') # 获取停止时间
+            stop_time_str = task.get('stop_time')
 
             for i in range(repeat_count):
-                # --- 【核心修复】在这里增加停止时间的判断 ---
                 if stop_time_str:
                     current_time_str = datetime.now().strftime('%H:%M:%S')
                     if current_time_str >= stop_time_str:
                         self.log(f"任务 '{task['name']}' 已到达停止时间 '{stop_time_str}'，提前中止截屏。")
-                        break # 退出循环
-                # --- 修复结束 ---
-
+                        break
+                
                 screenshot = ImageGrab.grab()
                 filename = f"Screenshot_{task['name']}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]}.png"
                 save_path = os.path.join(SCREENSHOT_FOLDER, filename)
@@ -4145,7 +4038,7 @@ class TimedBroadcastApp:
             task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
             self.save_screenshot_tasks()
 
-        except Exception as e: # <--- 修正：已将 except 块正确地配对到 try 之后
+        except Exception as e:
             self.log(f"执行截屏任务 '{task['name']}' 失败: {e}")
 
     def _execute_program_task(self, task, trigger_time):
@@ -4644,9 +4537,13 @@ class TimedBroadcastApp:
             self.video_window.destroy()
 
         self.video_window = ttk.Toplevel(self.root)
-        self.active_modal_dialog = self.video_window # <--- 【BUG修复】
         self.video_window.title(f"正在播放: {task['name']}")
         self.video_window.configure(bg='black')
+
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        self.root.attributes('-disabled', True)
+        self.video_window.attributes('-topmost', True)
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         mode = task.get('playback_mode', 'fullscreen')
         if mode == 'fullscreen':
@@ -4670,7 +4567,10 @@ class TimedBroadcastApp:
         if self.video_window and self.video_window.winfo_exists():
             self.video_window.destroy()
         self.video_window = None
-        self.active_modal_dialog = None # <--- 【BUG修复】
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        self.root.attributes('-disabled', False)
+        self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
     def _handle_video_manual_stop(self, event=None):
         self.log("用户手动关闭视频窗口，将停止整个视频任务。")
@@ -4769,12 +4669,15 @@ class TimedBroadcastApp:
             self.fullscreen_window.destroy()
 
         self.fullscreen_window = ttk.Toplevel(self.root)
-        self.active_modal_dialog = self.fullscreen_window # <--- 【BUG修复】
         self.fullscreen_window.attributes('-fullscreen', True)
         self.fullscreen_window.attributes('-topmost', True)
         self.fullscreen_window.configure(bg='black', cursor='none')
         self.fullscreen_window.protocol("WM_DELETE_WINDOW", lambda: None)
         self.fullscreen_window.bind("<Escape>", self._handle_esc_press)
+
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        self.root.attributes('-disabled', True)
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         self.fullscreen_label = ttk.Label(self.fullscreen_window, background='black')
         self.fullscreen_label.pack(expand=True, fill=BOTH)
@@ -4846,7 +4749,10 @@ class TimedBroadcastApp:
             self.fullscreen_window = None
             self.fullscreen_label = None
             self.image_tk_ref = None
-            self.active_modal_dialog = None # <--- 【BUG修复】
+            # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+            self.root.attributes('-disabled', False)
+            self.root.focus_force()
+            # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
     def log(self, message): self.root.after(0, lambda: self._log_threadsafe(message))
     
@@ -5031,20 +4937,25 @@ class TimedBroadcastApp:
 
     def show_quit_dialog(self):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("确认")
-        dialog.resizable(False, False); dialog.transient(self.root); dialog.grab_set()
+        dialog.resizable(False, False); dialog.transient(self.root)
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         ttk.Label(dialog, text="您想要如何操作？", font=self.font_12).pack(pady=20, padx=40)
         btn_frame = ttk.Frame(dialog); btn_frame.pack(pady=10)
         ttk.Button(btn_frame, text="退出程序", command=lambda: [cleanup_and_destroy(), self.quit_app()], bootstyle="danger").pack(side=LEFT, padx=10)
         if TRAY_AVAILABLE: ttk.Button(btn_frame, text="最小化到托盘", command=lambda: [cleanup_and_destroy(), self.hide_to_tray()], bootstyle="primary-outline").pack(side=LEFT, padx=10)
-        ttk.Button(btn_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        ttk.Button(btn_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         
         self.center_window(dialog, parent=self.root)
 
@@ -5062,14 +4973,11 @@ class TimedBroadcastApp:
         self.running = False
         self.playback_command_queue.put(('STOP', None))
 
-        # --- ↓↓↓ 新增代码：在保存设置前，先记录当前窗口的几何信息 ↓↓↓ ---
-        # 只有当窗口不是最小化状态时才保存，避免保存一个看不见的位置
         if self.root.state() == 'normal':
             self.settings["window_geometry"] = self.root.geometry()
-        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
 
         self.save_tasks()
-        self.save_settings() # 这个函数会把包含新窗口位置的整个设置字典写入文件
+        self.save_settings()
         self.save_holidays()
         self.save_todos()
         self.save_screenshot_tasks()
@@ -5077,8 +4985,6 @@ class TimedBroadcastApp:
 
         if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
        
-        # self.root.destroy()
-        # sys.exit()
         os._exit(0)
 
     def setup_tray_icon(self):
@@ -5174,7 +5080,7 @@ class TimedBroadcastApp:
             ("添加", self.add_holiday, "primary"), 
             ("修改", self.edit_holiday, "info"), 
             ("删除", self.delete_holiday, "danger"),
-            (None, None, None), # Separator
+            (None, None, None),
             ("全部启用", self.enable_all_holidays, "success-outline"), 
             ("全部禁用", self.disable_all_holidays, "warning-outline"),
             (None, None, None),
@@ -5213,7 +5119,6 @@ class TimedBroadcastApp:
             self.holidays = []
 
 #第11部分
-
 #第11部分
     def update_holiday_list(self):
         if not hasattr(self, 'holiday_tree') or not self.holiday_tree.winfo_exists(): return
@@ -5270,14 +5175,19 @@ class TimedBroadcastApp:
 
     def open_holiday_dialog(self, holiday_to_edit=None, index=None):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("修改节假日" if holiday_to_edit else "添加节假日")
         dialog.resizable(False, False)
-        dialog.transient(self.root); dialog.grab_set()
+        dialog.transient(self.root)
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
@@ -5362,13 +5272,13 @@ class TimedBroadcastApp:
 
             self.update_holiday_list()
             self.save_holidays()
-            cleanup_and_destroy() # <--- 【BUG修复】
+            cleanup_and_destroy()
 
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=4, column=0, columnspan=3, pady=20)
         ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
-        ttk.Button(button_frame, text="取消", command=cleanup_and_destroy, width=10).pack(side=LEFT, padx=10) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
+        ttk.Button(button_frame, text="取消", command=cleanup_and_destroy, width=10).pack(side=LEFT, padx=10)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
 
         self.center_window(dialog, parent=self.root)
 
@@ -5705,16 +5615,20 @@ class TimedBroadcastApp:
 
     def open_todo_dialog(self, todo_to_edit=None, index=None):
         dialog = ttk.Toplevel(self.root)
-        self.active_modal_dialog = dialog # <--- 【BUG修复】
         dialog.title("修改待办事项" if todo_to_edit else "添加待办事项")
         dialog.resizable(True, True)
         dialog.minsize(640, 550)
         dialog.transient(self.root)
-        dialog.grab_set()
 
-        def cleanup_and_destroy(): # <--- 【BUG修复】
-            self.active_modal_dialog = None
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
             dialog.destroy()
+            self.root.focus_force()
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
@@ -5858,14 +5772,13 @@ class TimedBroadcastApp:
 
             self.update_todo_list()
             self.save_todos()
-            cleanup_and_destroy() # <--- 【BUG修复】
+            cleanup_and_destroy()
 
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=4, column=0, columnspan=4, pady=20)
         ttk.Button(button_frame, text="保存", command=save, bootstyle="primary", width=10).pack(side=LEFT, padx=10)
-        ttk.Button(button_frame, text="取消", command=cleanup_and_destroy, width=10).pack(side=LEFT, padx=10) # <--- 【BUG修复】
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy) # <--- 【BUG修复】
-
+        ttk.Button(button_frame, text="取消", command=cleanup_and_destroy, width=10).pack(side=LEFT, padx=10)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
 
 #第13部分
 #第13部分
@@ -6069,16 +5982,16 @@ class TimedBroadcastApp:
         self._play_reminder_sound()
 
         reminder_win = ttk.Toplevel(self.root)
-        self.active_modal_dialog = reminder_win # <--- 【BUG修复】
         reminder_win.title(f"待办事项提醒 - {todo.get('name')}")
         
-        # --- 核心修改：完全按照您的要求，设置一个固定的窗口尺寸 ---
         reminder_win.geometry("640x480")
-        # 为了防止窗口被意外缩小，我们禁止调整大小
         reminder_win.resizable(False, False)
-        # --- 修改结束 ---
 
+        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+        self.root.attributes('-disabled', True)
         reminder_win.attributes('-topmost', True)
+        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
+
         reminder_win.lift()
         reminder_win.focus_force()
         reminder_win.after(1000, lambda: reminder_win.attributes('-topmost', False))
@@ -6086,7 +5999,6 @@ class TimedBroadcastApp:
         original_index = todo.get('original_index')
         task_type = todo.get('type')
 
-        # --- 使用我们已验证过可以稳定显示所有组件的 Grid 布局 ---
         reminder_win.columnconfigure(0, weight=1)
         reminder_win.rowconfigure(1, weight=1)
 
@@ -6101,7 +6013,6 @@ class TimedBroadcastApp:
         content_frame.rowconfigure(0, weight=1)
         content_frame.columnconfigure(0, weight=1)
 
-        # 使用原始的 Text 和 Scrollbar 组件，这是最可靠的组合
         content_text_widget = tk.Text(content_frame, font=self.font_11, wrap=WORD, bd=0, highlightthickness=0)
         content_text_widget.grid(row=0, column=0, sticky='nsew')
         
@@ -6113,7 +6024,14 @@ class TimedBroadcastApp:
         content_text_widget.insert('1.0', todo.get('content', ''))
         content_text_widget.config(state='disabled')
 
-        # 在按钮区内部配置按钮
+        def close_and_release():
+            self.is_reminder_active = False
+            # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
+            self.root.attributes('-disabled', False)
+            reminder_win.destroy()
+            self.root.focus_force()
+            # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
+
         if task_type == 'onetime':
             btn_frame.columnconfigure((0, 1, 2), weight=1)
             ttk.Button(btn_frame, text="已完成", bootstyle="success", command=lambda: handle_complete()).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
@@ -6124,12 +6042,6 @@ class TimedBroadcastApp:
             ttk.Button(btn_frame, text="本次完成", bootstyle="primary", command=lambda: close_and_release()).grid(row=0, column=0, padx=5, ipady=4, sticky='ew')
             ttk.Button(btn_frame, text="删除任务", bootstyle="danger", command=lambda: handle_delete()).grid(row=0, column=1, padx=5, ipady=4, sticky='ew')
         
-        # --- 逻辑处理部分（没有变化） ---
-        def close_and_release():
-            self.is_reminder_active = False
-            self.active_modal_dialog = None # <--- 【BUG修复】
-            reminder_win.destroy()
-
         def handle_complete():
             if original_index is not None and original_index < len(self.todos):
                 self.todos[original_index]['status'] = '禁用'
