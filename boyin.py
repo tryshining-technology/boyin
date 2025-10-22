@@ -5041,15 +5041,17 @@ class TimedBroadcastApp:
         self.log("程序已从托盘恢复。")
 
     def quit_app(self, icon=None, item=None):
-        # --- ↓↓↓ 新增：在退出时写入时间戳文件 ↓↓↓ ---
+        # --- ↓↓↓ 新增/修正：在退出时写入时间戳文件 ↓↓↓ ---
         try:
             with open(TIMESTAMP_FILE, "w") as f:
                 # 写入当前时间戳字符串，内容本身不重要，重要的是文件的修改时间
                 f.write(str(time.time()))
-        except Exception as e:
-            # 即使写入失败，也只是降低了安全性，不应阻止程序退出
-            #print(f"警告: 无法写入时间戳文件 - {e}")
-        # --- ↑↑↑ 新增结束 ↑↑↑ ---
+        except Exception:
+            # 即使写入失败，也只是降低了安全性，不应阻止程序退出。
+            # 使用 pass 语句来确保 except 块在语法上是有效的。
+            pass
+        # --- ↑↑↑ 修正结束 ↑↑↑ ---
+
         if self.tray_icon: self.tray_icon.stop()
         self.running = False
         self.playback_command_queue.put(('STOP', None))
