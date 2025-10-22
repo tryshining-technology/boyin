@@ -124,6 +124,7 @@ HOLIDAY_FILE = os.path.join(application_path, "holidays.json")
 TODO_FILE = os.path.join(application_path, "todos.json")
 SCREENSHOT_TASK_FILE = os.path.join(application_path, "screenshot_tasks.json")
 EXECUTE_TASK_FILE = os.path.join(application_path, "execute_tasks.json")
+TIMESTAMP_FILE = os.path.join(application_path, ".timestamp.dat")
 
 PROMPT_FOLDER = os.path.join(application_path, "提示音")
 AUDIO_FOLDER = os.path.join(application_path, "音频文件")
@@ -236,7 +237,7 @@ class TimedBroadcastApp:
         font_name = self.settings.get("app_font", "Microsoft YaHei")
         try:
             if font_name not in font.families():
-                self.log(f"警告：字体 '{font_name}' 未在系统中找到，已回退至默认字体。")
+                #self.log(f"警告：字体 '{font_name}' 未在系统中找到，已回退至默认字体。")
                 font_name = "Microsoft YaHei"
                 self.settings["app_font"] = font_name
         except Exception:
@@ -417,7 +418,7 @@ class TimedBroadcastApp:
     def _prompt_for_super_admin_password(self):
         if self.auth_info['status'] != 'Permanent':
             messagebox.showerror("权限不足", "此功能仅对“永久授权”用户开放。\n\n请注册软件并获取永久授权后重试。", parent=self.root)
-            self.log("非永久授权用户尝试进入超级管理模块被阻止。")
+            #self.log("非永久授权用户尝试进入超级管理模块被阻止。")
             return
 
         dialog = ttk.Toplevel(self.root)
@@ -1228,38 +1229,57 @@ class TimedBroadcastApp:
         # --- ↑↑↑ 修改结束 ↑↑↑ ---
 
     # 第2部分 (替换整个函数)
+# 第2部分 (替换整个函数)
     def check_authorization(self):
         today = datetime.now().date()
+        now_dt = datetime.now() # 获取包含时间的datetime对象
         status = self._load_from_registry('RegistrationStatus')
         reg_date_str = self._load_from_registry('RegistrationDate')
 
-        # --- ↓↓↓ 修复1：防止通过修改系统时间来无限试用 ↓↓↓ ---
-        last_seen_date_str = self._load_from_registry('LastSeenDate')
+        # --- ↓↓↓ 安全机制 1：文件时间戳校验 (防御RunAsDate) ↓↓↓ ---
         time_tampered = False
-        if last_seen_date_str:
+        if os.path.exists(TIMESTAMP_FILE):
             try:
-                last_seen_date = datetime.strptime(last_seen_date_str, '%Y-%m-%d').date()
-                if today < last_seen_date:
-                    self.log("检测到系统时间被回调，试用期立即结束。")
-                    time_tampered = True # 标记为时间已篡改
-            except (ValueError, TypeError):
-                pass # 日期格式错误，忽略
+                # 获取文件的真实最后修改时间戳 (float)
+                last_mod_time_stamp = os.path.getmtime(TIMESTAMP_FILE)
+                # 转换为datetime对象
+                last_mod_dt = datetime.fromtimestamp(last_mod_time_stamp)
+                
+                # 关键比较：如果程序认为的“现在”比文件的“最后修改时间”还要早，说明时间被回调
+                # 增加一个5秒的宽容度，以防止微小的系统时间波动导致误判
+                if now_dt < last_mod_dt - timedelta(seconds=5):
+                    #self.log("检测到时间篡改 (文件时间戳校验)，试用期立即结束。")
+                    time_tampered = True
+            except Exception as e:
+                #self.log(f"警告: 读取时间戳文件失败 - {e}")
+        # --- ↑↑↑ 安全机制 1 结束 ↑↑↑ ---
+
+        # --- ↓↓↓ 安全机制 2：注册表时间回调校验 (防御简单的时间修改) ↓↓↓ ---
+        # 只有在文件时间戳未检测到异常时，才执行此检查
+        if not time_tampered:
+            last_seen_date_str = self._load_from_registry('LastSeenDate')
+            if last_seen_date_str:
+                try:
+                    last_seen_date = datetime.strptime(last_seen_date_str, '%Y-%m-%d').date()
+                    if today < last_seen_date:
+                        #self.log("检测到系统时间被回调 (注册表校验)，试用期立即结束。")
+                        time_tampered = True
+                except (ValueError, TypeError):
+                    pass
 
         # 无论如何，都在检查后立即更新“上次运行日期”，为下次启动做准备
         self._save_to_registry('LastSeenDate', today.strftime('%Y-%m-%d'))
-        # --- ↑↑↑ 修复1结束 ↑↑↑ ---
+        # --- ↑↑↑ 安全机制 2 结束 ↑↑↑ ---
 
-        # --- ↓↓↓ 修复2：防止通过修改注册表来破解 ↓↓↓ ---
+        # --- ↓↓↓ 安全机制 3：哈希签名校验 (防御注册表篡改) ↓↓↓ ---
         stored_signature = self._load_from_registry('LicenseSignature')
-        
-        # 校验规则：如果状态存在，但签名不存在，或者签名与重新计算的不匹配，则视为无效
         if status and (not stored_signature or stored_signature != self._generate_signature(status)):
             self.log(f"检测到无效或被篡改的授权信息 (状态: {status})。")
             self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
             self.is_app_locked_down = True
             self.update_title_bar()
-            return # 校验失败，直接结束函数
-        # --- ↑↑↑ 修复2结束 ↑↑↑ ---
+            return
+        # --- ↑↑↑ 安全机制 3 结束 ↑↑↑ ---
 
         # --- ↓↓↓ 主授权逻辑判断 ↓↓↓ ---
         if status == 'Permanent':
@@ -1280,7 +1300,6 @@ class TimedBroadcastApp:
                 self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
                 self.is_app_locked_down = True
         else: # 处理试用期逻辑
-            # 如果检测到时间篡改，直接让试用期过期
             if time_tampered:
                 self.auth_info = {'status': 'Expired', 'message': '授权已过期，请注册'}
                 self.is_app_locked_down = True
@@ -1288,8 +1307,12 @@ class TimedBroadcastApp:
                 first_run_date_str = self._load_from_registry('FirstRunDate')
                 if not first_run_date_str:
                     self._save_to_registry('FirstRunDate', today.strftime('%Y-%m-%d'))
-                    self.auth_info = {'status': 'Trial', 'message': '未注册 - 剩余 3 天'}
-                    self.is_app_locked_down = False
+                    # 首次运行时，创建初始的时间戳文件
+                    try:
+                        with open(TIMESTAMP_FILE, "w") as f:
+                            f.write(str(time.time()))
+                    except Exception as e:
+                        print(f"警告: 无法创建初始时间戳文件 - {e}")
                 else:
                     try:
                         first_run_date = datetime.strptime(first_run_date_str, '%Y-%m-%d').date()
@@ -3317,12 +3340,12 @@ class TimedBroadcastApp:
         
 #第7部分
 #第7部分
-    def _import_voice_script(self, text_widget):
+    def _import_voice_script(self, text_widget, parent_dialog):
         filename = filedialog.askopenfilename(
             title="选择要导入的文稿",
             initialdir=VOICE_SCRIPT_FOLDER,
             filetypes=[("文本文档", "*.txt"), ("所有文件", "*.*")],
-            parent=self.root
+            parent=parent_dialog
         )
         if not filename:
             return
@@ -3334,13 +3357,13 @@ class TimedBroadcastApp:
             text_widget.insert('1.0', content)
             self.log(f"已从 {os.path.basename(filename)} 成功导入文稿。")
         except Exception as e:
-            messagebox.showerror("导入失败", f"无法读取文件：\n{e}", parent=self.root)
+            messagebox.showerror("导入失败", f"无法读取文件：\n{e}", parent=parent_dialog)
             self.log(f"导入文稿失败: {e}")
 
-    def _export_voice_script(self, text_widget, name_widget):
+    def _export_voice_script(self, text_widget, name_widget, parent_dialog):
         content = text_widget.get('1.0', END).strip()
         if not content:
-            messagebox.showwarning("无法导出", "播音文字内容为空，无需导出。", parent=self.root)
+            messagebox.showwarning("无法导出", "播音文字内容为空，无需导出。", parent=parent_dialog)
             return
 
         program_name = name_widget.get().strip()
@@ -3357,7 +3380,7 @@ class TimedBroadcastApp:
             initialfile=default_filename,
             defaultextension=".txt",
             filetypes=[("文本文档", "*.txt")],
-            parent=self.root
+            parent=parent_dialog
         )
         if not filename:
             return
@@ -3366,9 +3389,9 @@ class TimedBroadcastApp:
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(content)
             self.log(f"文稿已成功导出到 {os.path.basename(filename)}。")
-            messagebox.showinfo("导出成功", f"文稿已成功导出到：\n{filename}", parent=self.root)
+            messagebox.showinfo("导出成功", f"文稿已成功导出到：\n{filename}", parent=parent_dialog)
         except Exception as e:
-            messagebox.showerror("导出失败", f"无法保存文件：\n{e}", parent=self.root)
+            messagebox.showerror("导出失败", f"无法保存文件：\n{e}", parent=parent_dialog)
             self.log(f"导出文稿失败: {e}")
 
     def _synthesis_worker(self, text, voice_params, output_path, callback):
@@ -3422,8 +3445,8 @@ class TimedBroadcastApp:
             self.log(f"警告: 使用 win32com 获取语音列表失败 - {e}")
             return []
 
-    def select_file_for_entry(self, initial_dir, string_var):
-        filename = filedialog.askopenfilename(title="选择文件", initialdir=initial_dir, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")], parent=self.root)
+    def select_file_for_entry(self, initial_dir, string_var, parent_dialog):
+        filename = filedialog.askopenfilename(title="选择文件", initialdir=initial_dir, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")], parent=parent_dialog)
         if filename: string_var.set(filename)
 
     def delete_task(self):
@@ -5040,6 +5063,15 @@ class TimedBroadcastApp:
         self.log("程序已从托盘恢复。")
 
     def quit_app(self, icon=None, item=None):
+        # --- ↓↓↓ 新增：在退出时写入时间戳文件 ↓↓↓ ---
+        try:
+            with open(TIMESTAMP_FILE, "w") as f:
+                # 写入当前时间戳字符串，内容本身不重要，重要的是文件的修改时间
+                f.write(str(time.time()))
+        except Exception as e:
+            # 即使写入失败，也只是降低了安全性，不应阻止程序退出
+            #print(f"警告: 无法写入时间戳文件 - {e}")
+        # --- ↑↑↑ 新增结束 ↑↑↑ ---
         if self.tray_icon: self.tray_icon.stop()
         self.running = False
         self.playback_command_queue.put(('STOP', None))
