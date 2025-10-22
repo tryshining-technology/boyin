@@ -1212,76 +1212,54 @@ class TimedBroadcastApp:
             messagebox.showinfo("注册成功", "恭喜您，永久授权已成功激活！", parent=self.root)
         else:
             messagebox.showerror("注册失败", "您输入的注册码无效，请重新核对。", parent=self.root)
-            return # 注册失败，直接返回
+            return
 
-        # --- ↓↓↓ 核心修改：如果注册成功，则保存状态和签名 ↓↓↓ ---
         if license_type:
-            # 1. 根据授权类型生成签名
             signature = self._generate_signature(license_type)
-            
-            # 2. 将状态、日期和签名一同写入注册表
             self._save_to_registry('RegistrationStatus', license_type)
             self._save_to_registry('RegistrationDate', today_str)
-            self._save_to_registry('LicenseSignature', signature) # 新增：保存签名
-            
-            # 3. 立即重新校验授权
+            self._save_to_registry('LicenseSignature', signature)
             self.check_authorization()
-        # --- ↑↑↑ 修改结束 ↑↑↑ ---
 
-    # 第2部分 (替换整个函数)
-# 第2部分 (替换整个函数)
     def check_authorization(self):
         today = datetime.now().date()
-        now_dt = datetime.now() # 获取包含时间的datetime对象
+        now_dt = datetime.now()
         status = self._load_from_registry('RegistrationStatus')
         reg_date_str = self._load_from_registry('RegistrationDate')
 
-        # --- ↓↓↓ 安全机制 1：文件时间戳校验 (防御RunAsDate) ↓↓↓ ---
         time_tampered = False
         if os.path.exists(TIMESTAMP_FILE):
             try:
-                # 获取文件的真实最后修改时间戳 (float)
                 last_mod_time_stamp = os.path.getmtime(TIMESTAMP_FILE)
-                # 转换为datetime对象
                 last_mod_dt = datetime.fromtimestamp(last_mod_time_stamp)
-                
-                # 关键比较：如果程序认为的“现在”比文件的“最后修改时间”还要早，说明时间被回调
-                # 增加一个5秒的宽容度，以防止微小的系统时间波动导致误判
                 if now_dt < last_mod_dt - timedelta(seconds=5):
-                    #self.log("检测到时间篡改 (文件时间戳校验)，试用期立即结束。")
+                    # self.log("检测到时间篡改 (文件时间戳校验)，试用期立即结束。")
                     time_tampered = True
-            except Exception as e:
-                #self.log(f"警告: 读取时间戳文件失败 - {e}")
-        # --- ↑↑↑ 安全机制 1 结束 ↑↑↑ ---
-
-        # --- ↓↓↓ 安全机制 2：注册表时间回调校验 (防御简单的时间修改) ↓↓↓ ---
-        # 只有在文件时间戳未检测到异常时，才执行此检查
+            except Exception:
+                # self.log(f"警告: 读取时间戳文件失败 - {e}")
+                pass
+        
         if not time_tampered:
             last_seen_date_str = self._load_from_registry('LastSeenDate')
             if last_seen_date_str:
                 try:
                     last_seen_date = datetime.strptime(last_seen_date_str, '%Y-%m-%d').date()
                     if today < last_seen_date:
-                        #self.log("检测到系统时间被回调 (注册表校验)，试用期立即结束。")
+                        # self.log("检测到系统时间被回调 (注册表校验)，试用期立即结束。")
                         time_tampered = True
                 except (ValueError, TypeError):
                     pass
 
-        # 无论如何，都在检查后立即更新“上次运行日期”，为下次启动做准备
         self._save_to_registry('LastSeenDate', today.strftime('%Y-%m-%d'))
-        # --- ↑↑↑ 安全机制 2 结束 ↑↑↑ ---
 
-        # --- ↓↓↓ 安全机制 3：哈希签名校验 (防御注册表篡改) ↓↓↓ ---
         stored_signature = self._load_from_registry('LicenseSignature')
         if status and (not stored_signature or stored_signature != self._generate_signature(status)):
-            self.log(f"检测到无效或被篡改的授权信息 (状态: {status})。")
+            # self.log(f"检测到无效或被篡改的授权信息 (状态: {status})。")
             self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
             self.is_app_locked_down = True
             self.update_title_bar()
             return
-        # --- ↑↑↑ 安全机制 3 结束 ↑↑↑ ---
 
-        # --- ↓↓↓ 主授权逻辑判断 ↓↓↓ ---
         if status == 'Permanent':
             self.auth_info = {'status': 'Permanent', 'message': '永久授权'}
             self.is_app_locked_down = False
@@ -1299,7 +1277,7 @@ class TimedBroadcastApp:
             except (TypeError, ValueError):
                 self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
                 self.is_app_locked_down = True
-        else: # 处理试用期逻辑
+        else:
             if time_tampered:
                 self.auth_info = {'status': 'Expired', 'message': '授权已过期，请注册'}
                 self.is_app_locked_down = True
@@ -1307,12 +1285,12 @@ class TimedBroadcastApp:
                 first_run_date_str = self._load_from_registry('FirstRunDate')
                 if not first_run_date_str:
                     self._save_to_registry('FirstRunDate', today.strftime('%Y-%m-%d'))
-                    # 首次运行时，创建初始的时间戳文件
                     try:
                         with open(TIMESTAMP_FILE, "w") as f:
                             f.write(str(time.time()))
-                    except Exception as e:
-                        print(f"警告: 无法创建初始时间戳文件 - {e}")
+                    except Exception:
+                        # self.log("警告: 无法初始化授权组件 (代码: C2)。")
+                        pass
                 else:
                     try:
                         first_run_date = datetime.strptime(first_run_date_str, '%Y-%m-%d').date()
