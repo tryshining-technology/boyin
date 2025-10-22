@@ -1228,7 +1228,7 @@ class TimedBroadcastApp:
         # --- ↑↑↑ 修改结束 ↑↑↑ ---
 
     # 第2部分 (替换整个函数)
-        def check_authorization(self):
+    def check_authorization(self):
         today = datetime.now().date()
         status = self._load_from_registry('RegistrationStatus')
         reg_date_str = self._load_from_registry('RegistrationDate')
