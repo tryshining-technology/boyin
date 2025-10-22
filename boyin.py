@@ -19,6 +19,7 @@ import queue
 import shutil
 import re
 import ctypes
+import hashlib
 
 # --- ↓↓↓ 新增代码：全局隐藏 subprocess 调用的控制台窗口 ↓↓↓ ---
 
@@ -136,6 +137,11 @@ CHIME_FOLDER = os.path.join(AUDIO_FOLDER, "整点报时")
 
 REGISTRY_KEY_PATH = r"Software\创翔科技\TimedBroadcastApp"
 REGISTRY_PARENT_KEY_PATH = r"Software\创翔科技"
+# --- ↓↓↓ 新增代码：定义一个用于签名的密钥盐 ↓↓↓ ---
+# !!! 警告：请将这个字符串修改为您自己的、独一无二的复杂字符串 !!!
+SECRET_SALT = "42492f00-d980-40e1-a17e-ba8094727636"
+# --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+
 
 class TimedBroadcastApp:
     def __init__(self, root):
@@ -1077,6 +1083,7 @@ class TimedBroadcastApp:
         self.log("用户请求取消注册...")
         self._save_to_registry('RegistrationStatus', '')
         self._save_to_registry('RegistrationDate', '')
+        self._save_to_registry('LicenseSignature', '') # <--- 新增这一行，清除签名
 
         self.check_authorization()
 
@@ -1160,6 +1167,17 @@ class TimedBroadcastApp:
                          return mac
         return None
 
+    # --- ↓↓↓ 新增函数：生成授权签名 ↓↓↓ ---
+    def _generate_signature(self, license_type):
+        """根据机器码、授权类型和密钥盐生成SHA-256签名"""
+        machine_code = self.get_machine_code()
+        # 将所有部分组合成一个字符串进行哈希
+        data_to_hash = str(machine_code) + str(license_type) + SECRET_SALT
+        # 使用 SHA-256 算法生成十六进制格式的签名
+        signature = hashlib.sha256(data_to_hash.encode('utf-8')).hexdigest()
+        return signature
+    # --- ↑↑↑ 新增函数结束 ↑↑↑ ---
+
     def _calculate_reg_codes(self, numeric_mac_str):
         try:
             monthly_code = int(int(numeric_mac_str) * 3.14)
@@ -1172,6 +1190,7 @@ class TimedBroadcastApp:
         except (ValueError, TypeError):
             return {'monthly': None, 'permanent': None}
 
+    # 第2部分 (替换整个函数)
     def attempt_registration(self):
         entered_code = self.reg_code_entry.get().strip()
         if not entered_code:
@@ -1183,24 +1202,66 @@ class TimedBroadcastApp:
 
         today_str = datetime.now().strftime('%Y-%m-%d')
 
+        license_type = None
         if entered_code == correct_codes['monthly']:
-            self._save_to_registry('RegistrationStatus', 'Monthly')
-            self._save_to_registry('RegistrationDate', today_str)
+            license_type = 'Monthly'
             messagebox.showinfo("注册成功", "恭喜您，月度授权已成功激活！", parent=self.root)
-            self.check_authorization()
         elif entered_code == correct_codes['permanent']:
-            self._save_to_registry('RegistrationStatus', 'Permanent')
-            self._save_to_registry('RegistrationDate', today_str)
+            license_type = 'Permanent'
             messagebox.showinfo("注册成功", "恭喜您，永久授权已成功激活！", parent=self.root)
-            self.check_authorization()
         else:
             messagebox.showerror("注册失败", "您输入的注册码无效，请重新核对。", parent=self.root)
+            return # 注册失败，直接返回
 
-    def check_authorization(self):
+        # --- ↓↓↓ 核心修改：如果注册成功，则保存状态和签名 ↓↓↓ ---
+        if license_type:
+            # 1. 根据授权类型生成签名
+            signature = self._generate_signature(license_type)
+            
+            # 2. 将状态、日期和签名一同写入注册表
+            self._save_to_registry('RegistrationStatus', license_type)
+            self._save_to_registry('RegistrationDate', today_str)
+            self._save_to_registry('LicenseSignature', signature) # 新增：保存签名
+            
+            # 3. 立即重新校验授权
+            self.check_authorization()
+        # --- ↑↑↑ 修改结束 ↑↑↑ ---
+
+    # 第2部分 (替换整个函数)
+        def check_authorization(self):
         today = datetime.now().date()
         status = self._load_from_registry('RegistrationStatus')
         reg_date_str = self._load_from_registry('RegistrationDate')
 
+        # --- ↓↓↓ 修复1：防止通过修改系统时间来无限试用 ↓↓↓ ---
+        last_seen_date_str = self._load_from_registry('LastSeenDate')
+        time_tampered = False
+        if last_seen_date_str:
+            try:
+                last_seen_date = datetime.strptime(last_seen_date_str, '%Y-%m-%d').date()
+                if today < last_seen_date:
+                    self.log("检测到系统时间被回调，试用期立即结束。")
+                    time_tampered = True # 标记为时间已篡改
+            except (ValueError, TypeError):
+                pass # 日期格式错误，忽略
+
+        # 无论如何，都在检查后立即更新“上次运行日期”，为下次启动做准备
+        self._save_to_registry('LastSeenDate', today.strftime('%Y-%m-%d'))
+        # --- ↑↑↑ 修复1结束 ↑↑↑ ---
+
+        # --- ↓↓↓ 修复2：防止通过修改注册表来破解 ↓↓↓ ---
+        stored_signature = self._load_from_registry('LicenseSignature')
+        
+        # 校验规则：如果状态存在，但签名不存在，或者签名与重新计算的不匹配，则视为无效
+        if status and (not stored_signature or stored_signature != self._generate_signature(status)):
+            self.log(f"检测到无效或被篡改的授权信息 (状态: {status})。")
+            self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
+            self.is_app_locked_down = True
+            self.update_title_bar()
+            return # 校验失败，直接结束函数
+        # --- ↑↑↑ 修复2结束 ↑↑↑ ---
+
+        # --- ↓↓↓ 主授权逻辑判断 ↓↓↓ ---
         if status == 'Permanent':
             self.auth_info = {'status': 'Permanent', 'message': '永久授权'}
             self.is_app_locked_down = False
@@ -1218,26 +1279,31 @@ class TimedBroadcastApp:
             except (TypeError, ValueError):
                 self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
                 self.is_app_locked_down = True
-        else:
-            first_run_date_str = self._load_from_registry('FirstRunDate')
-            if not first_run_date_str:
-                self._save_to_registry('FirstRunDate', today.strftime('%Y-%m-%d'))
-                self.auth_info = {'status': 'Trial', 'message': '未注册 - 剩余 3 天'}
-                self.is_app_locked_down = False
+        else: # 处理试用期逻辑
+            # 如果检测到时间篡改，直接让试用期过期
+            if time_tampered:
+                self.auth_info = {'status': 'Expired', 'message': '授权已过期，请注册'}
+                self.is_app_locked_down = True
             else:
-                try:
-                    first_run_date = datetime.strptime(first_run_date_str, '%Y-%m-%d').date()
-                    trial_expiry_date = first_run_date + timedelta(days=3)
-                    if today > trial_expiry_date:
-                        self.auth_info = {'status': 'Expired', 'message': '授权已过期，请注册'}
+                first_run_date_str = self._load_from_registry('FirstRunDate')
+                if not first_run_date_str:
+                    self._save_to_registry('FirstRunDate', today.strftime('%Y-%m-%d'))
+                    self.auth_info = {'status': 'Trial', 'message': '未注册 - 剩余 3 天'}
+                    self.is_app_locked_down = False
+                else:
+                    try:
+                        first_run_date = datetime.strptime(first_run_date_str, '%Y-%m-%d').date()
+                        trial_expiry_date = first_run_date + timedelta(days=3)
+                        if today > trial_expiry_date:
+                            self.auth_info = {'status': 'Expired', 'message': '授权已过期，请注册'}
+                            self.is_app_locked_down = True
+                        else:
+                            remaining_days = (trial_expiry_date - today).days
+                            self.auth_info = {'status': 'Trial', 'message': f'未注册 - 剩余 {remaining_days} 天'}
+                            self.is_app_locked_down = False
+                    except (TypeError, ValueError):
+                        self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
                         self.is_app_locked_down = True
-                    else:
-                        remaining_days = (trial_expiry_date - today).days
-                        self.auth_info = {'status': 'Trial', 'message': f'未注册 - 剩余 {remaining_days} 天'}
-                        self.is_app_locked_down = False
-                except (TypeError, ValueError):
-                    self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
-                    self.is_app_locked_down = True
 
         self.update_title_bar()
 
@@ -2769,6 +2835,7 @@ class TimedBroadcastApp:
 
 #第6部分
 #第6部分
+    # 第6部分 (替换整个函数)
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
@@ -2810,8 +2877,10 @@ class TimedBroadcastApp:
         
         script_btn_frame = ttk.Frame(content_frame)
         script_btn_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=(0, 2))
-        ttk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text), bootstyle="outline").pack(side=LEFT)
-        ttk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text, name_entry), bootstyle="outline").pack(side=LEFT, padx=10)
+        # <--- 修改点 1: 传入 dialog
+        ttk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text, dialog), bootstyle="outline").pack(side=LEFT)
+        # <--- 修改点 2: 传入 dialog
+        ttk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text, name_entry, dialog), bootstyle="outline").pack(side=LEFT, padx=10)
 
         ad_btn_frame = ttk.Frame(script_btn_frame)
         ad_btn_frame.pack(side=LEFT, padx=20)
@@ -2854,7 +2923,8 @@ class TimedBroadcastApp:
         ttk.Checkbutton(prompt_frame, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
         prompt_file_var, prompt_volume_var = tk.StringVar(), tk.StringVar()
         prompt_file_entry = ttk.Entry(prompt_frame, textvariable=prompt_file_var, font=self.font_11); prompt_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        ttk.Button(prompt_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var), bootstyle="outline", width=2).grid(row=0, column=2)
+        # <--- 修改点 3: 传入 dialog
+        ttk.Button(prompt_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var, dialog), bootstyle="outline", width=2).grid(row=0, column=2)
         
         prompt_vol_frame = ttk.Frame(prompt_frame)
         prompt_vol_frame.grid(row=0, column=3, sticky='e')
@@ -2867,7 +2937,8 @@ class TimedBroadcastApp:
         ttk.Checkbutton(bgm_frame, text="背景音乐:", variable=bgm_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
         bgm_file_var, bgm_volume_var = tk.StringVar(), tk.StringVar()
         bgm_file_entry = ttk.Entry(bgm_frame, textvariable=bgm_file_var, font=self.font_11); bgm_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        ttk.Button(bgm_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var), bootstyle="outline", width=2).grid(row=0, column=2)
+        # <--- 修改点 4: 传入 dialog
+        ttk.Button(bgm_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var, dialog), bootstyle="outline", width=2).grid(row=0, column=2)
         
         bgm_vol_frame = ttk.Frame(bgm_frame)
         bgm_vol_frame.grid(row=0, column=3, sticky='e')
