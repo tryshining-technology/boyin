@@ -579,6 +579,69 @@ class TimedBroadcastApp:
         self.update_screenshot_list()
         self.save_screenshot_tasks()
 
+    # --- ↓↓↓ 新增代码：为“定时截屏”列表添加右键菜单及相关操作函数 ↓↓↓ ---
+
+    def show_screenshot_context_menu(self, event):
+        if self.is_locked: return
+        iid = self.screenshot_tree.identify_row(event.y)
+        context_menu = tk.Menu(self.root, tearoff=0, font=self.font_11)
+
+        if iid:
+            if iid not in self.screenshot_tree.selection():
+                self.screenshot_tree.selection_set(iid)
+
+            context_menu.add_command(label="修改", command=self.edit_screenshot_task)
+            context_menu.add_command(label="删除", command=self.delete_screenshot_task)
+            context_menu.add_separator()
+            context_menu.add_command(label="置顶", command=self.move_screenshot_to_top)
+            context_menu.add_command(label="上移", command=lambda: self.move_screenshot_task(-1))
+            context_menu.add_command(label="下移", command=lambda: self.move_screenshot_task(1))
+            context_menu.add_command(label="置末", command=self.move_screenshot_to_bottom)
+            context_menu.add_separator()
+            context_menu.add_command(label="启用", command=lambda: self._set_screenshot_status('启用'))
+            context_menu.add_command(label="禁用", command=lambda: self._set_screenshot_status('禁用'))
+        else:
+            self.screenshot_tree.selection_set()
+            context_menu.add_command(label="添加任务", command=self.add_screenshot_task)
+
+        context_menu.post(event.x_root, event.y_root)
+
+    def move_screenshot_task(self, direction):
+        selection = self.screenshot_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.screenshot_tree.index(selection[0])
+        new_index = index + direction
+        if 0 <= new_index < len(self.screenshot_tasks):
+            task_to_move = self.screenshot_tasks.pop(index)
+            self.screenshot_tasks.insert(new_index, task_to_move)
+            self.update_screenshot_list(); self.save_screenshot_tasks()
+            items = self.screenshot_tree.get_children()
+            if items: self.screenshot_tree.selection_set(items[new_index]); self.screenshot_tree.focus(items[new_index])
+
+    def move_screenshot_to_top(self):
+        selection = self.screenshot_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.screenshot_tree.index(selection[0])
+        if index > 0:
+            task_to_move = self.screenshot_tasks.pop(index)
+            self.screenshot_tasks.insert(0, task_to_move)
+            self.update_screenshot_list(); self.save_screenshot_tasks()
+            items = self.screenshot_tree.get_children()
+            if items: self.screenshot_tree.selection_set(items[0]); self.screenshot_tree.focus(items[0])
+
+    def move_screenshot_to_bottom(self):
+        selection = self.screenshot_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.screenshot_tree.index(selection[0])
+        if index < len(self.screenshot_tasks) - 1:
+            task_to_move = self.screenshot_tasks.pop(index)
+            self.screenshot_tasks.append(task_to_move)
+            self.update_screenshot_list(); self.save_screenshot_tasks()
+            items = self.screenshot_tree.get_children()
+            if items: self.screenshot_tree.selection_set(items[-1]); self.screenshot_tree.focus(items[-1])
+
+    # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+
     def open_screenshot_dialog(self, task_to_edit=None, index=None):
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改截屏任务" if task_to_edit else "添加截屏任务")
@@ -732,6 +795,7 @@ class TimedBroadcastApp:
         self.screenshot_tree.configure(yscrollcommand=scrollbar.set)
 
         self.screenshot_tree.bind("<Double-1>", lambda e: self.edit_screenshot_task())
+        self.screenshot_tree.bind("<Button-3>", self.show_screenshot_context_menu) # <--- 添加这一行
 
         action_frame = ttk.Frame(parent_frame, padding=(10, 0))
         action_frame.grid(row=0, column=1, sticky='ns', padx=(10, 0))
@@ -796,6 +860,7 @@ class TimedBroadcastApp:
         self.execute_tree.configure(yscrollcommand=scrollbar.set)
 
         self.execute_tree.bind("<Double-1>", lambda e: self.edit_execute_task())
+        self.execute_tree.bind("<Button-3>", self.show_execute_context_menu) # <--- 添加这一行
 
         action_frame = ttk.Frame(parent_frame, padding=(10, 0))
         action_frame.grid(row=0, column=1, sticky='ns', padx=(10, 0))
@@ -894,6 +959,69 @@ class TimedBroadcastApp:
             self.execute_tasks[index]['status'] = status
         self.update_execute_list()
         self.save_execute_tasks()
+
+    # --- ↓↓↓ 新增代码：为“定时运行”列表添加右键菜单及相关操作函数 ↓↓↓ ---
+
+    def show_execute_context_menu(self, event):
+        if self.is_locked: return
+        iid = self.execute_tree.identify_row(event.y)
+        context_menu = tk.Menu(self.root, tearoff=0, font=self.font_11)
+
+        if iid:
+            if iid not in self.execute_tree.selection():
+                self.execute_tree.selection_set(iid)
+
+            context_menu.add_command(label="修改", command=self.edit_execute_task)
+            context_menu.add_command(label="删除", command=self.delete_execute_task)
+            context_menu.add_separator()
+            context_menu.add_command(label="置顶", command=self.move_execute_to_top)
+            context_menu.add_command(label="上移", command=lambda: self.move_execute_task(-1))
+            context_menu.add_command(label="下移", command=lambda: self.move_execute_task(1))
+            context_menu.add_command(label="置末", command=lambda: self.move_execute_to_bottom)
+            context_menu.add_separator()
+            context_menu.add_command(label="启用", command=lambda: self._set_execute_status('启用'))
+            context_menu.add_command(label="禁用", command=lambda: self._set_execute_status('禁用'))
+        else:
+            self.execute_tree.selection_set()
+            context_menu.add_command(label="添加任务", command=self.add_execute_task)
+
+        context_menu.post(event.x_root, event.y_root)
+
+    def move_execute_task(self, direction):
+        selection = self.execute_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.execute_tree.index(selection[0])
+        new_index = index + direction
+        if 0 <= new_index < len(self.execute_tasks):
+            task_to_move = self.execute_tasks.pop(index)
+            self.execute_tasks.insert(new_index, task_to_move)
+            self.update_execute_list(); self.save_execute_tasks()
+            items = self.execute_tree.get_children()
+            if items: self.execute_tree.selection_set(items[new_index]); self.execute_tree.focus(items[new_index])
+
+    def move_execute_to_top(self):
+        selection = self.execute_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.execute_tree.index(selection[0])
+        if index > 0:
+            task_to_move = self.execute_tasks.pop(index)
+            self.execute_tasks.insert(0, task_to_move)
+            self.update_execute_list(); self.save_execute_tasks()
+            items = self.execute_tree.get_children()
+            if items: self.execute_tree.selection_set(items[0]); self.execute_tree.focus(items[0])
+
+    def move_execute_to_bottom(self):
+        selection = self.execute_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.execute_tree.index(selection[0])
+        if index < len(self.execute_tasks) - 1:
+            task_to_move = self.execute_tasks.pop(index)
+            self.execute_tasks.append(task_to_move)
+            self.update_execute_list(); self.save_execute_tasks()
+            items = self.execute_tree.get_children()
+            if items: self.execute_tree.selection_set(items[-1]); self.execute_tree.focus(items[-1])
+
+    # --- ↑↑↑ 新增代码结束 ↑↑↑ ---```
 
     def open_execute_dialog(self, task_to_edit=None, index=None):
         dialog = ttk.Toplevel(self.root)
