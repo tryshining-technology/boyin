@@ -198,7 +198,9 @@ class TimedBroadcastApp:
         self.vlc_player = None
         self.video_stop_event = None
         self.is_muted = False # <--- 添加这一行
-
+        self.interstitial_text_content = "" # <--- 添加这一行：用于保存插播文字
+        self.currently_playing_task = None  # <--- 添加这一行：用于记录被中断的任务
+        self.is_interstitial_active = False # <--- 添加这一行
         self.create_folder_structure()
         self.load_settings()
 
@@ -318,7 +320,7 @@ class TimedBroadcastApp:
         self.page_container = ttk.Frame(self.root)
         self.page_container.pack(side=LEFT, fill=BOTH, expand=True)
 
-        nav_button_titles = ["定时广播", "节假日", "待办事项", "高级功能", "设置", "注册软件", "超级管理"]
+        nav_button_titles = ["定时广播", "插播语音", "节假日", "待办事项", "高级功能", "设置", "注册软件", "超级管理"]
 
         for i, title in enumerate(nav_button_titles):
             is_super_admin = (title == "超级管理")
@@ -331,13 +333,11 @@ class TimedBroadcastApp:
 
         # --- ↓↓↓ 从这里开始添加新代码 ↓↓↓ ---
 
-        # 添加一个分隔符，让底部按钮和主导航分开
         ttk.Separator(self.nav_frame, orient=HORIZONTAL).pack(side=BOTTOM, fill=X, pady=5, padx=5)
 
         # 创建一个Frame来容纳底部的三个按钮
         bottom_btn_frame = ttk.Frame(self.nav_frame, style='light.TFrame')
-        bottom_btn_frame.pack(side=BOTTOM, fill=X, padx=5, pady=5)
-        bottom_btn_frame.columnconfigure((0, 1, 2), weight=1) # 让三列平分宽度
+        bottom_btn_frame.pack(side=BOTTOM, fill=X, padx=5, pady=(0, 10)) # 增加一点底部间距
 
         # 1. 一键静音按钮
         self.mute_button = ttk.Button(
@@ -346,7 +346,7 @@ class TimedBroadcastApp:
             bootstyle="info-outline", 
             command=self.toggle_mute_all
         )
-        self.mute_button.grid(row=0, column=0, sticky='ew', padx=1)
+        self.mute_button.pack(fill=X, pady=2) # 使用pack，fill=X使其水平填满
 
         # 2. 最小化按钮
         minimize_button = ttk.Button(
@@ -355,7 +355,7 @@ class TimedBroadcastApp:
             bootstyle="secondary-outline", 
             command=self.hide_to_tray
         )
-        minimize_button.grid(row=0, column=1, sticky='ew', padx=1)
+        minimize_button.pack(fill=X, pady=2)
         if not TRAY_AVAILABLE:
             minimize_button.config(state=DISABLED)
 
@@ -366,7 +366,9 @@ class TimedBroadcastApp:
             bootstyle="danger-outline", 
             command=self.quit_app
         )
-        exit_button.grid(row=0, column=2, sticky='ew', padx=1)
+        exit_button.pack(fill=X, pady=2)
+
+        # --- ↑↑↑ 替换到这里结束 ↑↑↑ ---
             
         style = ttk.Style.get_instance()
         style.configure('Link.TButton', font=self.font_13_bold, anchor='w')
@@ -427,6 +429,8 @@ class TimedBroadcastApp:
         else:
             if page_name == "节假日":
                 target_frame = self.create_holiday_page()
+            elif page_name == "插播语音": # <--- 添加这一行
+                target_frame = self.create_interstitial_page() # <--- 添加这一行
             elif page_name == "待办事项":
                 target_frame = self.create_todo_page()
             elif page_name == "设置":
@@ -1765,6 +1769,250 @@ class TimedBroadcastApp:
             messagebox.showinfo("重置成功", "软件已恢复到初始状态。\n\n请点击“确定”后手动关闭并重新启动软件。", parent=self.root)
         except Exception as e:
             self.log(f"重置失败: {e}"); messagebox.showerror("重置失败", f"发生错误: {e}", parent=self.root)
+
+# --- ↓↓↓ 新增代码：创建“插播语音”页面的完整函数 ↓↓↓ ---
+    def create_interstitial_page(self):
+        page_frame = ttk.Frame(self.page_container, padding=20)
+        page_frame.columnconfigure(0, weight=1)
+
+        title_label = ttk.Label(page_frame, text="即时插播语音", font=self.font_14_bold, bootstyle="primary")
+        title_label.pack(anchor='w', pady=(0, 10))
+        
+        desc_label = ttk.Label(page_frame, text="在此处编辑并播报紧急通知或临时广播。点击“立即插播”将暂停当前任务，播报完毕后自动恢复。", 
+                               font=self.font_11, bootstyle="secondary", wraplength=self.root.winfo_width() - 100)
+        desc_label.pack(anchor='w', pady=(0, 20), fill=X)
+
+        content_frame = ttk.LabelFrame(page_frame, text="内容", padding=15)
+        content_frame.pack(fill=BOTH, expand=True, pady=5)
+        content_frame.columnconfigure(1, weight=1)
+
+        # --- 播音文字 ---
+        ttk.Label(content_frame, text="播音文字:").grid(row=0, column=0, sticky='nw', padx=5, pady=2)
+        text_frame = ttk.Frame(content_frame)
+        text_frame.grid(row=0, column=1, sticky='nsew')
+        text_frame.columnconfigure(0, weight=1)
+        text_frame.rowconfigure(0, weight=1)
+        content_text = ScrolledText(text_frame, height=8, font=self.font_11, wrap=WORD)
+        content_text.grid(row=0, column=0, sticky='nsew')
+        content_text.text.insert('1.0', self.interstitial_text_content) # 加载上次的内容
+        content_frame.rowconfigure(0, weight=1)
+
+        script_btn_frame = ttk.Frame(content_frame)
+        script_btn_frame.grid(row=1, column=1, sticky='w', padx=5, pady=(5, 10))
+        ttk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text.text, self.root), bootstyle="outline").pack(side=LEFT)
+        ttk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text.text, None, self.root), bootstyle="outline").pack(side=LEFT, padx=10)
+
+        # --- 播音员和参数 ---
+        params_frame = ttk.LabelFrame(page_frame, text="参数", padding=15)
+        params_frame.pack(fill=X, pady=5)
+        params_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(params_frame, text="播音员:").grid(row=0, column=0, sticky='w', padx=5, pady=3)
+        available_voices = self.get_available_voices()
+        voice_var = tk.StringVar()
+        voice_combo = ttk.Combobox(params_frame, textvariable=voice_var, values=available_voices, font=self.font_11, state='readonly')
+        voice_combo.grid(row=0, column=1, sticky='ew', padx=5)
+        if available_voices:
+            voice_combo.set(available_voices[0])
+
+        speech_params_frame = ttk.Frame(params_frame)
+        speech_params_frame.grid(row=0, column=2, sticky='e', padx=(10, 0))
+        ttk.Label(speech_params_frame, text="语速:").pack(side=LEFT)
+        speed_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=5); speed_entry.insert(0, "0"); speed_entry.pack(side=LEFT, padx=(2, 5))
+        ttk.Label(speech_params_frame, text="音调:").pack(side=LEFT)
+        pitch_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=5); pitch_entry.insert(0, "0"); pitch_entry.pack(side=LEFT, padx=(2, 5))
+        ttk.Label(speech_params_frame, text="音量:").pack(side=LEFT)
+        volume_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=5); volume_entry.insert(0, "100"); volume_entry.pack(side=LEFT, padx=(2, 0))
+
+        # --- 提示音和背景音乐 ---
+        audio_options_frame = ttk.LabelFrame(page_frame, text="音频选项", padding=15)
+        audio_options_frame.pack(fill=X, pady=5)
+        audio_options_frame.columnconfigure(1, weight=1)
+
+        prompt_var = tk.IntVar(); 
+        ttk.Checkbutton(audio_options_frame, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w', padx=5)
+        prompt_file_var, prompt_volume_var = tk.StringVar(), tk.StringVar(value="80")
+        prompt_file_entry = ttk.Entry(audio_options_frame, textvariable=prompt_file_var, font=self.font_11); prompt_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        ttk.Button(audio_options_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var, self.root), bootstyle="outline", width=2).grid(row=0, column=2)
+        prompt_vol_frame = ttk.Frame(audio_options_frame)
+        prompt_vol_frame.grid(row=0, column=3, sticky='e')
+        ttk.Label(prompt_vol_frame, text="音量:").pack(side=LEFT, padx=(10,5))
+        ttk.Entry(prompt_vol_frame, textvariable=prompt_volume_var, font=self.font_11, width=5).pack(side=LEFT, padx=5)
+        
+        bgm_var = tk.IntVar(); 
+        ttk.Checkbutton(audio_options_frame, text="背景音乐:", variable=bgm_var, bootstyle="round-toggle").grid(row=1, column=0, sticky='w', padx=5, pady=5)
+        bgm_file_var, bgm_volume_var = tk.StringVar(), tk.StringVar(value="40")
+        bgm_file_entry = ttk.Entry(audio_options_frame, textvariable=bgm_file_var, font=self.font_11); bgm_file_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
+        ttk.Button(audio_options_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var, self.root), bootstyle="outline", width=2).grid(row=1, column=2, pady=5)
+        bgm_vol_frame = ttk.Frame(audio_options_frame)
+        bgm_vol_frame.grid(row=1, column=3, sticky='e', pady=5)
+        ttk.Label(bgm_vol_frame, text="音量:").pack(side=LEFT, padx=(10,5))
+        ttk.Entry(bgm_vol_frame, textvariable=bgm_volume_var, font=self.font_11, width=5).pack(side=LEFT, padx=5)
+
+        # --- 立即插播按钮 ---
+        bottom_frame = ttk.Frame(page_frame)
+        bottom_frame.pack(fill=X, pady=20)
+        
+        # 将所有需要传递的控件打包到一个字典中
+        interstitial_params = {
+            'content_text': content_text.text,
+            'voice_var': voice_var,
+            'speed_entry': speed_entry,
+            'pitch_entry': pitch_entry,
+            'volume_entry': volume_entry,
+            'prompt_var': prompt_var,
+            'prompt_file_var': prompt_file_var,
+            'prompt_volume_var': prompt_volume_var,
+            'bgm_var': bgm_var,
+            'bgm_file_var': bgm_file_var,
+            'bgm_volume_var': bgm_volume_var,
+        }
+
+        play_button = ttk.Button(
+            bottom_frame, 
+            text="立即插播", 
+            bootstyle="success", 
+            style='lg.TButton',
+            command=lambda: self.execute_interstitial_broadcast(interstitial_params)
+        )
+        play_button.pack(ipady=8, fill=X)
+
+        return page_frame
+    # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+
+    def execute_interstitial_broadcast(self, params):
+        # 1. --- 从UI控件获取所有参数并验证 ---
+        text_content = params['content_text'].get('1.0', END).strip()
+        if not text_content:
+            messagebox.showerror("输入错误", "播音文字内容不能为空。", parent=self.root)
+            return
+
+        voice_params = {
+            'voice': params['voice_var'].get(),
+            'speed': params['speed_entry'].get().strip() or "0",
+            'pitch': params['pitch_entry'].get().strip() or "0",
+            'volume': params['volume_entry'].get().strip() or "100"
+        }
+        if not voice_params['voice']:
+            messagebox.showerror("输入错误", "请先选择一个“播音员”。", parent=self.root)
+            return
+
+        audio_options = {
+            'use_prompt': params['prompt_var'].get(),
+            'prompt_file': params['prompt_file_var'].get(),
+            'prompt_volume': params['prompt_volume_var'].get(),
+            'use_bgm': params['bgm_var'].get(),
+            'bgm_file': params['bgm_file_var'].get(),
+            'bgm_volume': params['bgm_volume_var'].get()
+        }
+
+        # 2. --- 弹窗询问播放次数 ---
+        repeat_count = simpledialog.askinteger(
+            "确认次数", 
+            "请输入要插播的次数：", 
+            parent=self.root, 
+            minvalue=1, 
+            initialvalue=1
+        )
+        if not repeat_count:
+            return # 用户点击了取消
+
+        # 3. --- 保存当前文字内容，以便下次打开时加载 ---
+        self.interstitial_text_content = text_content
+        self.settings['interstitial_text'] = self.interstitial_text_content
+        
+        # 4. --- 中断当前任务（降级方案的核心） ---
+        self.log("收到插播指令，准备中断当前任务...")
+        self.playback_command_queue.put(('STOP_FOR_INTERSTITIAL', None))
+
+        # 5. --- 启动后台插播线程 ---
+        interstitial_thread = threading.Thread(
+            target=self._interstitial_worker,
+            args=(text_content, voice_params, audio_options, repeat_count),
+            daemon=True
+        )
+        interstitial_thread.start()
+    # --- ↑↑↑ 新增代码结束 ↑↑↑ --
+
+    def _interstitial_worker(self, text, voice_params, audio_options, repeat_count):
+        self.log(f"插播任务开始，共 {repeat_count} 遍。")
+        self.update_playing_text(f"[紧急插播] 正在准备...")
+
+        # 等待 _playback_worker 线程处理完 STOP 命令并释放资源
+        time.sleep(0.5) 
+
+        try:
+            self.is_interstitial_active = True # <--- 添加这一行：升起“请勿打扰”
+            for i in range(repeat_count):
+                # 每次循环都检查主队列是否有更高优先级的指令（如用户再次点击停止）
+                if self._is_interrupted():
+                    self.log("插播任务被更高优先级指令中断。")
+                    break
+
+                self.update_playing_text(f"[紧急插播] 正在播报第 {i+1}/{repeat_count} 遍...")
+
+                # --- 播放提示音 ---
+                if audio_options['use_prompt']:
+                    prompt_path = audio_options['prompt_file']
+                    if os.path.exists(prompt_path):
+                        try:
+                            prompt_sound = pygame.mixer.Sound(prompt_path)
+                            prompt_sound.set_volume(float(audio_options['prompt_volume']) / 100.0)
+                            channel = pygame.mixer.find_channel(True)
+                            channel.play(prompt_sound)
+                            while channel.get_busy():
+                                time.sleep(0.05)
+                        except Exception as e:
+                            self.log(f"插播时播放提示音失败: {e}")
+
+                # --- 播放背景音乐 ---
+                if audio_options['use_bgm']:
+                    bgm_path = audio_options['bgm_file']
+                    if os.path.exists(bgm_path):
+                        try:
+                            pygame.mixer.music.load(bgm_path)
+                            pygame.mixer.music.set_volume(float(audio_options['bgm_volume']) / 100.0)
+                            pygame.mixer.music.play(-1) # 循环播放
+                        except Exception as e:
+                            self.log(f"插播时播放背景音乐失败: {e}")
+                
+                # --- 直接文本转语音播放（核心阻塞操作） ---
+                pythoncom.CoInitialize()
+                try:
+                    speaker = win32com.client.Dispatch("SAPI.SpVoice")
+                    all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
+                    if (selected_voice_desc := voice_params.get('voice')) in all_voices:
+                        speaker.Voice = all_voices[selected_voice_desc]
+                    
+                    speaker.Volume = int(voice_params.get('volume', 100))
+                    xml_text = f"<rate absspeed='{voice_params.get('speed', '0')}'><pitch middle='{voice_params.get('pitch', '0')}'>{text}</pitch></rate>"
+                    
+                    speaker.Speak(xml_text) # 直接播放，会阻塞当前子线程
+                except Exception as e:
+                    self.log(f"即时语音合成播放失败: {e}")
+                finally:
+                    pythoncom.CoUninitialize()
+
+                # --- 清理 ---
+                if audio_options['use_bgm']:
+                    pygame.mixer.music.stop()
+
+                if i < repeat_count - 1:
+                    time.sleep(0.5) # 多次播放之间的短暂间隔
+
+        finally:
+            self.is_interstitial_active = False # <--- 添加这一行：放下“请勿打扰”
+            # --- 恢复被中断的任务 ---
+            if self.currently_playing_task:
+                self.log(f"插播结束，准备恢复任务: {self.currently_playing_task['name']}")
+                # 将任务放回队列，让 _playback_worker 重新播放它
+                self.playback_command_queue.put(('PLAY', (self.currently_playing_task, "resumed")))
+                self.currently_playing_task = None
+            else:
+                self.log("插播结束，没有需要恢复的任务。")
+            
+            self.update_playing_text("等待播放...")
+    # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
 
     def create_scheduled_broadcast_page(self):
         page_frame = self.pages["定时广播"]
@@ -4382,6 +4630,9 @@ class TimedBroadcastApp:
                 self.log(f"警告：找不到整点报时文件 {chime_file}，报时失败。")
 
     def _check_broadcast_tasks(self, now):
+        if self.is_interstitial_active: # <--- 添加这一行
+            return                      # <--- 添加这一行
+
         if self._is_in_holiday(now):
             return
 
@@ -4426,25 +4677,60 @@ class TimedBroadcastApp:
 
     def _playback_worker(self):
         is_playing = False
+        current_task_data = None # 用于在循环中临时持有任务数据
+
         while self.running:
             try:
                 command, data = self.playback_command_queue.get(timeout=0.1)
+                if data:
+                    current_task_data = data # 暂存任务数据
             except queue.Empty:
+                # 在空闲时更新当前播放任务的状态
+                if is_playing and current_task_data:
+                    self.currently_playing_task = current_task_data[0]
+                else:
+                    self.currently_playing_task = None
                 continue
+
+            # --- 新增：处理插播中断指令 ---
+            if command == 'STOP_FOR_INTERSTITIAL':
+                is_playing = False
+                # 停止所有播放器
+                if AUDIO_AVAILABLE:
+                    pygame.mixer.music.stop()
+                    pygame.mixer.stop()
+                if VLC_AVAILABLE and self.vlc_player:
+                    self.vlc_player.stop()
+                if self.video_stop_event:
+                    self.video_stop_event.set()
+                
+                self.log("收到插播指令，当前任务已暂停。")
+                self.update_playing_text("[任务暂停] 等待插播...")
+                # 清空队列中可能存在的其他待播任务
+                while not self.playback_command_queue.empty():
+                    try: self.playback_command_queue.get_nowait()
+                    except queue.Empty: break
+                continue # 继续下一次循环，等待插播结束后的恢复指令
 
             if command == 'PLAY_INTERRUPT':
                 is_playing = True
+                self.currently_playing_task = data[0] # 记录当前任务
                 while not self.playback_command_queue.empty():
                     try: self.playback_command_queue.get_nowait()
                     except queue.Empty: break
                 self._execute_broadcast(data[0], data[1])
                 is_playing = False
+                self.currently_playing_task = None # 任务正常结束，清空记录
+                current_task_data = None
 
             elif command == 'PLAY':
                 if not is_playing:
                     is_playing = True
+                    self.currently_playing_task = data[0] # 记录当前任务
                     self._execute_broadcast(data[0], data[1])
                     is_playing = False
+                    self.currently_playing_task = None # 任务正常结束，清空记录
+                    current_task_data = None
 
             elif command == 'PLAY_CHIME':
                 if not AUDIO_AVAILABLE: continue
@@ -4470,6 +4756,8 @@ class TimedBroadcastApp:
 
             elif command == 'STOP':
                 is_playing = False
+                self.currently_playing_task = None # 手动停止，清空记录
+                current_task_data = None
                 if AUDIO_AVAILABLE:
                     pygame.mixer.music.stop()
                     pygame.mixer.stop()
@@ -5166,6 +5454,7 @@ class TimedBroadcastApp:
                 self.settings = defaults
         else:
             self.settings = defaults
+        self.interstitial_text_content = self.settings.get('interstitial_text', '') # <--- 添加这一行
         self.log("系统设置已加载。")
 
     def save_settings(self):
@@ -5339,6 +5628,15 @@ class TimedBroadcastApp:
 
         if self.root.state() == 'normal':
             self.settings["window_geometry"] = self.root.geometry()
+
+        if "插播语音" in self.pages and self.pages["插播语音"].winfo_exists():
+        try:
+            # 这是一个比较复杂的查找控件的方法，但很可靠
+            scrolled_text = self.pages["插播语音"].winfo_children()[2].winfo_children()[1].winfo_children()[0]
+            self.interstitial_text_content = scrolled_text.text.get('1.0', END).strip()
+            self.settings['interstitial_text'] = self.interstitial_text_content
+        except Exception as e:
+            self.log(f"退出时保存插播内容失败: {e}")
 
         self.save_tasks()
         self.save_settings()
