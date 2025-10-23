@@ -1096,7 +1096,7 @@ class TimedBroadcastApp:
         warning_frame = ttk.LabelFrame(main_frame, text="风险警告", padding=10, bootstyle="danger")
         warning_frame.grid(row=2, column=0, sticky='ew', pady=10)
         ttk.Label(warning_frame, text="请确保您完全信任所要运行的程序。运行未知或恶意程序可能对计算机安全造成威胁。\n设置“停止时间”将强制终止进程，可能导致数据未保存或文件损坏。", 
-                  bootstyle="inverse-danger", wraplength=450, justify=LEFT).pack(fill=X)
+                  bootstyle="inverse-danger", wraplength=550, justify=LEFT).pack(fill=X)
 
         dialog_button_frame = ttk.Frame(dialog)
         dialog_button_frame.pack(pady=15)
@@ -2528,10 +2528,32 @@ class TimedBroadcastApp:
         audio_single_entry = ttk.Entry(audio_single_frame, font=self.font_11)
         audio_single_entry.grid(row=0, column=1, sticky='ew', padx=5)
         ttk.Label(audio_single_frame, text="00:00").grid(row=0, column=2, padx=10)
+
+         # 根据VLC是否可用，动态设置支持的文件类型和提示信息
+        if VLC_AVAILABLE:
+            filetypes = [("所有支持的音频", "*.mp3 *.wav *.ogg *.flac *.m4a *.wma"), ("所有文件", "*.*")]
+            vlc_info_text = " (已启用VLC，支持绝大多数格式)"
+            vlc_info_style = "success"
+        else:
+            filetypes = [("支持的音频", "*.mp3 *.wav *.ogg *.flac"), ("所有文件", "*.*")]
+            vlc_info_text = " (提示: 安装VLC播放器可支持更多格式)"
+            vlc_info_style = "warning"
+
         def select_single_audio():
-            filename = filedialog.askopenfilename(title="选择音频文件", initialdir=AUDIO_FOLDER, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")], parent=dialog)
-            if filename: audio_single_entry.delete(0, END); audio_single_entry.insert(0, filename)
+            filename = filedialog.askopenfilename(
+                title="选择音频文件", 
+                initialdir=AUDIO_FOLDER, 
+                filetypes=filetypes, 
+                parent=dialog
+            )
+            if filename: 
+                audio_single_entry.delete(0, END)
+                audio_single_entry.insert(0, filename)
+        
         ttk.Button(audio_single_frame, text="选取...", command=select_single_audio, bootstyle="outline").grid(row=0, column=3, padx=5)
+        
+        # 在对话框中添加一个提示标签
+        ttk.Label(content_frame, text=vlc_info_text, bootstyle=vlc_info_style, font=self.font_9).grid(row=1, column=0, sticky='w', padx=5)
         
         ttk.Label(content_frame, text="音频文件夹").grid(row=2, column=0, sticky='e', padx=5, pady=2)
         audio_folder_frame = ttk.Frame(content_frame)
@@ -4503,72 +4525,143 @@ class TimedBroadcastApp:
         return False
 
     def _play_audio_task_internal(self, task):
-        if not AUDIO_AVAILABLE:
-            self.log("错误: Pygame未初始化，无法播放音频。")
-            return
-
-        interval_type = task.get('interval_type', 'first')
-        duration_seconds = int(task.get('interval_seconds', 0))
+        playlist = []
         repeat_count = int(task.get('interval_first', 1))
 
-        playlist = []
+        # 1. 构建播放列表
         if task.get('audio_type') == 'single':
-            if os.path.exists(task['content']): playlist = [task['content']] * repeat_count
+            if os.path.exists(task['content']):
+                playlist = [task['content']] * repeat_count
         else:
             folder_path = task['content']
             if os.path.isdir(folder_path):
-                all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
-                if task.get('play_order') == 'random': random.shuffle(all_files)
-                playlist = all_files[:repeat_count]
+                # 扩展支持的音频格式列表
+                supported_extensions = ('.mp3', '.wav', '.ogg', '.flac', '.m4a', '.wma', '.ape')
+                all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(supported_extensions)]
+                if task.get('play_order') == 'random':
+                    random.shuffle(all_files)
+                
+                if task.get('interval_type', 'first') == 'first':
+                    playlist = all_files[:repeat_count]
+                else: # 如果是按秒播放，则需要整个文件夹列表
+                    playlist = all_files
 
         if not playlist:
-            self.log(f"错误: 音频列表为空，任务 '{task['name']}' 无法播放。")
+            self.log(f"错误: 音频列表为空或文件/文件夹不存在，任务 '{task['name']}' 无法播放。")
             return
 
-        start_time = time.time()
-        for i, audio_path in enumerate(playlist):
-            if self._is_interrupted():
-                self.log(f"任务 '{task['name']}' 被新指令中断。")
-                return
-
-            if interval_type == 'first':
-                status_msg = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)} ({i+1}/{len(playlist)})"
-                self.update_playing_text(status_msg)
-
-            self.log(f"正在播放: {os.path.basename(audio_path)} ({i+1}/{len(playlist)})")
-
+        # 2. 智能选择播放引擎
+        if VLC_AVAILABLE:
+            # --- 使用 VLC 播放 ---
+            self.log(f"检测到VLC，使用VLC引擎播放任务 '{task['name']}'。")
             try:
-                pygame.mixer.music.load(audio_path)
-                pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
-                pygame.mixer.music.play()
+                instance = vlc.Instance()
+                player = instance.media_player_new()
+                start_time = time.time()
+                duration_seconds = int(task.get('interval_seconds', 0))
 
-                last_text_update_time = 0
-
-                while pygame.mixer.music.get_busy():
+                for i, audio_path in enumerate(playlist):
                     if self._is_interrupted():
-                        pygame.mixer.music.stop()
-                        return
+                        self.log(f"任务 '{task['name']}' 被新指令中断。")
+                        break
+                    
+                    media = instance.media_new(audio_path)
+                    player.set_media(media)
+                    player.audio_set_volume(int(task.get('volume', 80)))
+                    player.play()
+                    time.sleep(0.2) # 等待播放开始
 
-                    if interval_type == 'seconds':
+                    last_text_update_time = 0
+                    while player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
+                        if self._is_interrupted():
+                            player.stop()
+                            break
+
                         now = time.time()
-                        elapsed = now - start_time
-                        if elapsed >= duration_seconds:
-                            pygame.mixer.music.stop()
-                            self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
-                            return
-                        if now - last_text_update_time >= 1.0:
-                            remaining_seconds = int(duration_seconds - elapsed)
-                            status_msg = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)} (剩余 {remaining_seconds} 秒)"
-                            self.update_playing_text(status_msg)
-                            last_text_update_time = now
+                        if task.get('interval_type') == 'seconds':
+                            elapsed = now - start_time
+                            if elapsed >= duration_seconds:
+                                player.stop()
+                                self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
+                                break
+                            if now - last_text_update_time >= 1.0:
+                                remaining = int(duration_seconds - elapsed)
+                                self.update_playing_text(f"[{task['name']}] {os.path.basename(audio_path)} (剩余 {remaining} 秒)")
+                                last_text_update_time = now
+                        else:
+                            if now - last_text_update_time >= 1.0:
+                                self.update_playing_text(f"[{task['name']}] {os.path.basename(audio_path)} ({i+1}/{len(playlist)})")
+                                last_text_update_time = now
+                        
+                        time.sleep(0.1)
+                    
+                    if task.get('interval_type') == 'seconds' and (time.time() - start_time) >= duration_seconds:
+                        break
+                
+                player.stop()
 
-                    time.sleep(0.1)
-
-                if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
-                    return
             except Exception as e:
-                self.log(f"播放音频文件 {os.path.basename(audio_path)} 失败: {e}")
-                continue
+                self.log(f"使用VLC播放音频失败: {e}")
+
+        else:
+            # --- 回退到 Pygame 播放 ---
+            if not AUDIO_AVAILABLE:
+                self.log("错误: Pygame未初始化，无法播放音频。")
+                return
+            
+            self.log(f"VLC不可用，回退到Pygame引擎播放任务 '{task['name']}'。")
+            supported_pygame_formats = ('.wav', '.mp3', '.ogg')
+            interval_type = task.get('interval_type', 'first')
+            duration_seconds = int(task.get('interval_seconds', 0))
+            
+            start_time = time.time()
+            for i, audio_path in enumerate(playlist):
+                if self._is_interrupted():
+                    self.log(f"任务 '{task['name']}' 被新指令中断。")
+                    return
+
+                # 检查Pygame是否支持该格式
+                if not audio_path.lower().endswith(supported_pygame_formats):
+                    self.log(f"警告: Pygame不支持播放 '{os.path.basename(audio_path)}'。请安装VLC播放器以支持更多格式。")
+                    continue
+
+                if interval_type == 'first':
+                    status_msg = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)} ({i+1}/{len(playlist)})"
+                    self.update_playing_text(status_msg)
+
+                self.log(f"正在播放: {os.path.basename(audio_path)} ({i+1}/{len(playlist)})")
+
+                try:
+                    pygame.mixer.music.load(audio_path)
+                    pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
+                    pygame.mixer.music.play()
+
+                    last_text_update_time = 0
+                    while pygame.mixer.music.get_busy():
+                        if self._is_interrupted():
+                            pygame.mixer.music.stop()
+                            return
+
+                        if interval_type == 'seconds':
+                            now = time.time()
+                            elapsed = now - start_time
+                            if elapsed >= duration_seconds:
+                                pygame.mixer.music.stop()
+                                self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
+                                return
+                            if now - last_text_update_time >= 1.0:
+                                remaining_seconds = int(duration_seconds - elapsed)
+                                status_msg = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)} (剩余 {remaining_seconds} 秒)"
+                                self.update_playing_text(status_msg)
+                                last_text_update_time = now
+
+                        time.sleep(0.1)
+
+                    if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
+                        return
+                except Exception as e:
+                    self.log(f"播放音频文件 {os.path.basename(audio_path)} 失败: {e}")
+                    continue
 
     def _play_voice_task_internal(self, task):
         if not AUDIO_AVAILABLE:
