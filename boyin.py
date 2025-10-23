@@ -197,6 +197,7 @@ class TimedBroadcastApp:
         self.video_window = None
         self.vlc_player = None
         self.video_stop_event = None
+        self.is_muted = False # <--- 添加这一行
 
         self.create_folder_structure()
         self.load_settings()
@@ -327,6 +328,45 @@ class TimedBroadcastApp:
                            style='Link.TButton', command=cmd)
             btn.pack(fill=X, pady=1, ipady=8, padx=5)
             self.nav_buttons[title] = btn
+
+        # --- ↓↓↓ 从这里开始添加新代码 ↓↓↓ ---
+
+        # 添加一个分隔符，让底部按钮和主导航分开
+        ttk.Separator(self.nav_frame, orient=HORIZONTAL).pack(side=BOTTOM, fill=X, pady=5, padx=5)
+
+        # 创建一个Frame来容纳底部的三个按钮
+        bottom_btn_frame = ttk.Frame(self.nav_frame, style='light.TFrame')
+        bottom_btn_frame.pack(side=BOTTOM, fill=X, padx=5, pady=5)
+        bottom_btn_frame.columnconfigure((0, 1, 2), weight=1) # 让三列平分宽度
+
+        # 1. 一键静音按钮
+        self.mute_button = ttk.Button(
+            bottom_btn_frame, 
+            text="一键静音", 
+            bootstyle="info-outline", 
+            command=self.toggle_mute_all
+        )
+        self.mute_button.grid(row=0, column=0, sticky='ew', padx=1)
+
+        # 2. 最小化按钮
+        minimize_button = ttk.Button(
+            bottom_btn_frame, 
+            text="最小化", 
+            bootstyle="secondary-outline", 
+            command=self.hide_to_tray
+        )
+        minimize_button.grid(row=0, column=1, sticky='ew', padx=1)
+        if not TRAY_AVAILABLE:
+            minimize_button.config(state=DISABLED)
+
+        # 3. 退出按钮
+        exit_button = ttk.Button(
+            bottom_btn_frame, 
+            text="退出", 
+            bootstyle="danger-outline", 
+            command=self.quit_app
+        )
+        exit_button.grid(row=0, column=2, sticky='ew', padx=1)
             
         style = ttk.Style.get_instance()
         style.configure('Link.TButton', font=self.font_13_bold, anchor='w')
@@ -2529,9 +2569,9 @@ class TimedBroadcastApp:
         audio_single_entry.grid(row=0, column=1, sticky='ew', padx=5)
         ttk.Label(audio_single_frame, text="00:00").grid(row=0, column=2, padx=10)
 
-         # 根据VLC是否可用，动态设置支持的文件类型和提示信息
+        # 根据VLC是否可用，动态设置支持的文件类型和提示信息
         if VLC_AVAILABLE:
-            filetypes = [("所有支持的音频", "*.mp3 *.wav *.ogg *.flac *.m4a *.wma"), ("所有文件", "*.*")]
+            filetypes = [("所有支持的音频", "*.mp3 *.wav *.ogg *.flac *.m4a *.wma *.ape"), ("所有文件", "*.*")]
             vlc_info_text = " (已启用VLC，支持绝大多数格式)"
             vlc_info_style = "success"
         else:
@@ -2552,8 +2592,8 @@ class TimedBroadcastApp:
         
         ttk.Button(audio_single_frame, text="选取...", command=select_single_audio, bootstyle="outline").grid(row=0, column=3, padx=5)
         
-        # 在对话框中添加一个提示标签
-        ttk.Label(content_frame, text=vlc_info_text, bootstyle=vlc_info_style, font=self.font_9).grid(row=1, column=0, sticky='w', padx=5)
+        # 将提示标签放到 audio_single_frame 的第4列，避免覆盖
+        ttk.Label(audio_single_frame, text=vlc_info_text, bootstyle=vlc_info_style, font=self.font_9).grid(row=0, column=4, sticky='w', padx=10)
         
         ttk.Label(content_frame, text="音频文件夹").grid(row=2, column=0, sticky='e', padx=5, pady=2)
         audio_folder_frame = ttk.Frame(content_frame)
@@ -3574,7 +3614,7 @@ class TimedBroadcastApp:
             return []
 
     def select_file_for_entry(self, initial_dir, string_var, parent_dialog):
-        filename = filedialog.askopenfilename(title="选择文件", initialdir=initial_dir, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac *.m4a"), ("所有文件", "*.*")], parent=parent_dialog)
+        filename = filedialog.askopenfilename(title="选择文件", initialdir=initial_dir, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac"), ("所有文件", "*.*")], parent=parent_dialog)
         if filename: string_var.set(filename)
 
     def delete_task(self):
@@ -5310,6 +5350,35 @@ class TimedBroadcastApp:
         if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
        
         os._exit(0)
+
+    def toggle_mute_all(self):
+        # 1. 切换静音状态
+        self.is_muted = not self.is_muted
+
+        # 2. 更新按钮的文本和样式
+        if self.is_muted:
+            self.mute_button.config(text="取消静音", bootstyle="warning")
+            self.log("已开启全局静音。")
+        else:
+            self.mute_button.config(text="一键静音", bootstyle="info-outline")
+            self.log("已关闭全局静音。")
+
+        # 3. 控制当前正在播放的 VLC 播放器
+        if VLC_AVAILABLE and self.vlc_player and self.vlc_player.is_playing():
+            # vlc有内置的切换静音功能，非常方便
+            self.vlc_player.audio_toggle_mute()
+
+        # 4. 控制当前正在播放的 Pygame 音乐 (主要用于音频节目和语音节目的背景音乐)
+        if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
+            if self.is_muted:
+                pygame.mixer.music.set_volume(0)
+            else:
+                # 尝试从正在播放的任务中获取原始音量
+                # 这是一个简化处理，直接恢复到任务设定的音量
+                # 注意：这里我们无法完美知道静音前的确切音量，但恢复到1.0（最大）或任务音量是合理的
+                # 为了简单起见，我们直接恢复到100%音量，因为具体任务播放时会重新设置
+                pygame.mixer.music.set_volume(1.0) 
+    # --- ↑↑↑ 新增代码结束 ↑↑↑ ---```
 
     def setup_tray_icon(self):
         try: image = Image.open(ICON_FILE)
