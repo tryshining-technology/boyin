@@ -4195,17 +4195,37 @@ class TimedBroadcastApp:
         return False, None
 
     def _check_advanced_tasks(self, now):
-        if self._is_in_holiday(now): return
+        # --- ↓↓↓ 核心修改：删除了函数开头的 if self._is_in_holiday(now): return ---
 
+        # 检查截屏任务
         for task in self.screenshot_tasks:
             is_due, trigger_time = self._is_task_due(task, now)
             if is_due:
+                # --- ↓↓↓ 核心修改：将节假日检查移到这里 ---
+                if self._is_in_holiday(now):
+                    self.log(f"跳过截屏任务 '{task['name']}'，原因：当前处于节假日期间。")
+                    # 标记为今天已“处理”，防止节假日结束后重复触发
+                    task.setdefault('last_run', {})[trigger_time] = now.strftime("%Y-%m-%d")
+                    self.save_screenshot_tasks()
+                    continue # 跳过此任务，继续检查下一个
+                # --- ↑↑↑ 修改结束 ↑↑↑ ---
+                
                 self.log(f"触发截屏任务: {task['name']}")
                 threading.Thread(target=self._execute_screenshot_task, args=(task, trigger_time), daemon=True).start()
         
+        # 检查运行任务
         for task in self.execute_tasks:
             is_due, trigger_time = self._is_task_due(task, now)
             if is_due:
+                # --- ↓↓↓ 核心修改：同样在这里添加节假日检查 ---
+                if self._is_in_holiday(now):
+                    self.log(f"跳过运行任务 '{task['name']}'，原因：当前处于节假日期间。")
+                    # 标记为今天已“处理”
+                    task.setdefault('last_run', {})[trigger_time] = now.strftime("%Y-%m-%d")
+                    self.save_execute_tasks()
+                    continue # 跳过此任务，继续检查下一个
+                # --- ↑↑↑ 修改结束 ↑↑↑ ---
+
                 self.log(f"触发运行任务: {task['name']}")
                 threading.Thread(target=self._execute_program_task, args=(task, trigger_time), daemon=True).start()
     
@@ -5496,23 +5516,26 @@ class TimedBroadcastApp:
     def show_holiday_context_menu(self, event):
         if self.is_locked: return
         iid = self.holiday_tree.identify_row(event.y)
-        if not iid: return
-
         context_menu = tk.Menu(self.root, tearoff=0, font=self.font_11)
 
-        if iid not in self.holiday_tree.selection():
-            self.holiday_tree.selection_set(iid)
+        if iid: # 如果点击在已有项目上
+            if iid not in self.holiday_tree.selection():
+                self.holiday_tree.selection_set(iid)
 
-        context_menu.add_command(label="修改", command=self.edit_holiday)
-        context_menu.add_command(label="删除", command=self.delete_holiday)
-        context_menu.add_separator()
-        context_menu.add_command(label="置顶", command=self.move_holiday_to_top)
-        context_menu.add_command(label="上移", command=lambda: self.move_holiday(-1))
-        context_menu.add_command(label="下移", command=lambda: self.move_holiday(1))
-        context_menu.add_command(label="置末", command=self.move_holiday_to_bottom)
-        context_menu.add_separator()
-        context_menu.add_command(label="启用", command=lambda: self._set_holiday_status('启用'))
-        context_menu.add_command(label="禁用", command=lambda: self._set_holiday_status('禁用'))
+            context_menu.add_command(label="修改", command=self.edit_holiday)
+            context_menu.add_command(label="删除", command=self.delete_holiday)
+            context_menu.add_separator()
+            context_menu.add_command(label="置顶", command=self.move_holiday_to_top)
+            context_menu.add_command(label="上移", command=lambda: self.move_holiday(-1))
+            context_menu.add_command(label="下移", command=lambda: self.move_holiday(1))
+            context_menu.add_command(label="置末", command=self.move_holiday_to_bottom)
+            context_menu.add_separator()
+            context_menu.add_command(label="启用", command=lambda: self._set_holiday_status('启用'))
+            context_menu.add_command(label="禁用", command=lambda: self._set_holiday_status('禁用'))
+        else: # --- ↓↓↓ 新增的逻辑：如果点击在空白处 ↓↓↓ ---
+            self.holiday_tree.selection_set() # 清空所有选择
+            context_menu.add_command(label="添加节假日", command=self.add_holiday)
+        # --- ↑↑↑ 新增逻辑结束 ↑↑↑ ---
 
         context_menu.post(event.x_root, event.y_root)
 
@@ -6002,22 +6025,26 @@ class TimedBroadcastApp:
     def show_todo_context_menu(self, event):
         if self.is_locked: return
         iid = self.todo_tree.identify_row(event.y)
-        if not iid: return
-
         context_menu = tk.Menu(self.root, tearoff=0, font=self.font_11)
-        if iid not in self.todo_tree.selection():
-            self.todo_tree.selection_set(iid)
+        
+        if iid: # 如果点击在已有项目上
+            if iid not in self.todo_tree.selection():
+                self.todo_tree.selection_set(iid)
 
-        context_menu.add_command(label="修改", command=self.edit_todo)
-        context_menu.add_command(label="删除", command=self.delete_todo)
-        context_menu.add_separator()
-        context_menu.add_command(label="置顶", command=self.move_todo_to_top)
-        context_menu.add_command(label="上移", command=lambda: self.move_todo(-1))
-        context_menu.add_command(label="下移", command=lambda: self.move_todo(1))
-        context_menu.add_command(label="置末", command=self.move_todo_to_bottom)
-        context_menu.add_separator()
-        context_menu.add_command(label="启用", command=lambda: self._set_todo_status('启用'))
-        context_menu.add_command(label="禁用", command=lambda: self._set_todo_status('禁用'))
+            context_menu.add_command(label="修改", command=self.edit_todo)
+            context_menu.add_command(label="删除", command=self.delete_todo)
+            context_menu.add_separator()
+            context_menu.add_command(label="置顶", command=self.move_todo_to_top)
+            context_menu.add_command(label="上移", command=lambda: self.move_todo(-1))
+            context_menu.add_command(label="下移", command=lambda: self.move_todo(1))
+            context_menu.add_command(label="置末", command=self.move_todo_to_bottom)
+            context_menu.add_separator()
+            context_menu.add_command(label="启用", command=lambda: self._set_todo_status('启用'))
+            context_menu.add_command(label="禁用", command=lambda: self._set_todo_status('禁用'))
+        else: # --- ↓↓↓ 新增的逻辑：如果点击在空白处 ↓↓↓ ---
+            self.todo_tree.selection_set() # 清空所有选择
+            context_menu.add_command(label="添加待办事项", command=self.add_todo)
+        # --- ↑↑↑ 新增逻辑结束 ↑↑↑ ---
 
         context_menu.post(event.x_root, event.y_root)
 
@@ -6108,7 +6135,7 @@ class TimedBroadcastApp:
             self.log("已清空所有待办事项。")
 
     def _check_todo_tasks(self, now):
-        if self._is_in_holiday(now): return
+        # --- ↓↓↓ 核心修改：删除了函数开头的 if self._is_in_holiday(now): return ---
 
         now_str_dt = now.strftime('%Y-%m-%d %H:%M:%S')
         now_str_date = now.strftime('%Y-%m-%d')
@@ -6117,12 +6144,15 @@ class TimedBroadcastApp:
         for index, todo in enumerate(self.todos):
             if todo.get('status') != '启用': continue
 
+            # --- ↓↓↓ 核心修改：将节假日检查移到每个任务的触发判断逻辑中 ↓↓↓ ---
+            
+            should_trigger = False
+            trigger_time_for_log = "" # 用于记录是哪个时间点触发的
+
             if todo.get('type') == 'onetime':
                 if todo.get('remind_datetime') == now_str_dt:
-                    self.log(f"触发一次性待办事项: {todo['name']}")
-                    todo_with_index = todo.copy()
-                    todo_with_index['original_index'] = index
-                    self.reminder_queue.put(todo_with_index)
+                    should_trigger = True
+                    trigger_time_for_log = todo.get('remind_datetime')
 
             elif todo.get('type') == 'recurring':
                 try:
@@ -6136,28 +6166,44 @@ class TimedBroadcastApp:
                             (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
                 if not run_today: continue
 
-                triggered = False
+                # 检查固定时间点
                 for trigger_time in [t.strip() for t in todo.get('start_times', '').split(',')]:
                     if trigger_time == now_str_time and todo.get('last_run', {}).get(trigger_time) != now_str_date:
-                        triggered = True
+                        should_trigger = True
+                        trigger_time_for_log = trigger_time
                         todo.setdefault('last_run', {})[trigger_time] = now_str_date
                         break
-
+                
+                # 检查循环间隔
                 interval = todo.get('interval_minutes', 0)
-                if not triggered and interval > 0 and todo.get('start_times'):
+                if not should_trigger and interval > 0 and todo.get('start_times'):
                     last_run_str = todo.get('last_interval_run')
                     if last_run_str:
                         try:
                             last_run_dt = datetime.strptime(last_run_str, '%Y-%m-%d %H:%M:%S')
                             if now >= last_run_dt + timedelta(minutes=interval):
-                                triggered = True
+                                should_trigger = True
+                                trigger_time_for_log = f"间隔循环 ({now_str_time})"
                         except ValueError: pass
-
-                if triggered:
-                    self.log(f"触发循环待办事项: {todo['name']}")
-                    todo_with_index = todo.copy()
-                    todo_with_index['original_index'] = index
-                    self.reminder_queue.put(todo_with_index)
+            
+            # --- 统一的触发/跳过逻辑 ---
+            if should_trigger:
+                if self._is_in_holiday(now):
+                    self.log(f"跳过待办事项提醒 '{todo['name']}'，原因：当前处于节假日期间。")
+                    # 对于循环任务，更新间隔计时，防止节假日后立即触发
+                    if todo.get('type') == 'recurring':
+                        todo['last_interval_run'] = now_str_dt
+                        self.save_todos()
+                    continue # 跳过此任务
+                
+                # 如果不是节假日，则正常触发
+                self.log(f"触发待办事项提醒: {todo['name']} (规则: {trigger_time_for_log})")
+                todo_with_index = todo.copy()
+                todo_with_index['original_index'] = index
+                self.reminder_queue.put(todo_with_index)
+                
+                # 更新循环任务的最后运行时间
+                if todo.get('type') == 'recurring':
                     todo['last_interval_run'] = now_str_dt
                     self.save_todos()
 
