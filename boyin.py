@@ -334,6 +334,13 @@ class TimedBroadcastApp:
                            style='Link.TButton', command=cmd)
             btn.pack(fill=X, pady=1, ipady=8, padx=5)
             self.nav_buttons[title] = btn
+
+            # --- 修改：在“定时广播”后立即插入“插播语音”按钮 ---
+            if title == "定时广播":
+                interstitial_btn = ttk.Button(self.nav_frame, text="插播语音", bootstyle="light",
+                                          style='Link.TButton', command=lambda: self.switch_page("插播语音"))
+                interstitial_btn.pack(fill=X, pady=1, ipady=8, padx=5)
+                self.nav_buttons["插播语音"] = interstitial_btn
 # --- 新增：插播语音按钮 ---
         interstitial_btn = ttk.Button(self.nav_frame, text="插播语音", bootstyle="light",
                                   style='Link.TButton', command=lambda: self.switch_page("插播语音"))
@@ -352,7 +359,7 @@ class TimedBroadcastApp:
         # 1. 一键静音按钮
         self.mute_button = ttk.Button(
             bottom_btn_frame, 
-            text="🔇一键静音", 
+            text="一键静音", 
             bootstyle="info-outline", 
             command=self.toggle_mute_all
         )
@@ -401,7 +408,7 @@ class TimedBroadcastApp:
         self.status_labels = []
         status_texts = ["当前时间", "系统状态", "播放状态", "任务数量", "待办事项"]
 
-        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技", font=self.font_11,
+        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 最后编译20251023", font=self.font_11,
                                     bootstyle=(SECONDARY, INVERSE), padding=(15, 0))
         copyright_label.pack(side=RIGHT, padx=2)
 
@@ -4658,9 +4665,10 @@ class TimedBroadcastApp:
                         break
                     
                     media = instance.media_new(audio_path)
-                    player.set_media(media)
-                    player.audio_set_volume(int(task.get('volume', 80)))
-                    player.play()
+                    self.vlc_player = player # --- 修改：将局部player赋值给全局实例 ---
+                    self.vlc_player.set_media(media)
+                    # player.audio_set_volume(int(task.get('volume', 80))) # --- 删除：音量将在循环内设置 ---
+                    self.vlc_player.play()
                     time.sleep(0.2) # 等待播放开始
 
                     last_text_update_time = 0
@@ -4684,6 +4692,8 @@ class TimedBroadcastApp:
                             if now - last_text_update_time >= 1.0:
                                 self.update_playing_text(f"[{task['name']}] {os.path.basename(audio_path)} ({i+1}/{len(playlist)})")
                                 last_text_update_time = now
+
+                        self._apply_master_volume() # --- 新增：在循环中持续应用主音量 ---
                         
                         time.sleep(0.1)
                     
@@ -4691,6 +4701,7 @@ class TimedBroadcastApp:
                         break
                 
                 player.stop()
+                self.vlc_player = None # --- 新增：播放结束，清除全局实例引用 ---
 
             except Exception as e:
                 self.log(f"使用VLC播放音频失败: {e}")
@@ -4725,7 +4736,6 @@ class TimedBroadcastApp:
 
                 try:
                     pygame.mixer.music.load(audio_path)
-                    pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
                     pygame.mixer.music.play()
 
                     last_text_update_time = 0
@@ -4757,6 +4767,7 @@ class TimedBroadcastApp:
                                 self.update_playing_text(status_msg)
                                 last_text_update_time = now
 
+                        self._apply_master_volume() # --- 新增：在循环中持续应用主音量 ---
                         time.sleep(0.1)
 
                     if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
@@ -4942,6 +4953,7 @@ class TimedBroadcastApp:
                             self.update_playing_text(f"[{task['name']}] {os.path.basename(video_path)} ({i+1}/{len(playlist)} - {status_text})")
                             last_text_update_time = now
 
+                    self._apply_master_volume() # --- 新增：在循环中持续应用主音量 ---
                     time.sleep(0.2)
 
                 if (interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds) or stop_event.is_set():
@@ -5473,10 +5485,10 @@ class TimedBroadcastApp:
         self.is_muted = not self.is_muted
 
         if self.is_muted:
-            self.mute_button.config(text="🔊取消静音", bootstyle="warning")
+            self.mute_button.config(text="取消静音", bootstyle="warning")
             self.log("已开启全局静音。")
         else:
-            self.mute_button.config(text="🔇一键静音", bootstyle="info-outline")
+            self.mute_button.config(text="一键静音", bootstyle="info-outline")
             self.log("已关闭全局静音。")
         
         # 通过队列请求_playback_worker应用新的音量
@@ -5665,6 +5677,12 @@ class TimedBroadcastApp:
         self.interstitial_prompt_file_var, self.interstitial_prompt_volume_var = tk.StringVar(), tk.StringVar(value="80")
         ttk.Entry(prompt_frame, textvariable=self.interstitial_prompt_file_var, font=self.font_11).grid(row=0, column=1, sticky='ew', padx=5)
         ttk.Button(prompt_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, self.interstitial_prompt_file_var, page_frame), bootstyle="outline", width=2).grid(row=0, column=2)
+
+        # --- 新增：提示音音量控制 ---
+        prompt_vol_frame = ttk.Frame(prompt_frame)
+        prompt_vol_frame.grid(row=0, column=3, sticky='e', padx=(10,0))
+        ttk.Label(prompt_vol_frame, text="音量:").pack(side=LEFT)
+        ttk.Entry(prompt_vol_frame, textvariable=self.interstitial_prompt_volume_var, font=self.font_11, width=5).pack(side=LEFT, padx=5)
         
         self.interstitial_bgm_var = tk.IntVar(value=0)
         bgm_frame = ttk.Frame(audio_addons_frame)
@@ -5674,6 +5692,12 @@ class TimedBroadcastApp:
         self.interstitial_bgm_file_var, self.interstitial_bgm_volume_var = tk.StringVar(), tk.StringVar(value="40")
         ttk.Entry(bgm_frame, textvariable=self.interstitial_bgm_file_var, font=self.font_11).grid(row=0, column=1, sticky='ew', padx=5)
         ttk.Button(bgm_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, self.interstitial_bgm_file_var, page_frame), bootstyle="outline", width=2).grid(row=0, column=2)
+
+        # --- 新增：背景音乐音量控制 ---
+        bgm_vol_frame = ttk.Frame(bgm_frame)
+        bgm_vol_frame.grid(row=0, column=3, sticky='e', padx=(10,0))
+        ttk.Label(bgm_vol_frame, text="音量:").pack(side=LEFT)
+        ttk.Entry(bgm_vol_frame, textvariable=self.interstitial_bgm_volume_var, font=self.font_11, width=5).pack(side=LEFT, padx=5)
         
         fade_frame = ttk.Frame(audio_addons_frame)
         fade_frame.pack(fill=X, pady=(10, 2))
@@ -5696,7 +5720,7 @@ class TimedBroadcastApp:
             messagebox.showwarning("正在插播", "当前已有插播任务正在进行，请稍后再试。", parent=self.root)
             return
 
-        repetitions = simpledialog.askinteger("播放次数", "请输入插播次数:", parent=self.root, minvalue=1, initialvalue=1)
+        repetitions = self._create_custom_input_dialog(title="播放次数",prompt="请输入插播次数:",minvalue=1)
         if not repetitions:
             return
 
