@@ -4553,8 +4553,6 @@ class TimedBroadcastApp:
         if task.get('bg_image_enabled') and task.get('bg_image_path') and os.path.isdir(task.get('bg_image_path')):
             if not IMAGE_AVAILABLE:
                 self.log("警告：背景图片功能已启用，但 Pillow 库未安装，无法显示图片。")
-            else:
-
 # --- 新增：防御性检查，防止视觉冲突 ---
             elif self.is_interstitial_active:
                 self.log(f"跳过任务 '{task['name']}' 的背景图片，因为正在进行插播。")
