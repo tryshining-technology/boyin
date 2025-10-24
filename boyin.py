@@ -322,7 +322,7 @@ class TimedBroadcastApp:
         self.page_container = ttk.Frame(self.root)
         self.page_container.pack(side=LEFT, fill=BOTH, expand=True)
 
-        nav_button_titles = ["定时广播", "节假日", "待办事项", "高级功能", "设置", "注册软件", "超级管理"]
+        nav_button_titles = ["定时广播", "插播语音", "节假日", "待办事项", "高级功能", "设置", "注册软件", "超级管理"]
 
         for i, title in enumerate(nav_button_titles):
             is_super_admin = (title == "超级管理")
@@ -430,7 +430,9 @@ class TimedBroadcastApp:
         if page_name in self.pages and self.pages[page_name].winfo_exists():
             target_frame = self.pages[page_name]
         else:
-            if page_name == "节假日":
+            if page_name == "插播语音":
+                target_frame = self.create_intercut_page()
+            elif page_name == "节假日":
                 target_frame = self.create_holiday_page()
             elif page_name == "待办事项":
                 target_frame = self.create_todo_page()
@@ -511,6 +513,68 @@ class TimedBroadcastApp:
         elif entered_password is not None:
             messagebox.showerror("验证失败", "密码错误！", parent=self.root)
             self.log("尝试进入超级管理模块失败：密码错误。")
+
+    def create_intercut_page(self):
+        page_frame = ttk.Frame(self.page_container, padding=20)
+        page_frame.columnconfigure(0, weight=1)
+        page_frame.rowconfigure(1, weight=1)
+
+        title_label = ttk.Label(page_frame, text="实时插播语音", font=self.font_14_bold, bootstyle="primary")
+        title_label.grid(row=0, column=0, sticky='w', pady=(0, 15))
+
+        # --- 播音文字区域 ---
+        text_lf = ttk.LabelFrame(page_frame, text="播音文字", padding=10)
+        text_lf.grid(row=1, column=0, sticky='nsew')
+        text_lf.columnconfigure(0, weight=1)
+        text_lf.rowconfigure(0, weight=1)
+
+        content_text = ScrolledText(text_lf, height=8, font=self.font_11, wrap=WORD)
+        content_text.grid(row=0, column=0, sticky='nsew')
+        # 加载上次保存在 settings 中的内容
+        content_text.text.insert('1.0', self.settings.get("intercut_text", ""))
+        
+        # --- 文稿操作按钮 ---
+        script_btn_frame = ttk.Frame(text_lf)
+        script_btn_frame.grid(row=1, column=0, sticky='w', pady=(10, 0))
+        
+        # 为了让 simpledialog 能正确显示在最前，父窗口需要是 root
+        ttk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text.text, self.root), bootstyle="outline").pack(side=LEFT)
+        ttk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text.text, None, self.root), bootstyle="outline").pack(side=LEFT, padx=10)
+
+        # --- 播音员和参数设置 ---
+        params_lf = ttk.LabelFrame(page_frame, text="播音参数", padding=15)
+        params_lf.grid(row=2, column=0, sticky='ew', pady=15)
+        params_lf.columnconfigure(1, weight=1)
+
+        ttk.Label(params_lf, text="播音员:").grid(row=0, column=0, sticky='w')
+        available_voices = self.get_available_voices()
+        voice_var = tk.StringVar()
+        voice_combo = ttk.Combobox(params_lf, textvariable=voice_var, values=available_voices, font=self.font_11, state='readonly')
+        voice_combo.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5)
+        if available_voices:
+            voice_combo.set(available_voices[0])
+
+        ttk.Label(params_lf, text="语速 (-10~10):").grid(row=1, column=0, sticky='w', pady=5)
+        speed_entry = ttk.Entry(params_lf, font=self.font_11, width=10)
+        speed_entry.insert(0, "0")
+        speed_entry.grid(row=1, column=1, sticky='w', padx=5, pady=5)
+
+        ttk.Label(params_lf, text="音调 (-10~10):").grid(row=2, column=0, sticky='w', pady=5)
+        pitch_entry = ttk.Entry(params_lf, font=self.font_11, width=10)
+        pitch_entry.insert(0, "0")
+        pitch_entry.grid(row=2, column=1, sticky='w', padx=5, pady=5)
+        
+        # --- 立即插播按钮 ---
+        intercut_btn = ttk.Button(page_frame, text="立即插播", style="lg.success.TButton", 
+                                  command=lambda: self._execute_intercut(
+                                      content_text.text.get('1.0', tk.END),
+                                      voice_var.get(),
+                                      speed_entry.get(),
+                                      pitch_entry.get()
+                                  ))
+        intercut_btn.grid(row=3, column=0, sticky='ew', ipady=8, pady=10)
+        
+        return page_frame
             
     def create_advanced_features_page(self):
         page_frame = ttk.Frame(self.page_container, padding=10)
@@ -4482,6 +4546,109 @@ class TimedBroadcastApp:
                 while not self.playback_command_queue.empty():
                     try: self.playback_command_queue.get_nowait()
                     except queue.Empty: break
+
+    def _execute_intercut(self, text, voice, speed, pitch):
+        text_content = text.strip()
+        if not text_content:
+            messagebox.showwarning("内容为空", "请输入要播报的文字内容。", parent=self.root)
+            return
+            
+        # 保存当前文字内容到 settings 字典，以便下次加载
+        self.settings["intercut_text"] = text_content
+        self.save_settings() # 调用保存，写入文件
+
+        try:
+            # 弹出输入框获取次数
+            repeat_count = simpledialog.askinteger("设置播放次数", "请输入要循环播报的次数:", 
+                                                 parent=self.root, initialvalue=1, minvalue=1, maxvalue=100)
+            if repeat_count is None:
+                return # 用户点击了取消
+        except:
+            return
+
+        voice_params = {'voice': voice, 'speed': speed, 'pitch': pitch, 'volume': '100'}
+
+        # --- 1. 创建停止信号 ---
+        stop_intercut_event = threading.Event()
+
+        # --- 2. 创建模态悬浮窗，增加按钮 ---
+        progress_dialog = ttk.Toplevel(self.root)
+        progress_dialog.title("插播进行中")
+        progress_dialog.resizable(False, False)
+        progress_dialog.transient(self.root)
+        progress_dialog.attributes('-topmost', True)
+        progress_dialog.grab_set()
+        progress_dialog.protocol("WM_DELETE_WINDOW", lambda: None)
+        
+        ttk.Label(progress_dialog, text="正在插播中...", font=self.font_12_bold, bootstyle="info").pack(padx=40, pady=(20, 10))
+        
+        stop_btn = ttk.Button(progress_dialog, text="紧急停止", bootstyle="danger", 
+                              command=lambda: stop_intercut_event.set())
+        stop_btn.pack(padx=20, pady=(0, 20), fill=X)
+        
+        self.center_window(progress_dialog)
+
+        # --- 记录静音状态并开启静音 ---
+        was_muted_before_intercut = self.is_muted
+        if not was_muted_before_intercut:
+            self.toggle_mute_all()
+
+        # --- 定义任务完成后的回调函数 ---
+        def on_done():
+            if progress_dialog.winfo_exists():
+                progress_dialog.destroy()
+            if not was_muted_before_intercut:
+                self.toggle_mute_all()
+            self.log("插播任务已结束。")
+
+        # --- 3. 将停止信号传递给后台线程 ---
+        intercut_thread = threading.Thread(target=self._speak_text_worker, 
+                                           args=(text_content, voice_params, repeat_count, on_done, stop_intercut_event), 
+                                           daemon=True)
+        intercut_thread.start()
+
+    def _speak_text_worker(self, text, voice_params, repeat_count, done_callback, stop_event):
+        """在后台线程中执行直接语音合成和播放，并响应停止事件"""
+        pythoncom.CoInitialize()
+        try:
+            speaker = win32com.client.Dispatch("SAPI.SpVoice")
+            
+            all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
+            if (selected_voice_desc := voice_params.get('voice')) in all_voices:
+                speaker.Voice = all_voices[selected_voice_desc]
+            speaker.Volume = int(voice_params.get('volume', 100))
+            
+            escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            xml_text = f"<rate absspeed='{voice_params.get('speed', '0')}'><pitch middle='{voice_params.get('pitch', '0')}'>{escaped_text}</pitch></rate>"
+
+            for i in range(repeat_count):
+                if stop_event.is_set():
+                    self.log("插播在循环开始前被停止。")
+                    break
+
+                self.log(f"正在进行第 {i+1}/{repeat_count} 次插播...")
+                
+                # SVSF_ASYNC (1) | SVSF_PURGEBEFORESPEAK (2)
+                # 这个组合可以开始异步播放，并清除之前的任何残留队列
+                flags = 1 | 2 
+                speaker.Speak(xml_text, flags)
+
+                # 循环检查状态，而不是阻塞等待
+                while speaker.Status.RunningState == 2: # 2 = SVSIsSpeaking
+                    if stop_event.is_set():
+                        # 收到停止信号，立即清空语音队列以中断播报
+                        speaker.Speak("", 3) # 3 = SVSFPurgeBeforeSpeak
+                        self.log("插播被用户紧急停止！")
+                        break
+                    time.sleep(0.1)
+                
+                if stop_event.is_set():
+                    break
+        except Exception as e:
+            self.log(f"插播语音时发生错误: {e}")
+        finally:
+            self.root.after(0, done_callback)
+            pythoncom.CoUninitialize()
 
     def on_weather_label_click(self, event=None):
         """处理天气标签点击事件，弹出城市输入框"""
