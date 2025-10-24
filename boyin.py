@@ -187,6 +187,7 @@ class TimedBroadcastApp:
         self.current_page = None
         self.current_page_name = ""
         self.main_weather_label = None # <--- 新增此行
+        self.intercut_page_content = None # <--- 新增：用于存储插播页面的文字内容
         
         self.active_processes = {}
 
@@ -1999,9 +2000,6 @@ class TimedBroadcastApp:
 
         ttk.Separator(general_frame, orient=HORIZONTAL).pack(fill=X, pady=10) # 添加一个分隔线
         # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
-
-        font_frame = ttk.Frame(general_frame)
-        font_frame.pack(fill=X, pady=8)
 
         font_frame = ttk.Frame(general_frame)
         font_frame.pack(fill=X, pady=8)
@@ -5587,7 +5585,7 @@ class TimedBroadcastApp:
 
             self.settings.update({
                 "app_font": self.font_var.get(),
-                "app_theme": self.theme_var.get(), # <--- 新增此行
+                "app_theme": self.theme_var.get(),
                 "autostart": self.autostart_var.get(),
                 "start_minimized": self.start_minimized_var.get(),
                 "lock_on_start": self.lock_on_start_var.get(),
@@ -5604,7 +5602,8 @@ class TimedBroadcastApp:
                 "time_chime_speed": self.time_chime_speed_var.get(),
                 "time_chime_pitch": self.time_chime_pitch_var.get(),
                 "bg_image_interval": interval,
-                "weather_city": self.settings.get("weather_city", "") # <--- 新增此行
+                "weather_city": self.settings.get("weather_city", ""),
+                "intercut_text": self.settings.get("intercut_text", "") # 新增：确保插播文本也被保存
             })
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(self.settings, f, ensure_ascii=False, indent=2)
