@@ -41,7 +41,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\pip\Cache
-          key: ${{ runner.os }}-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements_nuitka.txt') }}
+          key: ${{ runner.os }}-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-${{ hashFiles('**/requirements_nuitka.txt') }}-v2
           restore-keys: |
             ${{ runner.os }}-${{ matrix.python-version }}-${{ matrix.architecture }}-pip-
 
