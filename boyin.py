@@ -198,6 +198,7 @@ class TimedBroadcastApp:
         self.vlc_player = None
         self.video_stop_event = None
         self.is_muted = False # <--- 添加这一行
+        self.last_bgm_volume = 1.0 # <--- 新增：用于记住静音前的BGM音量
 
         self.create_folder_structure()
         self.load_settings()
@@ -390,7 +391,7 @@ class TimedBroadcastApp:
         self.status_labels = []
         status_texts = ["当前时间", "系统状态", "播放状态", "任务数量", "待办事项"]
 
-        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技", font=self.font_11,
+        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251024", font=self.font_11,
                                     bootstyle=(SECONDARY, INVERSE), padding=(15, 0))
         copyright_label.pack(side=RIGHT, padx=2)
 
@@ -4598,6 +4599,12 @@ class TimedBroadcastApp:
             try:
                 instance = vlc.Instance()
                 player = instance.media_player_new()
+                
+                # <--- 核心修改：在播放开始时，检查并应用全局静音状态 ---
+                if self.is_muted:
+                    player.audio_set_mute(True)
+                # --- 修改结束 ---
+
                 start_time = time.time()
                 duration_seconds = int(task.get('interval_seconds', 0))
 
@@ -4674,7 +4681,17 @@ class TimedBroadcastApp:
 
                 try:
                     pygame.mixer.music.load(audio_path)
-                    pygame.mixer.music.set_volume(float(task.get('volume', 80)) / 100.0)
+                    
+                    # <--- 核心修改：智能设置音量并“记住”它 ---
+                    task_volume_float = float(task.get('volume', 80)) / 100.0
+                    self.last_bgm_volume = task_volume_float  # 记住正确的音量
+                    
+                    if self.is_muted:
+                        pygame.mixer.music.set_volume(0)
+                    else:
+                        pygame.mixer.music.set_volume(task_volume_float)
+                    # --- 修改结束 ---
+                    
                     pygame.mixer.music.play()
 
                     last_text_update_time = 0
@@ -4746,7 +4763,17 @@ class TimedBroadcastApp:
                 try:
                     self.log(f"播放背景音乐: {os.path.basename(bgm_path)}")
                     pygame.mixer.music.load(bgm_path)
-                    pygame.mixer.music.set_volume(float(task.get('bgm_volume', 40)) / 100.0)
+                    
+                    # <--- 核心修改：智能设置BGM音量并“记住”它 ---
+                    bgm_volume_float = float(task.get('bgm_volume', 40)) / 100.0
+                    self.last_bgm_volume = bgm_volume_float  # 记住这个BGM的正确音量
+
+                    if self.is_muted:
+                        pygame.mixer.music.set_volume(0)
+                    else:
+                        pygame.mixer.music.set_volume(bgm_volume_float)
+                    # --- 修改结束 ---
+
                     pygame.mixer.music.play(-1)
                 except Exception as e:
                     self.log(f"播放背景音乐失败: {e}")
@@ -4842,6 +4869,11 @@ class TimedBroadcastApp:
                 self.vlc_player.set_rate(rate_val)
                 self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
                 self.log(f"设置播放速率为: {rate_val}")
+                
+                # <--- BUG 1 核心修复：在播放开始时，检查并应用全局静音状态 ---
+                if self.is_muted:
+                    self.vlc_player.audio_set_mute(True)
+                # --- 修复结束 ---
 
                 time.sleep(0.5)
 
@@ -5366,20 +5398,26 @@ class TimedBroadcastApp:
 
         # 3. 控制当前正在播放的 VLC 播放器
         if VLC_AVAILABLE and self.vlc_player and self.vlc_player.is_playing():
-            # vlc有内置的切换静音功能，非常方便
             self.vlc_player.audio_toggle_mute()
 
-        # 4. 控制当前正在播放的 Pygame 音乐 (主要用于音频节目和语音节目的背景音乐)
-        if AUDIO_AVAILABLE and pygame.mixer.music.get_busy():
-            if self.is_muted:
-                pygame.mixer.music.set_volume(0)
-            else:
-                # 尝试从正在播放的任务中获取原始音量
-                # 这是一个简化处理，直接恢复到任务设定的音量
-                # 注意：这里我们无法完美知道静音前的确切音量，但恢复到1.0（最大）或任务音量是合理的
-                # 为了简单起见，我们直接恢复到100%音量，因为具体任务播放时会重新设置
-                pygame.mixer.music.set_volume(1.0) 
-    # --- ↑↑↑ 新增代码结束 ↑↑↑ ---```
+        # 4. 控制当前正在播放的 Pygame 所有音频
+        if AUDIO_AVAILABLE:
+            # 控制所有普通音效通道 (用于语音和提示音)
+            for i in range(pygame.mixer.get_num_channels()):
+                channel = pygame.mixer.Channel(i)
+                if self.is_muted:
+                    channel.set_volume(0)
+                else:
+                    channel.set_volume(1.0)
+            
+            # 控制专用的背景音乐通道
+            if pygame.mixer.music.get_busy():
+                if self.is_muted:
+                    pygame.mixer.music.set_volume(0)
+                else:
+                    # <--- 核心修改：使用“记住”的音量来恢复 ---
+                    pygame.mixer.music.set_volume(self.last_bgm_volume)
+                    # --- 修改结束 ---
 
     def setup_tray_icon(self):
         try: image = Image.open(ICON_FILE)
