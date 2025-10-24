@@ -4600,10 +4600,12 @@ class TimedBroadcastApp:
                 instance = vlc.Instance()
                 player = instance.media_player_new()
                 
-                # <--- 核心修改：在播放开始时，检查并应用全局静音状态 ---
+                # <--- 核心修复：明确设置静音或非静音状态 ---
                 if self.is_muted:
                     player.audio_set_mute(True)
-                # --- 修改结束 ---
+                else:
+                    player.audio_set_mute(False) # 明确取消静音
+                # --- 修复结束 ---
 
                 start_time = time.time()
                 duration_seconds = int(task.get('interval_seconds', 0))
@@ -4682,15 +4684,13 @@ class TimedBroadcastApp:
                 try:
                     pygame.mixer.music.load(audio_path)
                     
-                    # <--- 核心修改：智能设置音量并“记住”它 ---
                     task_volume_float = float(task.get('volume', 80)) / 100.0
-                    self.last_bgm_volume = task_volume_float  # 记住正确的音量
+                    self.last_bgm_volume = task_volume_float
                     
                     if self.is_muted:
                         pygame.mixer.music.set_volume(0)
                     else:
                         pygame.mixer.music.set_volume(task_volume_float)
-                    # --- 修改结束 ---
                     
                     pygame.mixer.music.play()
 
@@ -4720,7 +4720,6 @@ class TimedBroadcastApp:
                 except Exception as e:
                     self.log(f"播放音频文件 {os.path.basename(audio_path)} 失败: {e}")
                     continue
-
     def _play_voice_task_internal(self, task):
         if not AUDIO_AVAILABLE:
             self.log("错误: Pygame未初始化，无法播放语音。")
@@ -4870,9 +4869,11 @@ class TimedBroadcastApp:
                 self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
                 self.log(f"设置播放速率为: {rate_val}")
                 
-                # <--- BUG 1 核心修复：在播放开始时，检查并应用全局静音状态 ---
+                # <--- 核心修复：明确设置静音或非静音状态 ---
                 if self.is_muted:
                     self.vlc_player.audio_set_mute(True)
+                else:
+                    self.vlc_player.audio_set_mute(False) # 明确取消静音
                 # --- 修复结束 ---
 
                 time.sleep(0.5)
