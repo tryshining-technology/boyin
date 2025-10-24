@@ -4598,14 +4598,13 @@ class TimedBroadcastApp:
             self.log(f"检测到VLC，使用VLC引擎播放任务 '{task['name']}'。")
             try:
                 instance = vlc.Instance()
-                player = instance.media_player_new()
+                # <--- 核心修复 1：将 player 赋值给 self.vlc_player ---
+                self.vlc_player = instance.media_player_new()
                 
-                # <--- 核心修复：明确设置静音或非静音状态 ---
                 if self.is_muted:
-                    player.audio_set_mute(True)
+                    self.vlc_player.audio_set_mute(True)
                 else:
-                    player.audio_set_mute(False) # 明确取消静音
-                # --- 修复结束 ---
+                    self.vlc_player.audio_set_mute(False)
 
                 start_time = time.time()
                 duration_seconds = int(task.get('interval_seconds', 0))
@@ -4616,22 +4615,22 @@ class TimedBroadcastApp:
                         break
                     
                     media = instance.media_new(audio_path)
-                    player.set_media(media)
-                    player.audio_set_volume(int(task.get('volume', 80)))
-                    player.play()
+                    self.vlc_player.set_media(media)
+                    self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
+                    self.vlc_player.play()
                     time.sleep(0.2) # 等待播放开始
 
                     last_text_update_time = 0
-                    while player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
+                    while self.vlc_player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
                         if self._is_interrupted():
-                            player.stop()
+                            self.vlc_player.stop()
                             break
 
                         now = time.time()
                         if task.get('interval_type') == 'seconds':
                             elapsed = now - start_time
                             if elapsed >= duration_seconds:
-                                player.stop()
+                                self.vlc_player.stop()
                                 self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
                                 break
                             if now - last_text_update_time >= 1.0:
@@ -4648,13 +4647,19 @@ class TimedBroadcastApp:
                     if task.get('interval_type') == 'seconds' and (time.time() - start_time) >= duration_seconds:
                         break
                 
-                player.stop()
+                self.vlc_player.stop()
 
             except Exception as e:
                 self.log(f"使用VLC播放音频失败: {e}")
+            finally:
+                # <--- 核心修复 2：确保播放结束后清理 self.vlc_player ---
+                if self.vlc_player:
+                    self.vlc_player.stop()
+                    self.vlc_player = None
+                # --- 修复结束 ---
 
         else:
-            # --- 回退到 Pygame 播放 ---
+            # --- 回退到 Pygame 播放 (这部分逻辑不变) ---
             if not AUDIO_AVAILABLE:
                 self.log("错误: Pygame未初始化，无法播放音频。")
                 return
@@ -4670,7 +4675,6 @@ class TimedBroadcastApp:
                     self.log(f"任务 '{task['name']}' 被新指令中断。")
                     return
 
-                # 检查Pygame是否支持该格式
                 if not audio_path.lower().endswith(supported_pygame_formats):
                     self.log(f"警告: Pygame不支持播放 '{os.path.basename(audio_path)}'。请安装VLC播放器以支持更多格式。")
                     continue
@@ -4720,6 +4724,7 @@ class TimedBroadcastApp:
                 except Exception as e:
                     self.log(f"播放音频文件 {os.path.basename(audio_path)} 失败: {e}")
                     continue
+
     def _play_voice_task_internal(self, task):
         if not AUDIO_AVAILABLE:
             self.log("错误: Pygame未初始化，无法播放语音。")
