@@ -1828,9 +1828,10 @@ class TimedBroadcastApp:
         self.stats_label = ttk.Label(stats_frame, text="节目单：0", font=self.font_11, bootstyle="secondary")
         self.stats_label.pack(side=LEFT)
 
-        # 新增的天气标签，靠右显示
-        self.main_weather_label = ttk.Label(stats_frame, text="天气: 正在获取...", font=self.font_11, bootstyle="info")
+# 新增的可点击天气标签，靠右显示
+        self.main_weather_label = ttk.Label(stats_frame, text="天气: 正在获取...", font=self.font_11, bootstyle="info", cursor="hand2")
         self.main_weather_label.pack(side=RIGHT, padx=10)
+        self.main_weather_label.bind("<Button-1>", self.on_weather_label_click)
 
         log_frame = ttk.LabelFrame(page_frame, text="", padding=(10, 5))
         log_frame.pack(side=BOTTOM, fill=X, padx=10, pady=5)
@@ -4498,36 +4499,92 @@ class TimedBroadcastApp:
                     try: self.playback_command_queue.get_nowait()
                     except queue.Empty: break
 
+        def on_weather_label_click(self, event=None):
+        """处理天气标签点击事件，弹出城市输入框"""
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("设置天气城市")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
+            dialog.destroy()
+            self.root.focus_force()
+
+        main_frame = ttk.Frame(dialog, padding=20)
+        main_frame.pack(fill=BOTH, expand=True)
+
+        ttk.Label(main_frame, text="请输入城市名称 (例如: 北京, 深圳市):").pack(pady=(0, 5))
+        
+        city_entry = ttk.Entry(main_frame, font=self.font_11, width=30)
+        city_entry.pack(pady=5)
+        city_entry.insert(0, self.settings.get("weather_city", ""))
+        city_entry.focus_set()
+
+        ttk.Label(main_frame, text="留空并保存，可恢复IP自动定位。", font=self.font_9, bootstyle="secondary").pack(pady=(5, 10))
+
+        def on_save():
+            new_city = city_entry.get().strip()
+            self.settings["weather_city"] = new_city
+            self.save_settings()
+            
+            self.log(f"用户手动设置天气城市为: '{new_city}'" if new_city else "用户清空了城市设置，将恢复自动定位。")
+            cleanup_and_destroy()
+            
+            self.main_weather_label.config(text="天气: 正在更新...")
+            threading.Thread(target=self._fetch_weather_data, daemon=True).start()
+
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=10)
+        
+        ttk.Button(btn_frame, text="保存", command=on_save, bootstyle="primary").pack(side=LEFT, padx=10)
+        ttk.Button(btn_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10)
+
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
+        dialog.bind('<Return>', lambda event: on_save())
+        
+        self.center_window(dialog)
+
     def _update_weather_display_threadsafe(self, text):
         """线程安全地更新界面上的天气标签"""
         if self.main_weather_label and self.main_weather_label.winfo_exists():
             self.main_weather_label.config(text=text)
 
     def _fetch_weather_data(self):
-        """全自动获取天气数据：IP定位 -> 查询天气（包含风力信息）"""
+        """获取天气数据（智能选择城市：优先用户设置，其次IP定位）"""
         
         if not AMAP_API_KEY or AMAP_API_KEY == "此处替换为您的真实高德API Key":
             self.log("天气功能：未在代码中配置有效的API Key。")
-            self.root.after(0, self._update_weather_display_threadsafe, "天气: 未配置Key")
+            self.root.after(0, self._update_weather_display_threadsafe, "天气: 未配置Key (点击设置)")
             return
 
-        city = None
-        try:
-            ip_url = "https://restapi.amap.com/v3/ip"
-            ip_params = {"key": AMAP_API_KEY}
-            response = requests.get(ip_url, params=ip_params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            if data.get("status") == "1" and data.get("city"):
-                city = data["city"]
-                self.log(f"IP定位成功: {city}")
-            else:
-                self.log(f"IP定位失败: {data.get('info', '未知错误')}")
-        except requests.exceptions.RequestException as e:
-            self.log(f"IP定位网络请求错误: {e}")
+        city = self.settings.get("weather_city", "").strip()
+        source = "用户设置"
+
+        if not city:
+            source = "IP自动定位"
+            try:
+                ip_url = "https://restapi.amap.com/v3/ip"
+                ip_params = {"key": AMAP_API_KEY}
+                response = requests.get(ip_url, params=ip_params, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                
+                if data.get("status") == "1" and isinstance(data.get("city"), str) and data.get("city"):
+                    city = data["city"]
+                    self.log(f"IP定位成功: {city}")
+                else:
+                    city = None
+                    self.log(f"IP定位未能返回有效城市: {data.get('info', '未知错误')}")
+            except requests.exceptions.RequestException as e:
+                city = None
+                self.log(f"IP定位网络请求错误: {e}")
         
         if not city:
-            self.root.after(0, self._update_weather_display_threadsafe, "天气: 定位失败")
+            self.log("天气功能：无法确定城市位置。")
+            self.root.after(0, self._update_weather_display_threadsafe, "天气: 定位失败 (点击设置)")
             return
 
         try:
@@ -4539,40 +4596,29 @@ class TimedBroadcastApp:
 
             if data.get("status") == "1" and data.get("lives"):
                 live = data["lives"][0]
-                
-                # 从API返回数据中获取所有需要的信息
-                city = live.get('city')
-                weather = live.get('weather')
-                temperature = live.get('temperature')
-                wind_direction = live.get('winddirection')
-                wind_power = live.get('windpower')
-                humidity = live.get('humidity') # <--- 新增：获取湿度
+                city_name, weather, temp = live.get('city'), live.get('weather'), live.get('temperature')
+                wind_dir, wind_power, humidity = live.get('winddirection'), live.get('windpower'), live.get('humidity')
 
-                # 按照您要求的格式构建最终的显示字符串
-                display_text = f"天气: {city} {weather} {temperature}°C {wind_direction}风 {wind_power}级 湿度:{humidity}%"
+                display_text = f"天气: {city_name} {weather} {temp}°C {wind_dir}风 {wind_power}级 湿度:{humidity}%"
                 
                 self.root.after(0, self._update_weather_display_threadsafe, display_text)
-                self.log(f"成功获取天气：{display_text}")
+                self.log(f"成功获取天气 ({source})：{display_text}")
             else:
-                self.log(f"获取天气失败 ({city}): {data.get('info', '未知错误')}")
-                self.root.after(0, self._update_weather_display_threadsafe, "天气: 查询失败")
-
-        except requests.exceptions.RequestException as e:
-            self.log(f"天气网络请求错误: {e}")
-            self.root.after(0, self._update_weather_display_threadsafe, "天气: 网络错误")
+                error_info = data.get("info", "未知天气查询错误")
+                self.log(f"获取天气失败 ({source} - {city}): {error_info}")
+                self.root.after(0, self._update_weather_display_threadsafe, f"天气: 查询失败 (点击修改)")
         except Exception as e:
             self.log(f"处理天气数据时出错: {e}")
-            self.root.after(0, self._update_weather_display_threadsafe, "天气: 数据错误")
+            self.root.after(0, self._update_weather_display_threadsafe, "天气: 数据错误 (点击修改)")
 
     def _weather_worker(self):
         """后台天气更新的循环工作线程"""
-        time.sleep(5) # 启动后稍等5秒，等待主界面完全加载
+        time.sleep(5)
         while self.running:
             self._fetch_weather_data()
-            time.sleep(1800) # 每30分钟更新一次
+            time.sleep(1800)
 
     # --- ↑↑↑ 粘贴到这里结束 ↑↑↑ ---
-
 
 #第10部分
 #第10部分
@@ -5281,6 +5327,7 @@ class TimedBroadcastApp:
             "time_chime_enabled": False, "time_chime_voice": "",
             "time_chime_speed": "0", "time_chime_pitch": "0",
             "bg_image_interval": 6
+            "weather_city": ""    # <--- 新增此行
         }
         if os.path.exists(SETTINGS_FILE):
             try:
@@ -5320,6 +5367,7 @@ class TimedBroadcastApp:
                 "time_chime_speed": self.time_chime_speed_var.get(),
                 "time_chime_pitch": self.time_chime_pitch_var.get(),
                 "bg_image_interval": interval
+                "weather_city": self.settings.get("weather_city", "") # <--- 新增此行
             })
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(self.settings, f, ensure_ascii=False, indent=2)
