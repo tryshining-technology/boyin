@@ -59,7 +59,7 @@ jobs:
             --output-dir="${{ matrix.output-dir-name }}" `
             --windows-icon-from-ico="icon.ico" `
             --include-data-file="icon.ico=icon.ico" `
-            --enable-plugin=tk-inter `
+            --enable-plugin=standard `
             --product-name="创翔多功能定时播音旗舰版" `
             --product-version="1.0.0.0" `
             --file-version="1.0.0.0" `
