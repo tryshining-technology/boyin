@@ -1294,52 +1294,36 @@ class TimedBroadcastApp:
             sys.exit()
 
     def _get_mac_address(self):
+        """
+        获取一个稳定的物理MAC地址，优先有线网卡。
+        这个版本不再依赖于网络连接状态('is_up')，使其更加稳定。
+        """
         interfaces = psutil.net_if_addrs()
-        stats = psutil.net_if_stats()
-
-        wired_macs = []
-        wireless_macs = []
-        other_macs = []
-
-        wired_keywords = ['ethernet', 'eth', '本地连接', 'local area connection']
-        wireless_keywords = ['wi-fi', 'wlan', '无线网络连接', 'wireless']
-
+        
+        mac_addresses = []
         for name, addrs in interfaces.items():
-            is_wired = any(keyword in name.lower() for keyword in wired_keywords)
-            is_wireless = any(keyword in name.lower() for keyword in wireless_keywords)
-
-            is_up = stats.get(name) and getattr(stats.get(name), 'isup', False)
-
+            # 过滤掉虚拟网卡和回环地址
+            if 'loopback' in name.lower() or 'virtual' in name.lower() or name.startswith('vEthernet'):
+                continue
+            
             for addr in addrs:
                 if addr.family == psutil.AF_LINK:
                     mac = addr.address.replace(':', '').replace('-', '').upper()
                     if len(mac) == 12 and mac != '000000000000':
-                        mac_info = {'mac': mac, 'is_up': is_up, 'name': name}
-                        if is_wired:
-                            wired_macs.append(mac_info)
-                        elif is_wireless:
-                            wireless_macs.append(mac_info)
-                        else:
-                            other_macs.append(mac_info)
+                        is_wired = 'ethernet' in name.lower() or 'eth' in name.lower() or '本地连接' in name.lower()
+                        # 赋予有线网卡更高的优先级
+                        priority = 0 if is_wired else 1
+                        mac_addresses.append((priority, mac, name))
 
-        wired_macs.sort(key=lambda x: x['is_up'], reverse=True)
-        wireless_macs.sort(key=lambda x: x['is_up'], reverse=True)
-        other_macs.sort(key=lambda x: x['is_up'], reverse=True)
+        if not mac_addresses:
+            return None
 
-        if wired_macs:
-            return wired_macs[0]['mac']
-        if wireless_macs:
-            return wireless_macs[0]['mac']
-        if other_macs:
-            return other_macs[0]['mac']
-
-        for name, addrs in interfaces.items():
-            for addr in addrs:
-                if addr.family == psutil.AF_LINK:
-                    mac = addr.address.replace(':', '').replace('-', '').upper()
-                    if len(mac) == 12 and mac != '000000000000':
-                         return mac
-        return None
+        # 按优先级（有线优先）、然后按名称排序，确保每次都得到相同的结果
+        mac_addresses.sort()
+        
+        # 返回最优先的那个MAC地址
+        self.log(f"找到的最稳定MAC地址来自网卡: {mac_addresses[0][2]}")
+        return mac_addresses[0][1]
 
     # --- ↓↓↓ 新增函数：生成授权签名 ↓↓↓ ---
     def _generate_signature(self, license_type):
