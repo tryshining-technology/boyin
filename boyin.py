@@ -4539,7 +4539,18 @@ class TimedBroadcastApp:
 
             if data.get("status") == "1" and data.get("lives"):
                 live = data["lives"][0]
-                display_text = f"天气: {live.get('city')} {live.get('weather')} {live.get('temperature')}°C {live.get('winddirection')}风 {live.get('windpower')}级"
+                
+                # 从API返回数据中获取所有需要的信息
+                city = live.get('city')
+                weather = live.get('weather')
+                temperature = live.get('temperature')
+                wind_direction = live.get('winddirection')
+                wind_power = live.get('windpower')
+                humidity = live.get('humidity') # <--- 新增：获取湿度
+
+                # 按照您要求的格式构建最终的显示字符串
+                display_text = f"天气: {city} {weather} {temperature}°C {wind_direction}风 {wind_power}级 湿度:{humidity}%"
+                
                 self.root.after(0, self._update_weather_display_threadsafe, display_text)
                 self.log(f"成功获取天气：{display_text}")
             else:
