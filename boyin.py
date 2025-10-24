@@ -5365,7 +5365,7 @@ class TimedBroadcastApp:
                 "time_chime_voice": self.time_chime_voice_var.get(),
                 "time_chime_speed": self.time_chime_speed_var.get(),
                 "time_chime_pitch": self.time_chime_pitch_var.get(),
-                "bg_image_interval": interval
+                "bg_image_interval": interval,
                 "weather_city": self.settings.get("weather_city", "") # <--- 新增此行
             })
         try:
