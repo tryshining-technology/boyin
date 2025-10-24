@@ -4499,7 +4499,7 @@ class TimedBroadcastApp:
                     try: self.playback_command_queue.get_nowait()
                     except queue.Empty: break
 
-        def on_weather_label_click(self, event=None):
+    def on_weather_label_click(self, event=None):
         """处理天气标签点击事件，弹出城市输入框"""
         dialog = ttk.Toplevel(self.root)
         dialog.title("设置天气城市")
