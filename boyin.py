@@ -20,6 +20,7 @@ import shutil
 import re
 import ctypes
 import hashlib
+import requests # <--- 新增此行
 
 # --- ↓↓↓ 新增代码：全局隐藏 subprocess 调用的控制台窗口 ↓↓↓ ---
 
@@ -141,6 +142,7 @@ REGISTRY_PARENT_KEY_PATH = r"Software\创翔科技"
 # --- ↓↓↓ 新增代码：定义一个用于签名的密钥盐 ↓↓↓ ---
 # !!! 警告：请将这个字符串修改为您自己的、独一无二的复杂字符串 !!!
 SECRET_SALT = "42492f00-d980-40e1-a17e-ba8094727636"
+AMAP_API_KEY = "c62d9b56d92792d1d11c8544f1b547dc"
 # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
 
 
@@ -184,6 +186,7 @@ class TimedBroadcastApp:
         self.nav_buttons = {}
         self.current_page = None
         self.current_page_name = ""
+        self.main_weather_label = None # <--- 新增此行
         
         self.active_processes = {}
 
@@ -1820,8 +1823,14 @@ class TimedBroadcastApp:
 
         stats_frame = ttk.Frame(page_frame, padding=(10, 5))
         stats_frame.pack(side=TOP, fill=X)
+        
+        # “节目单”标签，靠左显示
         self.stats_label = ttk.Label(stats_frame, text="节目单：0", font=self.font_11, bootstyle="secondary")
-        self.stats_label.pack(side=LEFT, fill=X, expand=True)
+        self.stats_label.pack(side=LEFT)
+
+        # 新增的天气标签，靠右显示
+        self.main_weather_label = ttk.Label(stats_frame, text="天气: 正在获取...", font=self.font_11, bootstyle="info")
+        self.main_weather_label.pack(side=RIGHT, padx=10)
 
         log_frame = ttk.LabelFrame(page_frame, text="", padding=(10, 5))
         log_frame.pack(side=BOTTOM, fill=X, padx=10, pady=5)
@@ -4181,6 +4190,7 @@ class TimedBroadcastApp:
     def start_background_threads(self):
         threading.Thread(target=self._scheduler_worker, daemon=True).start()
         threading.Thread(target=self._playback_worker, daemon=True).start()
+        threading.Thread(target=self._weather_worker, daemon=True).start() # <--- 新增此行
         self.root.after(1000, self._process_reminder_queue)
 
     def _check_running_processes_for_termination(self, now):
@@ -4487,6 +4497,71 @@ class TimedBroadcastApp:
                 while not self.playback_command_queue.empty():
                     try: self.playback_command_queue.get_nowait()
                     except queue.Empty: break
+
+    def _update_weather_display_threadsafe(self, text):
+        """线程安全地更新界面上的天气标签"""
+        if self.main_weather_label and self.main_weather_label.winfo_exists():
+            self.main_weather_label.config(text=text)
+
+    def _fetch_weather_data(self):
+        """全自动获取天气数据：IP定位 -> 查询天气（包含风力信息）"""
+        
+        if not AMAP_API_KEY or AMAP_API_KEY == "此处替换为您的真实高德API Key":
+            self.log("天气功能：未在代码中配置有效的API Key。")
+            self.root.after(0, self._update_weather_display_threadsafe, "天气: 未配置Key")
+            return
+
+        city = None
+        try:
+            ip_url = "https://restapi.amap.com/v3/ip"
+            ip_params = {"key": AMAP_API_KEY}
+            response = requests.get(ip_url, params=ip_params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("status") == "1" and data.get("city"):
+                city = data["city"]
+                self.log(f"IP定位成功: {city}")
+            else:
+                self.log(f"IP定位失败: {data.get('info', '未知错误')}")
+        except requests.exceptions.RequestException as e:
+            self.log(f"IP定位网络请求错误: {e}")
+        
+        if not city:
+            self.root.after(0, self._update_weather_display_threadsafe, "天气: 定位失败")
+            return
+
+        try:
+            weather_url = "https://restapi.amap.com/v3/weather/weatherInfo"
+            weather_params = {"key": AMAP_API_KEY, "city": city, "extensions": "base"}
+            response = requests.get(weather_url, params=weather_params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get("status") == "1" and data.get("lives"):
+                live = data["lives"][0]
+                display_text = f"天气: {live.get('city')} {live.get('weather')} {live.get('temperature')}°C {live.get('winddirection')}风 {live.get('windpower')}级"
+                self.root.after(0, self._update_weather_display_threadsafe, display_text)
+                self.log(f"成功获取天气：{display_text}")
+            else:
+                self.log(f"获取天气失败 ({city}): {data.get('info', '未知错误')}")
+                self.root.after(0, self._update_weather_display_threadsafe, "天气: 查询失败")
+
+        except requests.exceptions.RequestException as e:
+            self.log(f"天气网络请求错误: {e}")
+            self.root.after(0, self._update_weather_display_threadsafe, "天气: 网络错误")
+        except Exception as e:
+            self.log(f"处理天气数据时出错: {e}")
+            self.root.after(0, self._update_weather_display_threadsafe, "天气: 数据错误")
+
+    def _weather_worker(self):
+        """后台天气更新的循环工作线程"""
+        time.sleep(5) # 启动后稍等5秒，等待主界面完全加载
+        while self.running:
+            self._fetch_weather_data()
+            time.sleep(1800) # 每30分钟更新一次
+
+    # --- ↑↑↑ 粘贴到这里结束 ↑↑↑ ---
+
 
 #第10部分
 #第10部分
