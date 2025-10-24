@@ -5324,9 +5324,8 @@ class TimedBroadcastApp:
             "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00",
             "weekly_reboot_enabled": False, "weekly_reboot_days": "每周:67", "weekly_reboot_time": "22:00:00",
             "last_power_action_date": "",
-            "time_chime_enabled": False, "time_chime_voice": "",
             "time_chime_speed": "0", "time_chime_pitch": "0",
-            "bg_image_interval": 6
+            "bg_image_interval": 6,
             "weather_city": ""    # <--- 新增此行
         }
         if os.path.exists(SETTINGS_FILE):
