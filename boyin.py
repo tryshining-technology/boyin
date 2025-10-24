@@ -824,12 +824,12 @@ class TimedBroadcastApp:
             repeat_entry.insert(0, task_to_edit.get('repeat_count', 1))
             interval_entry.insert(0, task_to_edit.get('interval_seconds', 0))
             weekday_entry.insert(0, task_to_edit.get('weekday', '每周:1234567'))
-            date_range_entry.insert(0, task_to_edit.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            date_range_entry.insert(0, task_to_edit.get('date_range', '2025-01-01 ~ 2099-12-31'))
         else:
             repeat_entry.insert(0, '1')
             interval_entry.insert(0, '0')
             weekday_entry.insert(0, "每周:1234567")
-            date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
+            date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
 
         def save_task():
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
@@ -1217,10 +1217,10 @@ class TimedBroadcastApp:
             start_time_entry.insert(0, task_to_edit.get('time', ''))
             stop_time_entry.insert(0, task_to_edit.get('stop_time', ''))
             weekday_entry.insert(0, task_to_edit.get('weekday', '每周:1234567'))
-            date_range_entry.insert(0, task_to_edit.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            date_range_entry.insert(0, task_to_edit.get('date_range', '2025-01-01 ~ 2099-12-31'))
         else:
             weekday_entry.insert(0, "每周:1234567")
-            date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
+            date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
 
         def save_task():
             target_path = target_entry.get().strip()
@@ -1751,6 +1751,7 @@ class TimedBroadcastApp:
         if "设置" not in self.pages or not hasattr(self, 'autostart_var'):
             return
         
+        self.theme_var.set(self.settings.get("app_theme", "litera")) # <--- 新增此行
         self.font_var.set(self.settings.get("app_font", "Microsoft YaHei"))
         self.autostart_var.set(self.settings.get("autostart", False))
         self.start_minimized_var.set(self.settings.get("start_minimized", False))
@@ -1981,6 +1982,27 @@ class TimedBroadcastApp:
         self.restore_video_speed_btn = ttk.Button(bg_interval_frame, text="恢复所有视频节目播放速度", command=self._restore_all_video_speeds, bootstyle="info-outline")
         self.restore_video_speed_btn.pack(side=LEFT, padx=5)
 
+# --- ↓↓↓ 在这里添加新的主题设置UI ↓↓↓ ---
+        theme_frame = ttk.Frame(general_frame)
+        theme_frame.pack(fill=X, pady=(15, 5)) # 增加一点上边距
+
+        ttk.Label(theme_frame, text="软件主题:").pack(side=LEFT)
+
+        # 获取当前 ttkbootstrap 实例的所有可用主题
+        available_themes = sorted(style.theme_names())
+        
+        self.theme_var = ttk.StringVar()
+        theme_combo = ttk.Combobox(theme_frame, textvariable=self.theme_var, values=available_themes, 
+                                   font=self.font_10, width=25, state='readonly')
+        theme_combo.pack(side=LEFT, padx=10)
+        theme_combo.bind("<<ComboboxSelected>>", self._on_theme_selected)
+
+        ttk.Separator(general_frame, orient=HORIZONTAL).pack(fill=X, pady=10) # 添加一个分隔线
+        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+
+        font_frame = ttk.Frame(general_frame)
+        font_frame.pack(fill=X, pady=8)
+
         font_frame = ttk.Frame(general_frame)
         font_frame.pack(fill=X, pady=8)
 
@@ -2102,6 +2124,23 @@ class TimedBroadcastApp:
             self.log(f"字体已更改为 '{new_font}'。")
             self._apply_global_font()
             messagebox.showinfo("设置已保存", "字体设置已保存。\n请重启软件以使新字体完全生效。", parent=self.root)
+
+    def _on_theme_selected(self, event=None):
+        """当用户从下拉框选择一个新主题时调用"""
+        new_theme = self.theme_var.get()
+        if new_theme:
+            try:
+                style = ttk.Style.get_instance()
+                style.theme_use(new_theme)
+                self.log(f"软件主题已切换为: {new_theme}")
+                # 保存新主题到设置
+                self.settings['app_theme'] = new_theme
+                self.save_settings()
+            except tk.TclError:
+                messagebox.showerror("错误", f"无法应用主题 '{new_theme}'。", parent=self.root)
+                self.log(f"错误：切换主题 '{new_theme}' 失败。")
+                # 恢复到上一个有效主题
+                self.theme_var.set(style.theme_use())
 
     def _restore_default_font(self):
         default_font = "Microsoft YaHei"
@@ -2766,14 +2805,14 @@ class TimedBroadcastApp:
             interval_first_entry.insert(0, task.get('interval_first', '1'))
             interval_seconds_entry.insert(0, task.get('interval_seconds', '600'))
             weekday_entry.insert(0, task.get('weekday', '每周:1234567'))
-            date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            date_range_entry.insert(0, task.get('date_range', '2025-01-01 ~ 2099-12-31'))
             delay_var.set(task.get('delay', 'ontime'))
             bg_image_var.set(task.get('bg_image_enabled', 0))
             bg_image_path_var.set(task.get('bg_image_path', ''))
             bg_image_order_var.set(task.get('bg_image_order', 'sequential'))
         else:
             volume_entry.insert(0, "80"); interval_first_entry.insert(0, "1"); interval_seconds_entry.insert(0, "600")
-            weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
+            weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
 
         def save_task():
             audio_path = audio_single_entry.get().strip() if audio_type_var.get() == "single" else audio_folder_entry.get().strip()
@@ -3000,7 +3039,7 @@ class TimedBroadcastApp:
             interval_first_entry.insert(0, task.get('interval_first', '1'))
             interval_seconds_entry.insert(0, task.get('interval_seconds', '600'))
             weekday_entry.insert(0, task.get('weekday', '每周:1234567'))
-            date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            date_range_entry.insert(0, task.get('date_range', '2025-01-01 ~ 2099-12-31'))
             delay_var.set(task.get('delay', 'ontime'))
             toggle_resolution_combo()
         else:
@@ -3008,7 +3047,7 @@ class TimedBroadcastApp:
             interval_first_entry.insert(0, "1")
             interval_seconds_entry.insert(0, "600")
             weekday_entry.insert(0, "每周:1234567")
-            date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
+            date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
 
         def save_task():
             video_path = video_single_entry.get().strip() if video_type_var.get() == "single" else video_folder_entry.get().strip()
@@ -3273,7 +3312,7 @@ class TimedBroadcastApp:
             start_time_entry.insert(0, task.get('time', ''))
             repeat_entry.insert(0, task.get('repeat', '1'))
             weekday_entry.insert(0, task.get('weekday', '每周:1234567'))
-            date_range_entry.insert(0, task.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            date_range_entry.insert(0, task.get('date_range', '2025-01-01 ~ 2099-12-31'))
             delay_var.set(task.get('delay', 'delay'))
             bg_image_var.set(task.get('bg_image_enabled', 0))
             bg_image_path_var.set(task.get('bg_image_path', ''))
@@ -3281,7 +3320,7 @@ class TimedBroadcastApp:
         else:
             speed_entry.insert(0, "0"); pitch_entry.insert(0, "0"); volume_entry.insert(0, "80")
             prompt_var.set(0); prompt_volume_var.set("80"); bgm_var.set(0); bgm_volume_var.set("40")
-            repeat_entry.insert(0, "1"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2000-01-01 ~ 2099-12-31")
+            repeat_entry.insert(0, "1"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
 
         ad_params = {
             'dialog': dialog,
@@ -4088,7 +4127,7 @@ class TimedBroadcastApp:
         to_date_entry.pack(side=LEFT, padx=5)
         self._bind_mousewheel_to_entry(to_date_entry, self._handle_date_scroll)
         try: start, end = date_range_entry.get().split('~'); from_date_entry.insert(0, start.strip()); to_date_entry.insert(0, end.strip())
-        except (ValueError, IndexError): from_date_entry.insert(0, "2000-01-01"); to_date_entry.insert(0, "2099-12-31")
+        except (ValueError, IndexError): from_date_entry.insert(0, "2025-01-01"); to_date_entry.insert(0, "2099-12-31")
         ttk.Label(main_frame, text="格式: YYYY-MM-DD", font=self.font_11, bootstyle="secondary").pack(pady=10)
         bottom_frame = ttk.Frame(main_frame); bottom_frame.pack(pady=10)
         def confirm():
@@ -4553,17 +4592,61 @@ class TimedBroadcastApp:
             messagebox.showwarning("内容为空", "请输入要播报的文字内容。", parent=self.root)
             return
             
-        # 保存当前文字内容到 settings 字典，以便下次加载
         self.settings["intercut_text"] = text_content
-        self.save_settings() # 调用保存，写入文件
+        self.save_settings()
 
+        # --- 使用自定义对话框代替 simpledialog ---
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("设置播放次数")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        result_queue = queue.Queue() # 用于线程安全地获取结果
+
+        def cleanup_and_destroy(result=None):
+            result_queue.put(result)
+            self.root.attributes('-disabled', False)
+            dialog.destroy()
+            self.root.focus_force()
+
+        main_frame = ttk.Frame(dialog, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(main_frame, text="请输入要循环播报的次数:").pack(pady=(0, 5))
+        
+        repeat_entry = ttk.Entry(main_frame, font=self.font_11, width=10)
+        repeat_entry.pack(pady=5)
+        repeat_entry.insert(0, "1")
+        repeat_entry.focus_set()
+        repeat_entry.selection_range(0, tk.END)
+
+        def on_confirm():
+            try:
+                val = int(repeat_entry.get())
+                if not (1 <= val <= 100):
+                    raise ValueError
+                cleanup_and_destroy(val)
+            except (ValueError, TypeError):
+                messagebox.showerror("输入错误", "请输入一个 1 到 100 之间的整数。", parent=dialog)
+
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=10)
+        ttk.Button(btn_frame, text="确定", command=on_confirm, bootstyle="primary").pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="取消", command=lambda: cleanup_and_destroy(None)).pack(side=tk.LEFT, padx=10)
+
+        dialog.protocol("WM_DELETE_WINDOW", lambda: cleanup_and_destroy(None))
+        dialog.bind('<Return>', lambda event: on_confirm())
+        
+        self.center_window(dialog)
+        self.root.wait_window(dialog) # 等待对话框关闭
+        
         try:
-            # 弹出输入框获取次数
-            repeat_count = simpledialog.askinteger("设置播放次数", "请输入要循环播报的次数:", 
-                                                 parent=self.root, initialvalue=1, minvalue=1, maxvalue=100)
-            if repeat_count is None:
-                return # 用户点击了取消
-        except:
+            repeat_count = result_queue.get_nowait()
+        except queue.Empty:
+            repeat_count = None
+
+        if repeat_count is None:
             return
 
         voice_params = {'voice': voice, 'speed': speed, 'pitch': pitch, 'volume': '100'}
@@ -4609,7 +4692,9 @@ class TimedBroadcastApp:
 
     def _speak_text_worker(self, text, voice_params, repeat_count, done_callback, stop_event):
         """在后台线程中执行直接语音合成和播放，并响应停止事件"""
-        pythoncom.CoInitialize()
+        # --- 关键修复 1：使用多线程单元模型 ---
+        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
+        speaker = None # 预先定义
         try:
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
             
@@ -4629,15 +4714,12 @@ class TimedBroadcastApp:
                 self.log(f"正在进行第 {i+1}/{repeat_count} 次插播...")
                 
                 # SVSF_ASYNC (1) | SVSF_PURGEBEFORESPEAK (2)
-                # 这个组合可以开始异步播放，并清除之前的任何残留队列
                 flags = 1 | 2 
                 speaker.Speak(xml_text, flags)
 
-                # 循环检查状态，而不是阻塞等待
-                while speaker.Status.RunningState == 2: # 2 = SVSIsSpeaking
+                while speaker.Status.RunningState == 2:
                     if stop_event.is_set():
-                        # 收到停止信号，立即清空语音队列以中断播报
-                        speaker.Speak("", 3) # 3 = SVSFPurgeBeforeSpeak
+                        speaker.Speak("", 3)
                         self.log("插播被用户紧急停止！")
                         break
                     time.sleep(0.1)
@@ -4647,6 +4729,9 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"插播语音时发生错误: {e}")
         finally:
+            # --- 关键修复 2：确保 COM 对象被释放 ---
+            if speaker:
+                del speaker
             self.root.after(0, done_callback)
             pythoncom.CoUninitialize()
 
@@ -5470,6 +5555,7 @@ class TimedBroadcastApp:
     def load_settings(self):
         defaults = {
             "app_font": "Microsoft YaHei",
+            "app_theme": "litera", # <--- 新增此行，'litera' 是默认主题
             "autostart": False, "start_minimized": False, "lock_on_start": False,
             "daily_shutdown_enabled": False, "daily_shutdown_time": "23:00:00",
             "weekly_shutdown_enabled": False, "weekly_shutdown_days": "每周:12345", "weekly_shutdown_time": "23:30:00",
@@ -5501,6 +5587,7 @@ class TimedBroadcastApp:
 
             self.settings.update({
                 "app_font": self.font_var.get(),
+                "app_theme": self.theme_var.get(), # <--- 新增此行
                 "autostart": self.autostart_var.get(),
                 "start_minimized": self.start_minimized_var.get(),
                 "lock_on_start": self.lock_on_start_var.get(),
@@ -6444,14 +6531,14 @@ class TimedBroadcastApp:
             onetime_time_entry.insert(0, t)
             recurring_time_entry.insert(0, todo_to_edit.get('start_times', ''))
             recurring_weekday_entry.insert(0, todo_to_edit.get('weekday', '每周:1234567'))
-            recurring_daterange_entry.insert(0, todo_to_edit.get('date_range', '2000-01-01 ~ 2099-12-31'))
+            recurring_daterange_entry.insert(0, todo_to_edit.get('date_range', '2025-01-01 ~ 2099-12-31'))
             recurring_interval_entry.insert(0, todo_to_edit.get('interval_minutes', '0'))
         else:
             onetime_date_entry.insert(0, now.strftime('%Y-%m-%d'))
             onetime_time_entry.insert(0, (now + timedelta(minutes=5)).strftime('%H:%M:%S'))
             recurring_time_entry.insert(0, now.strftime('%H:%M:%S'))
             recurring_weekday_entry.insert(0, '每周:1234567')
-            recurring_daterange_entry.insert(0, '2000-01-01 ~ 2099-12-31')
+            recurring_daterange_entry.insert(0, '2025-01-01 ~ 2099-12-31')
             recurring_interval_entry.insert(0, '0')
 
         toggle_frames()
@@ -6941,7 +7028,19 @@ class TimedBroadcastApp:
 
 
 def main():
-    root = ttk.Window(themename="litera")
+    # 先加载一次设置，以获取保存的主题
+    temp_settings = {}
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                temp_settings = json.load(f)
+        except:
+            pass # 如果加载失败，则使用默认主题
+
+    # 使用保存的主题或默认的 'litera' 来创建窗口
+    saved_theme = temp_settings.get("app_theme", "litera")
+    root = ttk.Window(themename=saved_theme)
+    
     app = TimedBroadcastApp(root)
     root.mainloop()
 
