@@ -3931,39 +3931,46 @@ class TimedBroadcastApp:
         return result[0]
 
     def _show_batch_add_time_dialog(self, parent_dialog):
-        """创建一个模态对话框，用于批量添加时间点。"""
-        dialog = ttk.Toplevel(parent_dialog)
+        """创建一个模态对话框，用于批量添加时间点（已修复UI和死锁问题）。"""
+        dialog = ttk.Toplevel(self.root) # 父窗口始终是主窗口，以确保行为一致
         dialog.title("批量添加时间")
         dialog.resizable(False, False)
-        dialog.transient(parent_dialog)
+        dialog.transient(self.root) # 依附于主窗口
         dialog.attributes('-topmost', True)
-        parent_dialog.attributes('-disabled', True)
+        self.root.attributes('-disabled', True) # 禁用主窗口
 
+        # 使用队列在主线程间安全地传递结果
         result_queue = queue.Queue()
 
         def cleanup_and_destroy(result=None):
             result_queue.put(result)
-            parent_dialog.attributes('-disabled', False)
+            self.root.attributes('-disabled', False) # 恢复主窗口
             dialog.destroy()
-            parent_dialog.focus_force()
+            self.root.focus_force()
 
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
         main_frame.columnconfigure(1, weight=1)
 
-        labels = ["每 (分钟):", "间隔 (分钟):", "添加次数:"]
+        # --- 输入框 ---
+        labels_and_defaults = [
+            ("每 (分钟):", "40"),
+            ("间隔 (分钟):", "10"),
+            ("添加次数:", "3")
+        ]
         entries = {}
-        for i, text in enumerate(labels):
+        for i, (text, default_val) in enumerate(labels_and_defaults):
             ttk.Label(main_frame, text=text, font=self.font_11).grid(row=i, column=0, sticky='w', pady=5, padx=5)
             entry = ttk.Entry(main_frame, font=self.font_11, width=10)
             entry.grid(row=i, column=1, sticky='ew', pady=5, padx=5)
+            entry.insert(0, default_val)
+            # 将 Entry 对象存起来，使用简化的键
             entries[text.split(' ')[0]] = entry
 
         entries["每"].focus_set()
-        entries["每"].insert(0, "45")
-        entries["间隔"].insert(0, "10")
-        entries["添加"].insert(0, "3")
+        entries["每"].selection_range(0, tk.END)
 
+        # --- 确认和取消按钮 ---
         def on_confirm():
             try:
                 every_min = int(entries["每"].get())
@@ -3976,14 +3983,17 @@ class TimedBroadcastApp:
                 messagebox.showerror("输入错误", "所有输入项都必须是有效的正整数（间隔可以为0）。", parent=dialog)
 
         btn_frame = ttk.Frame(main_frame)
-        btn_frame.grid(row=len(labels), column=0, columnspan=2, pady=(15, 0))
+        btn_frame.grid(row=len(labels_and_defaults), column=0, columnspan=2, pady=(15, 0))
         ttk.Button(btn_frame, text="确定", command=on_confirm, bootstyle="primary").pack(side=tk.LEFT, padx=10)
         ttk.Button(btn_frame, text="取消", command=lambda: cleanup_and_destroy(None)).pack(side=tk.LEFT, padx=10)
 
+        # --- 窗口关闭协议和快捷键 ---
         dialog.protocol("WM_DELETE_WINDOW", lambda: cleanup_and_destroy(None))
         dialog.bind('<Return>', lambda event: on_confirm())
+        dialog.bind('<Escape>', lambda event: cleanup_and_destroy(None))
         
-        self.center_window(dialog, parent=parent_dialog)
+        # --- 居中显示 ---
+        self.center_window(dialog, parent=self.root)
         
         # 使用 wait_window 来阻塞，直到对话框关闭
         self.root.wait_window(dialog)
@@ -4682,7 +4692,7 @@ class TimedBroadcastApp:
 
     def _intercut_worker(self):
         """
-        专用于处理插播任务的后台线程（最终版：彻底修复死锁）。
+        专用于处理插播任务的后台线程（最终版：融合方案，彻底解决所有问题）。
         """
         pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
         speaker = None
@@ -4690,18 +4700,21 @@ class TimedBroadcastApp:
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
             
             while self.running:
-                # 阻塞等待，直到有插播任务进来
-                task_data = self.intercut_queue.get()
+                task_data = None
+                progress_dialog = None
+                was_muted = False
                 
+                # --- 顶级 try...finally 结构，保证清理逻辑的绝对执行 ---
                 try:
+                    task_data = self.intercut_queue.get()
                     self.log("接收到插播任务，开始执行...")
-                    was_muted = self.is_muted
-                    
-                    # --- ↓↓↓ 这是最核心的逻辑修正：不再互相等待 ↓↓↓ ---
 
-                    # 1. 在主线程中创建UI，并获取弹窗和停止按钮的引用
-                    ui_elements = queue.Queue()
+                    was_muted = self.is_muted
+                    ui_setup_done = queue.Queue()
+
+                    # 在主线程中设置UI
                     def setup_ui():
+                        nonlocal progress_dialog
                         if not was_muted:
                             self.toggle_mute_all()
                         
@@ -4723,15 +4736,14 @@ class TimedBroadcastApp:
                         stop_btn.pack(padx=20, pady=(0, 20), fill=tk.X)
                         
                         self.center_window(dialog)
-                        ui_elements.put(dialog) # 将创建好的对话框放入队列
+                        progress_dialog = dialog
+                        ui_setup_done.put(True)
 
                     self.root.after(0, setup_ui)
-                    progress_dialog = ui_elements.get() # 后台线程等待主线程完成UI创建
+                    ui_setup_done.get()
 
-                    # 2. 执行语音播报 (这部分逻辑不变)
-                    text = task_data['text']
-                    params = task_data['params']
-                    repeats = task_data['repeats']
+                    # 语音播报逻辑
+                    text, params, repeats = task_data['text'], task_data['params'], task_data['repeats']
                     final_text_to_speak = (text + "。 ") * repeats
                     
                     all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
@@ -4749,21 +4761,21 @@ class TimedBroadcastApp:
                             speaker.Speak("", 3)
                             self.log("插播被用户紧急停止！")
                             break
-                        # PumpWaitingMessages 在这里可能不是必需的，但保留无害
-                        pythoncom.PumpWaitingMessages() 
-                        time.sleep(0.05)
+                        time.sleep(0.1)
 
                 finally:
-                    # 3. 无论成功、失败还是中断，都保证在主线程执行清理
-                    def cleanup_ui():
-                        if progress_dialog and progress_dialog.winfo_exists():
-                            progress_dialog.destroy()
-                        if not was_muted and self.is_muted:
+                    # 这个 finally 块确保了无论 try 块如何结束（正常、break、异常），清理工作都会被调度
+                    def cleanup_ui(dialog_to_close, mute_status_before, task_completed):
+                        if dialog_to_close and dialog_to_close.winfo_exists():
+                            dialog_to_close.destroy()
+                        if not mute_status_before and self.is_muted:
                              self.toggle_mute_all()
                         self.log("插播任务已完成或被中断。")
-                        self.intercut_queue.task_done()
+                        if task_completed:
+                            self.intercut_queue.task_done()
                     
-                    self.root.after(0, cleanup_ui)
+                    # 使用 lambda 将 progress_dialog 的当前引用作为“快照”参数传递
+                    self.root.after(0, lambda: cleanup_ui(progress_dialog, was_muted, task_data is not None))
                     self.intercut_stop_event.clear()
         
         except Exception as e:
