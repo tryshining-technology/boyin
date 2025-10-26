@@ -343,9 +343,20 @@ class TimedBroadcastApp:
         # 添加一个分隔符，让底部按钮和主导航分开
         ttk.Separator(self.nav_frame, orient=HORIZONTAL).pack(side=BOTTOM, fill=X, pady=5, padx=5)
 
-        # 创建一个Frame来容纳底部的三个按钮
+# 创建一个Frame来容纳底部的按钮
         bottom_btn_frame = ttk.Frame(self.nav_frame, style='light.TFrame')
-        bottom_btn_frame.pack(side=BOTTOM, fill=X, padx=5, pady=(0, 10)) # 增加一点底部间距
+        bottom_btn_frame.pack(side=BOTTOM, fill=X, padx=5, pady=(0, 10))
+
+        # --- ↓↓↓ 在这里添加新按钮 ↓↓↓ ---
+        # 0. 一键停止按钮
+        stop_button = ttk.Button(
+            bottom_btn_frame, 
+            text="一键停止", 
+            bootstyle="warning-outline", 
+            command=self.stop_current_playback  # 直接复用已有的方法
+        )
+        stop_button.pack(fill=X, pady=2)
+        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
 
         # 1. 一键静音按钮
         self.mute_button = ttk.Button(
@@ -354,7 +365,7 @@ class TimedBroadcastApp:
             bootstyle="info-outline", 
             command=self.toggle_mute_all
         )
-        self.mute_button.pack(fill=X, pady=2) # 使用pack，fill=X使其水平填满
+        self.mute_button.pack(fill=X, pady=2)
 
         # 2. 最小化按钮
         minimize_button = ttk.Button(
@@ -4566,85 +4577,91 @@ class TimedBroadcastApp:
         它拥有唯一的 speaker 对象，从根本上避免COM和音频设备冲突。
         """
         pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
-        speaker = None
-        try:
-            speaker = win32com.client.Dispatch("SAPI.SpVoice")
-            
-            while self.running:
+        
+        while self.running:
+            try:
+                # 阻塞等待，直到有插播任务进来
+                task_data = self.intercut_queue.get()
+
+                # --- 收到任务，开始执行插播流程 ---
+                self.log("接收到插播任务，开始执行...")
+
+                # 1. 在主线程中显示模态窗口和静音
+                was_muted = self.is_muted
+                ui_setup_done = queue.Queue()
+
+                def setup_ui():
+                    if not was_muted:
+                        self.toggle_mute_all()
+
+                    progress_dialog = ttk.Toplevel(self.root)
+                    progress_dialog.title("插播进行中")
+                    progress_dialog.resizable(False, False)
+                    progress_dialog.transient(self.root)
+                    progress_dialog.attributes('-topmost', True)
+                    progress_dialog.grab_set()
+                    progress_dialog.protocol("WM_DELETE_WINDOW", lambda: None)
+                    
+                    ttk.Label(progress_dialog, text="正在插播中,请等待结束...", font=self.font_12_bold, bootstyle="info").pack(padx=40, pady=(20, 10))
+                    
+                    def stop_intercut_now():
+                        self.log("用户请求紧急停止插播...")
+                        self.intercut_stop_event.set()
+                    
+                    stop_btn = ttk.Button(progress_dialog, text="紧急停止", bootstyle="danger", command=stop_intercut_now)
+                    stop_btn.pack(padx=20, pady=(0, 20), fill=tk.X)
+                    
+                    self.center_window(progress_dialog)
+                    ui_setup_done.put(progress_dialog)
+
+                self.root.after(0, setup_ui)
+                progress_dialog = ui_setup_done.get()
+
+                # 2. 执行语音播报
+                text = task_data['text']
+                params = task_data['params']
+                repeats = task_data['repeats']
+                
                 try:
-                    # 阻塞等待，直到有插播任务进来
-                    task_data = self.intercut_queue.get()
-
-                    # --- 收到任务，开始执行插播流程 ---
-                    self.log("接收到插播任务，开始执行...")
-
-                    # 1. 在主线程中显示模态窗口和静音
-                    was_muted = self.is_muted
-                    ui_setup_done = queue.Queue()
-
-                    def setup_ui():
-                        if not was_muted:
-                            self.toggle_mute_all()
-
-                        progress_dialog = ttk.Toplevel(self.root)
-                        progress_dialog.title("插播进行中")
-                        progress_dialog.resizable(False, False)
-                        progress_dialog.transient(self.root)
-                        progress_dialog.attributes('-topmost', True)
-                        progress_dialog.grab_set()
-                        progress_dialog.protocol("WM_DELETE_WINDOW", lambda: None)
-                        
-                        ttk.Label(progress_dialog, text="正在插播中...", font=self.font_12_bold, bootstyle="info").pack(padx=40, pady=(20, 10))
-                        
-                        def stop_intercut_now():
-                            self.log("用户请求紧急停止插播...")
-                            self.intercut_stop_event.set()
-                        
-                        stop_btn = ttk.Button(progress_dialog, text="紧急停止", bootstyle="danger", command=stop_intercut_now)
-                        stop_btn.pack(padx=20, pady=(0, 20), fill=tk.X)
-                        
-                        self.center_window(progress_dialog)
-                        ui_setup_done.put(progress_dialog)
-
-                    self.root.after(0, setup_ui)
-                    progress_dialog = ui_setup_done.get()
-
-                    # 2. 执行语音播报
-                    text = task_data['text']
-                    params = task_data['params']
-                    repeats = task_data['repeats']
-
-                    all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
-                    if (voice_desc := params.get('voice')) in all_voices:
-                        speaker.Voice = all_voices[voice_desc]
-                    speaker.Volume = int(params.get('volume', 100))
-                    escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    xml_text = f"<rate absspeed='{params.get('speed', '0')}'><pitch middle='{params.get('pitch', '0')}'>{escaped_text}</pitch></rate>"
-
                     for i in range(repeats):
                         if self.intercut_stop_event.is_set():
                             self.log("插播在循环开始前被停止。")
                             break
-                        
-                        self.log(f"正在进行第 {i+1}/{repeats} 次插播...")
-                        speaker.Speak(xml_text, 1 | 2)
 
-                        # --- ↓↓↓ 这是最关键的修复：给予缓冲并使用更健壮的循环条件 ↓↓↓ ---
-                        time.sleep(0.1) # 等待一小段时间，让 SAPI 引擎有时间更新状态
+                        self.log(f"正在进行第 {i+1}/{repeats} 次插播...")
                         
-                        # 循环条件现在检查“正在准备说”或“正在说”
-                        while speaker.Status.RunningState in [1, 2]:
-                            if self.intercut_stop_event.is_set():
-                                speaker.Speak("", 3)
-                                self.log("插播被用户紧急停止！")
-                                break
-                            time.sleep(0.1)
-                        # --- ↑↑↑ 修复结束 ↑↑↑ ---
-                        
+                        # --- ↓↓↓ 这是最核心的修正：在循环内部创建和销毁 speaker 对象 ↓↓↓ ---
+                        speaker = None
+                        try:
+                            speaker = win32com.client.Dispatch("SAPI.SpVoice")
+                            
+                            all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
+                            if (voice_desc := params.get('voice')) in all_voices:
+                                speaker.Voice = all_voices[voice_desc]
+                            speaker.Volume = int(params.get('volume', 100))
+                            
+                            escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                            xml_text = f"<rate absspeed='{params.get('speed', '0')}'><pitch middle='{params.get('pitch', '0')}'>{escaped_text}</pitch></rate>"
+                            
+                            speaker.Speak(xml_text, 1 | 2) # SVSF_ASYNC | SVSF_PURGEBEFORESPEAK
+                            
+                            time.sleep(0.1) # 给予SAPI状态更新的缓冲时间
+
+                            while speaker.Status.RunningState in [1, 2]: # 检查“准备中”或“播放中”
+                                if self.intercut_stop_event.is_set():
+                                    speaker.Speak("", 3) # Purge
+                                    self.log("插播被用户紧急停止！")
+                                    break
+                                time.sleep(0.1)
+                        finally:
+                            if speaker:
+                                del speaker
+                        # --- ↑↑↑ 修正结束 ↑↑↑ ---
+
                         if self.intercut_stop_event.is_set():
                             break
-                    
-                    # 3. 在主线程中清理UI和恢复音量
+                finally:
+                    # 3. 在主线程中清理UI和恢复音量（无论成功或失败都执行）
                     def cleanup_ui():
                         if progress_dialog.winfo_exists():
                             progress_dialog.destroy()
@@ -4654,19 +4671,14 @@ class TimedBroadcastApp:
 
                     self.root.after(0, cleanup_ui)
 
-                except Exception as e:
-                    self.log(f"插播工作线程内部任务处理错误: {e}")
-                finally:
-                    if 'task_data' in locals():
-                        self.intercut_queue.task_done()
-                    self.intercut_stop_event.clear()
+            except Exception as e:
+                self.log(f"插播工作线程内部任务处理错误: {e}")
+            finally:
+                if 'task_data' in locals():
+                    self.intercut_queue.task_done()
+                self.intercut_stop_event.clear()
         
-        except Exception as e:
-            self.log(f"插播工作线程初始化时发生严重错误: {e}")
-        finally:
-            if speaker:
-                del speaker
-            pythoncom.CoUninitialize()
+        pythoncom.CoUninitialize()
 
     def _execute_intercut(self, text, voice, speed, pitch):
         text_content = text.strip()
