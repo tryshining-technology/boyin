@@ -4773,7 +4773,7 @@ class TimedBroadcastApp:
                         pythoncom.PumpWaitingMessages() 
                         time.sleep(0.05)
 
-                     time.sleep(1)
+                    time.sleep(1)
 
                 finally:
                     # 3. 无论成功、失败还是中断，都保证在主线程执行清理
