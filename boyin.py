@@ -4571,7 +4571,7 @@ class TimedBroadcastApp:
                     try: self.playback_command_queue.get_nowait()
                     except queue.Empty: break
 
-def _intercut_worker(self):
+    def _intercut_worker(self):
         """
         专用于处理插播任务的后台线程（最终版：拼接文本 + 可靠清理）。
         """
