@@ -810,7 +810,7 @@ class TimedBroadcastApp:
         start_time_entry = ttk.Entry(time_frame, font=self.font_11)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
-        ttk.Label(time_frame, text="《可多个,用英文逗号,隔开》").grid(row=0, column=2, sticky='w', padx=5)
+        ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
 
         ttk.Label(time_frame, text="停止时间:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
@@ -1198,7 +1198,7 @@ class TimedBroadcastApp:
         start_time_entry = ttk.Entry(time_frame, font=self.font_11)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
-        ttk.Label(time_frame, text="《可多个,用英文逗号,隔开》").grid(row=0, column=2, sticky='w', padx=5)
+        ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
 
         ttk.Label(time_frame, text="停止时间:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
@@ -2731,9 +2731,10 @@ class TimedBroadcastApp:
         start_time_entry = ttk.Entry(time_frame, font=self.font_11)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
-        ttk.Label(time_frame, text="《可多个,用英文逗号,隔开》").grid(row=0, column=2, sticky='w', padx=5)
+        ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
-        
+        ttk.Button(time_frame, text="批量添加", command=lambda: self._on_batch_add_time_click(start_time_entry, dialog), bootstyle="outline-info").grid(row=0, column=4, padx=5)
+
         interval_var = tk.StringVar(value="first")
         ttk.Label(time_frame, text="间隔播报:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
         interval_frame1 = ttk.Frame(time_frame)
@@ -2960,8 +2961,9 @@ class TimedBroadcastApp:
         start_time_entry = ttk.Entry(time_frame, font=self.font_11)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
-        ttk.Label(time_frame, text="《可多个,用英文逗号,隔开》").grid(row=0, column=2, sticky='w', padx=5)
+        ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
+        ttk.Button(time_frame, text="批量添加", command=lambda: self._on_batch_add_time_click(start_time_entry, dialog), bootstyle="outline-info").grid(row=0, column=4, padx=5)
 
         interval_var = tk.StringVar(value="first")
         ttk.Label(time_frame, text="间隔播报:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
@@ -3250,9 +3252,10 @@ class TimedBroadcastApp:
         start_time_entry = ttk.Entry(time_frame, font=self.font_11)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
-        ttk.Label(time_frame, text="《可多个,用英文逗号,隔开》").grid(row=0, column=2, sticky='w', padx=5)
+        ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
-        
+        ttk.Button(time_frame, text="批量添加", command=lambda: self._on_batch_add_time_click(start_time_entry, dialog), bootstyle="outline-info").grid(row=0, column=4, padx=5)
+
         ttk.Label(time_frame, text="播 n 遍:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
         repeat_entry = ttk.Entry(time_frame, font=self.font_11, width=12)
         repeat_entry.grid(row=1, column=1, sticky='w', padx=5, pady=2)
@@ -3926,6 +3929,112 @@ class TimedBroadcastApp:
         self.center_window(dialog, parent=self.root)
         self.root.wait_window(dialog)
         return result[0]
+
+    def _show_batch_add_time_dialog(self, parent_dialog):
+        """创建一个模态对话框，用于批量添加时间点。"""
+        dialog = ttk.Toplevel(parent_dialog)
+        dialog.title("批量添加时间")
+        dialog.resizable(False, False)
+        dialog.transient(parent_dialog)
+        dialog.attributes('-topmost', True)
+        parent_dialog.attributes('-disabled', True)
+
+        result_queue = queue.Queue()
+
+        def cleanup_and_destroy(result=None):
+            result_queue.put(result)
+            parent_dialog.attributes('-disabled', False)
+            dialog.destroy()
+            parent_dialog.focus_force()
+
+        main_frame = ttk.Frame(dialog, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        main_frame.columnconfigure(1, weight=1)
+
+        labels = ["每 (分钟):", "间隔 (分钟):", "添加次数:"]
+        entries = {}
+        for i, text in enumerate(labels):
+            ttk.Label(main_frame, text=text, font=self.font_11).grid(row=i, column=0, sticky='w', pady=5, padx=5)
+            entry = ttk.Entry(main_frame, font=self.font_11, width=10)
+            entry.grid(row=i, column=1, sticky='ew', pady=5, padx=5)
+            entries[text.split(' ')[0]] = entry
+
+        entries["每"].focus_set()
+        entries["每"].insert(0, "45")
+        entries["间隔"].insert(0, "10")
+        entries["添加"].insert(0, "3")
+
+        def on_confirm():
+            try:
+                every_min = int(entries["每"].get())
+                interval_min = int(entries["间隔"].get())
+                add_count = int(entries["添加"].get())
+                if every_min <= 0 or interval_min < 0 or add_count <= 0:
+                    raise ValueError
+                cleanup_and_destroy((every_min, interval_min, add_count))
+            except (ValueError, TypeError):
+                messagebox.showerror("输入错误", "所有输入项都必须是有效的正整数（间隔可以为0）。", parent=dialog)
+
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.grid(row=len(labels), column=0, columnspan=2, pady=(15, 0))
+        ttk.Button(btn_frame, text="确定", command=on_confirm, bootstyle="primary").pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="取消", command=lambda: cleanup_and_destroy(None)).pack(side=tk.LEFT, padx=10)
+
+        dialog.protocol("WM_DELETE_WINDOW", lambda: cleanup_and_destroy(None))
+        dialog.bind('<Return>', lambda event: on_confirm())
+        
+        self.center_window(dialog, parent=parent_dialog)
+        
+        # 使用 wait_window 来阻塞，直到对话框关闭
+        self.root.wait_window(dialog)
+        
+        try:
+            return result_queue.get_nowait()
+        except queue.Empty:
+            return None
+
+    def _on_batch_add_time_click(self, start_time_entry, parent_dialog):
+        """“批量添加”按钮的点击事件处理函数。"""
+        
+        # 1. 前置条件检查
+        current_text = start_time_entry.get().strip()
+        if not current_text:
+            messagebox.showwarning("操作无效", "请先在“开始时间”框中至少设置一个起始时间点。", parent=parent_dialog)
+            return
+
+        first_time_str = current_text.split(',')[0].strip()
+        base_time = self._normalize_time_string(first_time_str)
+        
+        if not base_time:
+            messagebox.showerror("格式错误", f"无法识别起始时间点 '{first_time_str}'。\n请确保格式为 HH:MM:SS。", parent=parent_dialog)
+            return
+
+        # 2. 弹出对话框获取参数
+        params = self._show_batch_add_time_dialog(parent_dialog)
+        if not params:
+            self.log("用户取消了批量添加时间操作。")
+            return
+
+        # 3. 核心计算
+        every_min, interval_min, add_count = params
+        all_times = {base_time} # 使用集合自动去重
+        current_time_obj = datetime.strptime(base_time, "%H:%M:%S")
+
+        for _ in range(add_count):
+            current_time_obj += timedelta(minutes=every_min)
+            all_times.add(current_time_obj.strftime("%H:%M:%S"))
+            
+            if interval_min > 0: # 只有当间隔大于0时才添加
+                current_time_obj += timedelta(minutes=interval_min)
+                all_times.add(current_time_obj.strftime("%H:%M:%S"))
+
+        # 4. 排序并更新输入框
+        sorted_times = sorted(list(all_times))
+        final_string = ", ".join(sorted_times)
+        
+        start_time_entry.delete(0, tk.END)
+        start_time_entry.insert(0, final_string)
+        self.log(f"批量生成了 {len(sorted_times)} 个时间点。")
 
     def clear_all_tasks(self, delete_associated_files=True):
         if not self.tasks: return
