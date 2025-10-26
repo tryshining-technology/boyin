@@ -4573,28 +4573,26 @@ class TimedBroadcastApp:
 
     def _intercut_worker(self):
         """
-        专用于处理插播任务的后台线程（最终版：拼接文本 + 可靠清理）。
+        专用于处理插播任务的后台线程（最终版：彻底修复死锁）。
         """
         pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
         speaker = None
         try:
-            # 在线程启动时，只创建一次 speaker 对象，长期持有，保证状态稳定
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
             
             while self.running:
-                task_data = None
-                progress_dialog = None
-                was_muted = False
+                # 阻塞等待，直到有插播任务进来
+                task_data = self.intercut_queue.get()
                 
                 try:
-                    task_data = self.intercut_queue.get()
                     self.log("接收到插播任务，开始执行...")
-
                     was_muted = self.is_muted
-                    ui_setup_done = queue.Queue()
+                    
+                    # --- ↓↓↓ 这是最核心的逻辑修正：不再互相等待 ↓↓↓ ---
 
+                    # 1. 在主线程中创建UI，并获取弹窗和停止按钮的引用
+                    ui_elements = queue.Queue()
                     def setup_ui():
-                        nonlocal progress_dialog
                         if not was_muted:
                             self.toggle_mute_all()
                         
@@ -4606,7 +4604,7 @@ class TimedBroadcastApp:
                         dialog.grab_set()
                         dialog.protocol("WM_DELETE_WINDOW", lambda: None)
                         
-                        ttk.Label(dialog, text="正在插播中...", font=self.font_12_bold, bootstyle="info").pack(padx=40, pady=(20, 10))
+                        ttk.Label(dialog, text="正在插播中,请等待结束或紧急停止...", font=self.font_12_bold, bootstyle="info").pack(padx=40, pady=(20, 10))
                         
                         def stop_intercut_now():
                             self.log("用户请求紧急停止插播...")
@@ -4616,24 +4614,21 @@ class TimedBroadcastApp:
                         stop_btn.pack(padx=20, pady=(0, 20), fill=tk.X)
                         
                         self.center_window(dialog)
-                        progress_dialog = dialog
-                        ui_setup_done.put(True)
+                        ui_elements.put(dialog) # 将创建好的对话框放入队列
 
                     self.root.after(0, setup_ui)
-                    ui_setup_done.get()
+                    progress_dialog = ui_elements.get() # 后台线程等待主线程完成UI创建
 
-                    # --- 语音播报逻辑：拼接文本，单次播报 ---
+                    # 2. 执行语音播报 (这部分逻辑不变)
                     text = task_data['text']
                     params = task_data['params']
                     repeats = task_data['repeats']
-
                     final_text_to_speak = (text + "。 ") * repeats
                     
                     all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
                     if (voice_desc := params.get('voice')) in all_voices:
                         speaker.Voice = all_voices[voice_desc]
                     speaker.Volume = int(params.get('volume', 100))
-                    
                     escaped_text = final_text_to_speak.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                     xml_text = f"<rate absspeed='{params.get('speed', '0')}'><pitch middle='{params.get('pitch', '0')}'>{escaped_text}</pitch></rate>"
                     
@@ -4645,19 +4640,19 @@ class TimedBroadcastApp:
                             speaker.Speak("", 3)
                             self.log("插播被用户紧急停止！")
                             break
-                        time.sleep(0.1)
+                        # PumpWaitingMessages 在这里可能不是必需的，但保留无害
+                        pythoncom.PumpWaitingMessages() 
+                        time.sleep(0.05)
 
                 finally:
-                    # --- 关键修正：无论成功、失败还是中断，都保证执行清理 ---
+                    # 3. 无论成功、失败还是中断，都保证在主线程执行清理
                     def cleanup_ui():
-                        nonlocal progress_dialog, was_muted
                         if progress_dialog and progress_dialog.winfo_exists():
                             progress_dialog.destroy()
                         if not was_muted and self.is_muted:
                              self.toggle_mute_all()
                         self.log("插播任务已完成或被中断。")
-                        if task_data:
-                            self.intercut_queue.task_done()
+                        self.intercut_queue.task_done()
                     
                     self.root.after(0, cleanup_ui)
                     self.intercut_stop_event.clear()
