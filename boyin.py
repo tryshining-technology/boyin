@@ -4573,27 +4573,22 @@ class TimedBroadcastApp:
 
     def _intercut_worker(self):
         """
-        专用于处理插播任务的、长期存活的后台线程。
-        它拥有唯一的 speaker 对象，从根本上避免COM和音频设备冲突。
+        专用于处理插播任务的、长期存活的后台线程（最终死锁和COM模型修复版）。
         """
-        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
-        
         while self.running:
+            task_data = None
             try:
-                # 阻塞等待，直到有插播任务进来
                 task_data = self.intercut_queue.get()
-
-                # --- 收到任务，开始执行插播流程 ---
+                
                 self.log("接收到插播任务，开始执行...")
 
-                # 1. 在主线程中显示模态窗口和静音
                 was_muted = self.is_muted
                 ui_setup_done = queue.Queue()
 
                 def setup_ui():
                     if not was_muted:
                         self.toggle_mute_all()
-
+                    
                     progress_dialog = ttk.Toplevel(self.root)
                     progress_dialog.title("插播进行中")
                     progress_dialog.resizable(False, False)
@@ -4617,20 +4612,21 @@ class TimedBroadcastApp:
                 self.root.after(0, setup_ui)
                 progress_dialog = ui_setup_done.get()
 
-                # 2. 执行语音播报
+                # --- 语音播报逻辑 ---
                 text = task_data['text']
                 params = task_data['params']
                 repeats = task_data['repeats']
                 
-                try:
+                def perform_speech():
                     for i in range(repeats):
                         if self.intercut_stop_event.is_set():
                             self.log("插播在循环开始前被停止。")
                             break
-
+                        
                         self.log(f"正在进行第 {i+1}/{repeats} 次插播...")
                         
-                        # --- ↓↓↓ 这是最核心的修正：在循环内部创建和销毁 speaker 对象 ↓↓↓ ---
+                        # --- ↓↓↓ 这是最核心的修正：将COM初始化也移入循环 ↓↓↓ ---
+                        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
                         speaker = None
                         try:
                             speaker = win32com.client.Dispatch("SAPI.SpVoice")
@@ -4643,42 +4639,42 @@ class TimedBroadcastApp:
                             escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                             xml_text = f"<rate absspeed='{params.get('speed', '0')}'><pitch middle='{params.get('pitch', '0')}'>{escaped_text}</pitch></rate>"
                             
-                            speaker.Speak(xml_text, 1 | 2) # SVSF_ASYNC | SVSF_PURGEBEFORESPEAK
+                            speaker.Speak(xml_text, 1 | 2)
+                            time.sleep(0.1)
                             
-                            time.sleep(0.1) # 给予SAPI状态更新的缓冲时间
-
-                            while speaker.Status.RunningState in [1, 2]: # 检查“准备中”或“播放中”
+                            while speaker.Status.RunningState in [1, 2]:
                                 if self.intercut_stop_event.is_set():
-                                    speaker.Speak("", 3) # Purge
+                                    speaker.Speak("", 3)
                                     self.log("插播被用户紧急停止！")
                                     break
                                 time.sleep(0.1)
                         finally:
                             if speaker:
                                 del speaker
+                            pythoncom.CoUninitialize() # 确保每次循环后都反初始化COM
                         # --- ↑↑↑ 修正结束 ↑↑↑ ---
 
                         if self.intercut_stop_event.is_set():
                             break
-                finally:
-                    # 3. 在主线程中清理UI和恢复音量（无论成功或失败都执行）
-                    def cleanup_ui():
-                        if progress_dialog.winfo_exists():
-                            progress_dialog.destroy()
-                        if not was_muted:
-                            self.toggle_mute_all()
-                        self.log("插播任务已完成。")
+                
+                perform_speech()
 
-                    self.root.after(0, cleanup_ui)
+                def cleanup_ui():
+                    if progress_dialog.winfo_exists():
+                        progress_dialog.destroy()
+                    if not was_muted:
+                        self.toggle_mute_all()
+                    self.log("插播任务已完成。")
+                    self.intercut_queue.task_done()
+
+                self.root.after(0, cleanup_ui)
 
             except Exception as e:
-                self.log(f"插播工作线程内部任务处理错误: {e}")
-            finally:
-                if 'task_data' in locals():
+                self.log(f"插播工作线程捕获到错误: {e}")
+                if task_data:
                     self.intercut_queue.task_done()
+            finally:
                 self.intercut_stop_event.clear()
-        
-        pythoncom.CoUninitialize()
 
     def _execute_intercut(self, text, voice, speed, pitch):
         text_content = text.strip()
