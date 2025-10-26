@@ -4682,61 +4682,64 @@ class TimedBroadcastApp:
 
     def _intercut_worker(self):
         """
-        专用于处理插播任务的后台线程（最终版：基于代码B修复清理逻辑）。
+        专用于处理插播任务的后台线程（最终版：借鉴视频播放的可靠UI交互模型）。
         """
-        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
+        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHreaded)
         speaker = None
         try:
-            # 在线程启动时，只创建一次 speaker 对象，长期持有，保证状态稳定
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
             
             while self.running:
-                task_data = None
-                progress_dialog = None
-                was_muted = False
+                # 1. 阻塞等待任务，这部分不变
+                task_data = self.intercut_queue.get()
                 
-                # --- ↓↓↓ 这是最关键的修正：用一个顶级的 try...finally 包裹所有操作 ↓↓↓ ---
+                # 定义一个队列，用于从主线程获取创建好的UI组件引用
+                ui_refs = queue.Queue()
+
+                # -------------------------------------------------------------
+                # 步骤A: 请求主线程创建并显示模态UI
+                # -------------------------------------------------------------
+                def setup_ui_in_main_thread():
+                    # 禁用主窗口
+                    self.root.attributes('-disabled', True)
+
+                    # 创建弹窗
+                    dialog = ttk.Toplevel(self.root)
+                    dialog.title("插播进行中")
+                    dialog.resizable(False, False)
+                    dialog.transient(self.root)
+                    dialog.attributes('-topmost', True)
+                    # 我们不再使用 grab_set()，而是用禁用主窗口的方式
+                    dialog.protocol("WM_DELETE_WINDOW", lambda: None) # 禁用X按钮
+                    
+                    ttk.Label(dialog, text="正在插播中,请等待结束或手动停止...", font=self.font_12_bold, bootstyle="info").pack(padx=40, pady=(20, 10))
+                    
+                    # 定义停止行为
+                    def stop_intercut_now():
+                        self.log("用户请求紧急停止插播...")
+                        self.intercut_stop_event.set()
+                    
+                    stop_btn = ttk.Button(dialog, text="紧急停止", bootstyle="danger", command=stop_intercut_now)
+                    stop_btn.pack(padx=20, pady=(0, 20), fill=tk.X)
+                    
+                    self.center_window(dialog)
+                    dialog.focus_force()
+                    
+                    # 将需要后续操作的dialog对象传回给后台线程
+                    ui_refs.put(dialog)
+
+                self.root.after(0, setup_ui_in_main_thread)
+                # 等待主线程完成UI创建，并获取dialog的引用
+                progress_dialog = ui_refs.get()
+
+                # -------------------------------------------------------------
+                # 步骤B: 在后台线程执行播报，同时主线程被锁定
+                # -------------------------------------------------------------
+                was_muted = self.is_muted
+                if not was_muted:
+                    self.root.after(0, self.toggle_mute_all) # 在主线程中静音
+
                 try:
-                    # 1. 获取任务，这个操作本身在 try 块之外，但在主循环内
-                    task_data = self.intercut_queue.get()
-                    self.log("接收到插播任务，开始执行...")
-
-                    # 2. 在主线程中设置UI，并等待其完成
-                    was_muted = self.is_muted
-                    ui_setup_done = queue.Queue()
-
-                    def setup_ui():
-                        # 使用 nonlocal 明确声明要修改外部作用域的变量
-                        nonlocal progress_dialog
-                        
-                        if not was_muted:
-                            self.toggle_mute_all()
-                        
-                        dialog = ttk.Toplevel(self.root)
-                        dialog.title("插播进行中")
-                        dialog.resizable(False, False)
-                        dialog.transient(self.root)
-                        dialog.attributes('-topmost', True)
-                        dialog.grab_set()
-                        dialog.protocol("WM_DELETE_WINDOW", lambda: None)
-                        
-                        ttk.Label(dialog, text="正在插播中...", font=self.font_12_bold, bootstyle="info").pack(padx=40, pady=(20, 10))
-                        
-                        def stop_intercut_now():
-                            self.log("用户请求紧急停止插播...")
-                            self.intercut_stop_event.set()
-                        
-                        stop_btn = ttk.Button(dialog, text="紧急停止", bootstyle="danger", command=stop_intercut_now)
-                        stop_btn.pack(padx=20, pady=(0, 20), fill=tk.X)
-                        
-                        self.center_window(dialog)
-                        progress_dialog = dialog # 将新创建的对话框赋值给外层变量
-                        ui_setup_done.put(True)
-
-                    self.root.after(0, setup_ui)
-                    ui_setup_done.get() # 等待主线程完成UI创建，确保 progress_dialog 已被赋值
-
-                    # 3. 语音播报逻辑 (保持代码B的正确逻辑)
                     text, params, repeats = task_data['text'], task_data['params'], task_data['repeats']
                     final_text_to_speak = (text + "。 ") * repeats
                     
@@ -4758,22 +4761,27 @@ class TimedBroadcastApp:
                         time.sleep(0.1)
 
                 finally:
-                    # 4. 无论 try 块如何结束（正常、break、异常），都保证执行清理
-                    def cleanup_ui(dialog_to_close, mute_status_before, task_completed):
-                        if dialog_to_close and dialog_to_close.winfo_exists():
-                            dialog_to_close.destroy()
-                        if not mute_status_before and self.is_muted:
+                    # -------------------------------------------------------------
+                    # 步骤C: 请求主线程清理UI和恢复状态
+                    # -------------------------------------------------------------
+                    def cleanup_ui_in_main_thread():
+                        if progress_dialog and progress_dialog.winfo_exists():
+                            progress_dialog.destroy()
+                        if not was_muted and self.is_muted:
                              self.toggle_mute_all()
+                        
+                        # 恢复主窗口
+                        self.root.attributes('-disabled', False)
+                        self.root.focus_force()
+
                         self.log("插播任务已完成或被中断。")
-                        if task_completed:
-                            self.intercut_queue.task_done()
+                        self.intercut_queue.task_done()
                     
-                    # 使用 lambda 将 progress_dialog 的当前引用作为“快照”参数传递
-                    self.root.after(0, lambda: cleanup_ui(progress_dialog, was_muted, task_data is not None))
+                    self.root.after(0, cleanup_ui_in_main_thread)
                     self.intercut_stop_event.clear()
         
         except Exception as e:
-            self.log(f"插播工作线程初始化时发生严重错误: {e}")
+            self.log(f"插播工作线程发生严重错误: {e}")
         finally:
             if speaker:
                 del speaker
