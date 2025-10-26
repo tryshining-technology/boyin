@@ -2732,8 +2732,32 @@ class TimedBroadcastApp:
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
         ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
-        ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
-        ttk.Button(time_frame, text="批量添加", command=lambda: self._on_batch_add_time_click(start_time_entry, dialog), bootstyle="outline-info").grid(row=0, column=4, padx=5)
+        ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5
+
+        # --- ▼▼▼ 批量添加功能的容器 ▼▼▼ ---
+        batch_add_container = ttk.Frame(time_frame)
+        batch_add_container.grid(row=0, column=4, rowspan=3, sticky='n', padx=5) # 放在第0行第4列，向下跨越，靠上对齐
+
+        # 批量添加的输入框
+        batch_interval_frame = ttk.Frame(batch_add_container)
+        batch_interval_frame.pack(pady=(0, 2))
+        ttk.Label(batch_interval_frame, text="每").pack(side=LEFT)
+        batch_interval_entry = ttk.Entry(batch_interval_frame, font=self.font_11, width=4)
+        batch_interval_entry.pack(side=LEFT, padx=(2,2))
+        ttk.Label(batch_interval_frame, text="分钟").pack(side=LEFT)
+
+        batch_count_frame = ttk.Frame(batch_add_container)
+        batch_count_frame.pack(pady=(0, 5))
+        ttk.Label(batch_count_frame, text="共").pack(side=LEFT)
+        batch_count_entry = ttk.Entry(batch_count_frame, font=self.font_11, width=4)
+        batch_count_entry.pack(side=LEFT, padx=(2,2))
+        ttk.Label(batch_count_frame, text="次").pack(side=LEFT)
+
+        # 批量添加的触发按钮
+        ttk.Button(batch_add_container, text="批量添加", 
+                   command=lambda: self._apply_batch_time_addition(start_time_entry, batch_interval_entry, batch_count_entry, dialog), 
+                   bootstyle="outline-info").pack(fill=X)
+        # --- ▲▲▲ 批量添加功能结束 ▲▲▲ ---
 
         interval_var = tk.StringVar(value="first")
         ttk.Label(time_frame, text="间隔播报:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
@@ -2964,7 +2988,31 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
         ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
-        ttk.Button(time_frame, text="批量添加", command=lambda: self._on_batch_add_time_click(start_time_entry, dialog), bootstyle="outline-info").grid(row=0, column=4, padx=5)
+        
+# --- ▼▼▼ 批量添加功能的容器 ▼▼▼ ---
+        batch_add_container = ttk.Frame(time_frame)
+        batch_add_container.grid(row=0, column=4, rowspan=3, sticky='n', padx=5) # 放在第0行第4列，向下跨越，靠上对齐
+
+        # 批量添加的输入框
+        batch_interval_frame = ttk.Frame(batch_add_container)
+        batch_interval_frame.pack(pady=(0, 2))
+        ttk.Label(batch_interval_frame, text="每").pack(side=LEFT)
+        batch_interval_entry = ttk.Entry(batch_interval_frame, font=self.font_11, width=4)
+        batch_interval_entry.pack(side=LEFT, padx=(2,2))
+        ttk.Label(batch_interval_frame, text="分钟").pack(side=LEFT)
+
+        batch_count_frame = ttk.Frame(batch_add_container)
+        batch_count_frame.pack(pady=(0, 5))
+        ttk.Label(batch_count_frame, text="共").pack(side=LEFT)
+        batch_count_entry = ttk.Entry(batch_count_frame, font=self.font_11, width=4)
+        batch_count_entry.pack(side=LEFT, padx=(2,2))
+        ttk.Label(batch_count_frame, text="次").pack(side=LEFT)
+
+        # 批量添加的触发按钮
+        ttk.Button(batch_add_container, text="批量添加", 
+                   command=lambda: self._apply_batch_time_addition(start_time_entry, batch_interval_entry, batch_count_entry, dialog), 
+                   bootstyle="outline-info").pack(fill=X)
+        # --- ▲▲▲ 批量添加功能结束 ▲▲▲ ---
 
         interval_var = tk.StringVar(value="first")
         ttk.Label(time_frame, text="间隔播报:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
@@ -3256,7 +3304,31 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
         ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
-        ttk.Button(time_frame, text="批量添加", command=lambda: self._on_batch_add_time_click(start_time_entry, dialog), bootstyle="outline-info").grid(row=0, column=4, padx=5)
+        
+# --- ▼▼▼ 批量添加功能的容器 ▼▼▼ ---
+        batch_add_container = ttk.Frame(time_frame)
+        batch_add_container.grid(row=0, column=4, rowspan=3, sticky='n', padx=5) # 放在第0行第4列，向下跨越，靠上对齐
+
+        # 批量添加的输入框
+        batch_interval_frame = ttk.Frame(batch_add_container)
+        batch_interval_frame.pack(pady=(0, 2))
+        ttk.Label(batch_interval_frame, text="每").pack(side=LEFT)
+        batch_interval_entry = ttk.Entry(batch_interval_frame, font=self.font_11, width=4)
+        batch_interval_entry.pack(side=LEFT, padx=(2,2))
+        ttk.Label(batch_interval_frame, text="分钟").pack(side=LEFT)
+
+        batch_count_frame = ttk.Frame(batch_add_container)
+        batch_count_frame.pack(pady=(0, 5))
+        ttk.Label(batch_count_frame, text="共").pack(side=LEFT)
+        batch_count_entry = ttk.Entry(batch_count_frame, font=self.font_11, width=4)
+        batch_count_entry.pack(side=LEFT, padx=(2,2))
+        ttk.Label(batch_count_frame, text="次").pack(side=LEFT)
+
+        # 批量添加的触发按钮
+        ttk.Button(batch_add_container, text="批量添加", 
+                   command=lambda: self._apply_batch_time_addition(start_time_entry, batch_interval_entry, batch_count_entry, dialog), 
+                   bootstyle="outline-info").pack(fill=X)
+        # --- ▲▲▲ 批量添加功能结束 ▲▲▲ ---
 
         ttk.Label(time_frame, text="播 n 遍:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
         repeat_entry = ttk.Entry(time_frame, font=self.font_11, width=12)
@@ -3933,104 +4005,51 @@ class TimedBroadcastApp:
         self.root.wait_window(dialog)
         return result[0]
 
-    def _on_batch_add_time_click(self, start_time_entry, parent_dialog):
-        """“批量添加”按钮的点击事件处理函数（最终修复版）。"""
-        
-        # 1. 前置条件检查
-        current_text = start_time_entry.get().strip()
-        if not current_text:
-            messagebox.showwarning("操作无效", "请先在“开始时间”框中至少设置一个起始时间点。", parent=parent_dialog)
+    def _apply_batch_time_addition(self, start_time_entry, interval_entry, count_entry, parent_dialog):
+        """处理新的批量添加时间逻辑"""
+        # 1. 校验输入
+        try:
+            interval_min = int(interval_entry.get())
+            count = int(count_entry.get())
+            if interval_min <= 1 or count <= 1:
+                messagebox.showwarning("输入无效", "“每分钟”和“一共次数”都必须是大于1的整数。", parent=parent_dialog)
+                return
+        except (ValueError, TypeError):
+            messagebox.showwarning("输入无效", "“每分钟”和“一共次数”必须填写大于1的整数。", parent=parent_dialog)
             return
 
-        first_time_str = current_text.split(',')[0].strip()
+        current_times_str = start_time_entry.get().strip()
+        if not current_times_str:
+            messagebox.showwarning("操作无效", "请先在“开始时间”框中至少设置一个有效的起始时间点。", parent=parent_dialog)
+            return
+
+        # 2. 获取基准时间
+        first_time_str = current_times_str.split(',')[0].strip()
         base_time = self._normalize_time_string(first_time_str)
-        
         if not base_time:
             messagebox.showerror("格式错误", f"无法识别起始时间点 '{first_time_str}'。\n请确保格式为 HH:MM:SS。", parent=parent_dialog)
             return
 
-        # --- ↓↓↓ 2. 创建并管理一个全新的、独立的模态对话框 ↓↓↓ ---
-        dialog = ttk.Toplevel(self.root)
-        dialog.title("批量添加时间")
-        dialog.resizable(False, False)
-        dialog.transient(parent_dialog)
-        dialog.attributes('-topmost', True)
-        
-        # 使用一个列表来传递结果，因为内部函数不能直接修改外部非 nonlocal 变量
-        result_container = [None] 
+        # 3. 计算新的时间序列
+        try:
+            # 使用集合来自动处理重复的时间点
+            all_times = {base_time}
+            current_time_obj = datetime.strptime(base_time, "%H:%M:%S")
 
-        def on_confirm():
-            try:
-                every_min = int(entries["每"].get())
-                interval_min = int(entries["间隔"].get())
-                add_count = int(entries["添加"].get())
-                if every_min <= 0 or interval_min < 0 or add_count <= 0:
-                    raise ValueError
-                result_container[0] = (every_min, interval_min, add_count)
-                dialog.destroy()
-            except (ValueError, TypeError):
-                messagebox.showerror("输入错误", "所有输入项都必须是有效的正整数（间隔可以为0）。", parent=dialog)
-
-        def on_cancel():
-            result_container[0] = None
-            dialog.destroy()
-
-        main_frame = ttk.Frame(dialog, padding=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        main_frame.columnconfigure(1, weight=1)
-
-        labels_and_defaults = [("每 (分钟):", "40"), ("间隔 (分钟):", "10"), ("添加次数:", "3")]
-        entries = {}
-        for i, (text, default_val) in enumerate(labels_and_defaults):
-            ttk.Label(main_frame, text=text, font=self.font_11).grid(row=i, column=0, sticky='w', pady=5, padx=5)
-            entry = ttk.Entry(main_frame, font=self.font_11, width=10)
-            entry.grid(row=i, column=1, sticky='ew', pady=5, padx=5)
-            entry.insert(0, default_val)
-            entries[text.split(' ')[0]] = entry
-        entries["每"].focus_set()
-        entries["每"].selection_range(0, tk.END)
-
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.grid(row=len(labels_and_defaults), column=0, columnspan=2, pady=(15, 0))
-        ttk.Button(btn_frame, text="确定", command=on_confirm, bootstyle="primary").pack(side=tk.LEFT, padx=10)
-        ttk.Button(btn_frame, text="取消", command=on_cancel).pack(side=tk.LEFT, padx=10)
-
-        dialog.protocol("WM_DELETE_WINDOW", on_cancel)
-        dialog.bind('<Return>', lambda event: on_confirm())
-        dialog.bind('<Escape>', lambda event: on_cancel())
-        
-        self.center_window(dialog, parent=parent_dialog)
-        
-        dialog.grab_set()
-        self.root.wait_window(dialog)
-        # --- ↑↑↑ 对话框逻辑结束 ↑↑↑ ---
-        
-        # 3. 获取对话框的结果
-        params = result_container[0]
-        if not params:
-            self.log("用户取消了批量添加时间操作。")
-            return
-
-        # 4. 核心计算
-        every_min, interval_min, add_count = params
-        all_times = {base_time}
-        current_time_obj = datetime.strptime(base_time, "%H:%M:%S")
-
-        for _ in range(add_count):
-            current_time_obj += timedelta(minutes=every_min)
-            all_times.add(current_time_obj.strftime("%H:%M:%S"))
-            
-            if interval_min > 0:
+            for _ in range(count):
                 current_time_obj += timedelta(minutes=interval_min)
                 all_times.add(current_time_obj.strftime("%H:%M:%S"))
 
-        # 5. 排序并更新输入框
-        sorted_times = sorted(list(all_times))
-        final_string = ", ".join(sorted_times)
-        
-        start_time_entry.delete(0, tk.END)
-        start_time_entry.insert(0, final_string)
-        self.log(f"批量生成了 {len(sorted_times)} 个时间点。")
+            # 4. 更新UI
+            sorted_times = sorted(list(all_times))
+            final_string = ", ".join(sorted_times)
+            
+            start_time_entry.delete(0, tk.END)
+            start_time_entry.insert(0, final_string)
+            self.log(f"批量生成了 {len(sorted_times)} 个时间点。")
+
+        except Exception as e:
+            messagebox.showerror("计算错误", f"生成时间序列时发生错误: {e}", parent=parent_dialog)
 
     def clear_all_tasks(self, delete_associated_files=True):
         if not self.tasks: return
