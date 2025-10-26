@@ -3933,32 +3933,27 @@ class TimedBroadcastApp:
         self.root.wait_window(dialog)
         return result[0]
 
-    def _show_batch_add_time_dialog(self):
-        """
-        创建一个模态对话框，用于批量添加时间点（已修复UI和死锁问题）。
-        父窗口的禁用/启用由调用者负责。
-        """
+    def _show_batch_add_time_dialog(self, parent_dialog):
+        """创建一个模态对话框，用于批量添加时间点（最终修复版）。"""
         dialog = ttk.Toplevel(self.root)
         dialog.title("批量添加时间")
         dialog.resizable(False, False)
-        dialog.transient(self.root)
+        dialog.transient(parent_dialog) # 依附于直接的父对话框
         dialog.attributes('-topmost', True)
-        
+
         result_queue = queue.Queue()
 
         def cleanup_and_destroy(result=None):
             result_queue.put(result)
+            dialog.grab_release() # 释放焦点
             dialog.destroy()
+            parent_dialog.focus_force()
 
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
         main_frame.columnconfigure(1, weight=1)
 
-        labels_and_defaults = [
-            ("每 (分钟):", "40"),
-            ("间隔 (分钟):", "10"),
-            ("添加次数:", "3")
-        ]
+        labels_and_defaults = [("每 (分钟):", "40"), ("间隔 (分钟):", "10"), ("添加次数:", "3")]
         entries = {}
         for i, (text, default_val) in enumerate(labels_and_defaults):
             ttk.Label(main_frame, text=text, font=self.font_11).grid(row=i, column=0, sticky='w', pady=5, padx=5)
@@ -3966,7 +3961,6 @@ class TimedBroadcastApp:
             entry.grid(row=i, column=1, sticky='ew', pady=5, padx=5)
             entry.insert(0, default_val)
             entries[text.split(' ')[0]] = entry
-
         entries["每"].focus_set()
         entries["每"].selection_range(0, tk.END)
 
@@ -3990,9 +3984,9 @@ class TimedBroadcastApp:
         dialog.bind('<Return>', lambda event: on_confirm())
         dialog.bind('<Escape>', lambda event: cleanup_and_destroy(None))
         
-        self.center_window(dialog, parent=self.root)
+        self.center_window(dialog, parent=parent_dialog)
         
-        # 让调用者来处理窗口等待和禁用
+        # 使用 grab_set() 来实现模态，不再禁用父窗口
         dialog.grab_set()
         self.root.wait_window(dialog)
         
@@ -4002,9 +3996,8 @@ class TimedBroadcastApp:
             return None
 
     def _on_batch_add_time_click(self, start_time_entry, parent_dialog):
-        """“批量添加”按钮的点击事件处理函数（已修复UI更新问题）。"""
+        """“批量添加”按钮的点击事件处理函数（最终修复版）。"""
         
-        # 1. 前置条件检查
         current_text = start_time_entry.get().strip()
         if not current_text:
             messagebox.showwarning("操作无效", "请先在“开始时间”框中至少设置一个起始时间点。", parent=parent_dialog)
@@ -4017,19 +4010,13 @@ class TimedBroadcastApp:
             messagebox.showerror("格式错误", f"无法识别起始时间点 '{first_time_str}'。\n请确保格式为 HH:MM:SS。", parent=parent_dialog)
             return
 
-        # 2. 弹出对话框获取参数
-        # --- 关键修正：在调用对话框前后，手动禁用/启用父窗口 ---
-        parent_dialog.attributes('-disabled', True)
-        params = self._show_batch_add_time_dialog()
-        parent_dialog.attributes('-disabled', False)
-        parent_dialog.focus_force()
-        # --- 修正结束 ---
-
+        # 直接调用对话框，不再手动禁用/启用
+        params = self._show_batch_add_time_dialog(parent_dialog)
+        
         if not params:
             self.log("用户取消了批量添加时间操作。")
             return
 
-        # 3. 核心计算
         every_min, interval_min, add_count = params
         all_times = {base_time}
         current_time_obj = datetime.strptime(base_time, "%H:%M:%S")
@@ -4042,7 +4029,6 @@ class TimedBroadcastApp:
                 current_time_obj += timedelta(minutes=interval_min)
                 all_times.add(current_time_obj.strftime("%H:%M:%S"))
 
-        # 4. 排序并更新输入框
         sorted_times = sorted(list(all_times))
         final_string = ", ".join(sorted_times)
         
@@ -4711,14 +4697,18 @@ class TimedBroadcastApp:
                 
                 # --- ↓↓↓ 这是最关键的修正：用一个顶级的 try...finally 包裹所有操作 ↓↓↓ ---
                 try:
+                    # 1. 获取任务，这个操作本身在 try 块之外，但在主循环内
                     task_data = self.intercut_queue.get()
                     self.log("接收到插播任务，开始执行...")
 
+                    # 2. 在主线程中设置UI，并等待其完成
                     was_muted = self.is_muted
                     ui_setup_done = queue.Queue()
 
                     def setup_ui():
+                        # 使用 nonlocal 明确声明要修改外部作用域的变量
                         nonlocal progress_dialog
+                        
                         if not was_muted:
                             self.toggle_mute_all()
                         
@@ -4730,7 +4720,7 @@ class TimedBroadcastApp:
                         dialog.grab_set()
                         dialog.protocol("WM_DELETE_WINDOW", lambda: None)
                         
-                        ttk.Label(dialog, text="正在插播中,请等待结束或手动紧急停止...", font=self.font_12_bold, bootstyle="info").pack(padx=40, pady=(20, 10))
+                        ttk.Label(dialog, text="正在插播中...", font=self.font_12_bold, bootstyle="info").pack(padx=40, pady=(20, 10))
                         
                         def stop_intercut_now():
                             self.log("用户请求紧急停止插播...")
@@ -4740,13 +4730,13 @@ class TimedBroadcastApp:
                         stop_btn.pack(padx=20, pady=(0, 20), fill=tk.X)
                         
                         self.center_window(dialog)
-                        progress_dialog = dialog
+                        progress_dialog = dialog # 将新创建的对话框赋值给外层变量
                         ui_setup_done.put(True)
 
                     self.root.after(0, setup_ui)
-                    ui_setup_done.get() # 等待主线程完成UI创建
+                    ui_setup_done.get() # 等待主线程完成UI创建，确保 progress_dialog 已被赋值
 
-                    # --- 语音播报逻辑 (保持代码B的正确逻辑) ---
+                    # 3. 语音播报逻辑 (保持代码B的正确逻辑)
                     text, params, repeats = task_data['text'], task_data['params'], task_data['repeats']
                     final_text_to_speak = (text + "。 ") * repeats
                     
@@ -4765,11 +4755,10 @@ class TimedBroadcastApp:
                             speaker.Speak("", 3)
                             self.log("插播被用户紧急停止！")
                             break
-                        pythoncom.PumpWaitingMessages()
-                        time.sleep(0.05)
+                        time.sleep(0.1)
 
                 finally:
-                    # 这个 finally 块确保了无论 try 块如何结束（正常、break、异常），清理工作都会被调度
+                    # 4. 无论 try 块如何结束（正常、break、异常），都保证执行清理
                     def cleanup_ui(dialog_to_close, mute_status_before, task_completed):
                         if dialog_to_close and dialog_to_close.winfo_exists():
                             dialog_to_close.destroy()
@@ -4779,7 +4768,7 @@ class TimedBroadcastApp:
                         if task_completed:
                             self.intercut_queue.task_done()
                     
-                    # 使用 lambda 将 progress_dialog 和 was_muted 的当前值作为“快照”参数传递
+                    # 使用 lambda 将 progress_dialog 的当前引用作为“快照”参数传递
                     self.root.after(0, lambda: cleanup_ui(progress_dialog, was_muted, task_data is not None))
                     self.intercut_stop_event.clear()
         
