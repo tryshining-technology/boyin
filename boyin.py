@@ -3933,21 +3933,47 @@ class TimedBroadcastApp:
         self.root.wait_window(dialog)
         return result[0]
 
-    def _show_batch_add_time_dialog(self, parent_dialog):
-        """创建一个模态对话框，用于批量添加时间点（最终修复版）。"""
+    def _on_batch_add_time_click(self, start_time_entry, parent_dialog):
+        """“批量添加”按钮的点击事件处理函数（最终修复版）。"""
+        
+        # 1. 前置条件检查
+        current_text = start_time_entry.get().strip()
+        if not current_text:
+            messagebox.showwarning("操作无效", "请先在“开始时间”框中至少设置一个起始时间点。", parent=parent_dialog)
+            return
+
+        first_time_str = current_text.split(',')[0].strip()
+        base_time = self._normalize_time_string(first_time_str)
+        
+        if not base_time:
+            messagebox.showerror("格式错误", f"无法识别起始时间点 '{first_time_str}'。\n请确保格式为 HH:MM:SS。", parent=parent_dialog)
+            return
+
+        # --- ↓↓↓ 2. 创建并管理一个全新的、独立的模态对话框 ↓↓↓ ---
         dialog = ttk.Toplevel(self.root)
         dialog.title("批量添加时间")
         dialog.resizable(False, False)
-        dialog.transient(parent_dialog) # 依附于直接的父对话框
+        dialog.transient(parent_dialog)
         dialog.attributes('-topmost', True)
+        
+        # 使用一个列表来传递结果，因为内部函数不能直接修改外部非 nonlocal 变量
+        result_container = [None] 
 
-        result_queue = queue.Queue()
+        def on_confirm():
+            try:
+                every_min = int(entries["每"].get())
+                interval_min = int(entries["间隔"].get())
+                add_count = int(entries["添加"].get())
+                if every_min <= 0 or interval_min < 0 or add_count <= 0:
+                    raise ValueError
+                result_container[0] = (every_min, interval_min, add_count)
+                dialog.destroy()
+            except (ValueError, TypeError):
+                messagebox.showerror("输入错误", "所有输入项都必须是有效的正整数（间隔可以为0）。", parent=dialog)
 
-        def cleanup_and_destroy(result=None):
-            result_queue.put(result)
-            dialog.grab_release() # 释放焦点
+        def on_cancel():
+            result_container[0] = None
             dialog.destroy()
-            parent_dialog.focus_force()
 
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -3964,59 +3990,28 @@ class TimedBroadcastApp:
         entries["每"].focus_set()
         entries["每"].selection_range(0, tk.END)
 
-        def on_confirm():
-            try:
-                every_min = int(entries["每"].get())
-                interval_min = int(entries["间隔"].get())
-                add_count = int(entries["添加"].get())
-                if every_min <= 0 or interval_min < 0 or add_count <= 0:
-                    raise ValueError
-                cleanup_and_destroy((every_min, interval_min, add_count))
-            except (ValueError, TypeError):
-                messagebox.showerror("输入错误", "所有输入项都必须是有效的正整数（间隔可以为0）。", parent=dialog)
-
         btn_frame = ttk.Frame(main_frame)
         btn_frame.grid(row=len(labels_and_defaults), column=0, columnspan=2, pady=(15, 0))
         ttk.Button(btn_frame, text="确定", command=on_confirm, bootstyle="primary").pack(side=tk.LEFT, padx=10)
-        ttk.Button(btn_frame, text="取消", command=lambda: cleanup_and_destroy(None)).pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="取消", command=on_cancel).pack(side=tk.LEFT, padx=10)
 
-        dialog.protocol("WM_DELETE_WINDOW", lambda: cleanup_and_destroy(None))
+        dialog.protocol("WM_DELETE_WINDOW", on_cancel)
         dialog.bind('<Return>', lambda event: on_confirm())
-        dialog.bind('<Escape>', lambda event: cleanup_and_destroy(None))
+        dialog.bind('<Escape>', lambda event: on_cancel())
         
         self.center_window(dialog, parent=parent_dialog)
         
-        # 使用 grab_set() 来实现模态，不再禁用父窗口
         dialog.grab_set()
         self.root.wait_window(dialog)
+        # --- ↑↑↑ 对话框逻辑结束 ↑↑↑ ---
         
-        try:
-            return result_queue.get_nowait()
-        except queue.Empty:
-            return None
-
-    def _on_batch_add_time_click(self, start_time_entry, parent_dialog):
-        """“批量添加”按钮的点击事件处理函数（最终修复版）。"""
-        
-        current_text = start_time_entry.get().strip()
-        if not current_text:
-            messagebox.showwarning("操作无效", "请先在“开始时间”框中至少设置一个起始时间点。", parent=parent_dialog)
-            return
-
-        first_time_str = current_text.split(',')[0].strip()
-        base_time = self._normalize_time_string(first_time_str)
-        
-        if not base_time:
-            messagebox.showerror("格式错误", f"无法识别起始时间点 '{first_time_str}'。\n请确保格式为 HH:MM:SS。", parent=parent_dialog)
-            return
-
-        # 直接调用对话框，不再手动禁用/启用
-        params = self._show_batch_add_time_dialog(parent_dialog)
-        
+        # 3. 获取对话框的结果
+        params = result_container[0]
         if not params:
             self.log("用户取消了批量添加时间操作。")
             return
 
+        # 4. 核心计算
         every_min, interval_min, add_count = params
         all_times = {base_time}
         current_time_obj = datetime.strptime(base_time, "%H:%M:%S")
@@ -4029,6 +4024,7 @@ class TimedBroadcastApp:
                 current_time_obj += timedelta(minutes=interval_min)
                 all_times.add(current_time_obj.strftime("%H:%M:%S"))
 
+        # 5. 排序并更新输入框
         sorted_times = sorted(list(all_times))
         final_string = ", ".join(sorted_times)
         
@@ -4682,65 +4678,56 @@ class TimedBroadcastApp:
 
     def _intercut_worker(self):
         """
-        专用于处理插播任务的后台线程（最终版：借鉴视频播放的可靠UI交互模型）。
+        专用于处理插播任务的后台线程（最终版：彻底修复死锁）。
         """
-        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHreaded)
+        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
         speaker = None
         try:
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
             
             while self.running:
-                # 1. 阻塞等待任务，这部分不变
+                # 阻塞等待，直到有插播任务进来
                 task_data = self.intercut_queue.get()
                 
-                # 定义一个队列，用于从主线程获取创建好的UI组件引用
-                ui_refs = queue.Queue()
-
-                # -------------------------------------------------------------
-                # 步骤A: 请求主线程创建并显示模态UI
-                # -------------------------------------------------------------
-                def setup_ui_in_main_thread():
-                    # 禁用主窗口
-                    self.root.attributes('-disabled', True)
-
-                    # 创建弹窗
-                    dialog = ttk.Toplevel(self.root)
-                    dialog.title("插播进行中")
-                    dialog.resizable(False, False)
-                    dialog.transient(self.root)
-                    dialog.attributes('-topmost', True)
-                    # 我们不再使用 grab_set()，而是用禁用主窗口的方式
-                    dialog.protocol("WM_DELETE_WINDOW", lambda: None) # 禁用X按钮
-                    
-                    ttk.Label(dialog, text="正在插播中,请等待结束或手动停止...", font=self.font_12_bold, bootstyle="info").pack(padx=40, pady=(20, 10))
-                    
-                    # 定义停止行为
-                    def stop_intercut_now():
-                        self.log("用户请求紧急停止插播...")
-                        self.intercut_stop_event.set()
-                    
-                    stop_btn = ttk.Button(dialog, text="紧急停止", bootstyle="danger", command=stop_intercut_now)
-                    stop_btn.pack(padx=20, pady=(0, 20), fill=tk.X)
-                    
-                    self.center_window(dialog)
-                    dialog.focus_force()
-                    
-                    # 将需要后续操作的dialog对象传回给后台线程
-                    ui_refs.put(dialog)
-
-                self.root.after(0, setup_ui_in_main_thread)
-                # 等待主线程完成UI创建，并获取dialog的引用
-                progress_dialog = ui_refs.get()
-
-                # -------------------------------------------------------------
-                # 步骤B: 在后台线程执行播报，同时主线程被锁定
-                # -------------------------------------------------------------
-                was_muted = self.is_muted
-                if not was_muted:
-                    self.root.after(0, self.toggle_mute_all) # 在主线程中静音
-
                 try:
-                    text, params, repeats = task_data['text'], task_data['params'], task_data['repeats']
+                    self.log("接收到插播任务，开始执行...")
+                    was_muted = self.is_muted
+                    
+                    # --- ↓↓↓ 这是最核心的逻辑修正：不再互相等待 ↓↓↓ ---
+
+                    # 1. 在主线程中创建UI，并获取弹窗和停止按钮的引用
+                    ui_elements = queue.Queue()
+                    def setup_ui():
+                        if not was_muted:
+                            self.toggle_mute_all()
+                        
+                        dialog = ttk.Toplevel(self.root)
+                        dialog.title("插播进行中")
+                        dialog.resizable(False, False)
+                        dialog.transient(self.root)
+                        dialog.attributes('-topmost', True)
+                        dialog.grab_set()
+                        dialog.protocol("WM_DELETE_WINDOW", lambda: None)
+                        
+                        ttk.Label(dialog, text="正在插播中,请等待结束或紧急停止...", font=self.font_12_bold, bootstyle="info").pack(padx=40, pady=(20, 10))
+                        
+                        def stop_intercut_now():
+                            self.log("用户请求紧急停止插播...")
+                            self.intercut_stop_event.set()
+                        
+                        stop_btn = ttk.Button(dialog, text="紧急停止", bootstyle="danger", command=stop_intercut_now)
+                        stop_btn.pack(padx=20, pady=(0, 20), fill=tk.X)
+                        
+                        self.center_window(dialog)
+                        ui_elements.put(dialog) # 将创建好的对话框放入队列
+
+                    self.root.after(0, setup_ui)
+                    progress_dialog = ui_elements.get() # 后台线程等待主线程完成UI创建
+
+                    # 2. 执行语音播报 (这部分逻辑不变)
+                    text = task_data['text']
+                    params = task_data['params']
+                    repeats = task_data['repeats']
                     final_text_to_speak = (text + "。 ") * repeats
                     
                     all_voices = {v.GetDescription(): v for v in speaker.GetVoices()}
@@ -4758,30 +4745,25 @@ class TimedBroadcastApp:
                             speaker.Speak("", 3)
                             self.log("插播被用户紧急停止！")
                             break
-                        time.sleep(0.1)
+                        # PumpWaitingMessages 在这里可能不是必需的，但保留无害
+                        pythoncom.PumpWaitingMessages() 
+                        time.sleep(0.05)
 
                 finally:
-                    # -------------------------------------------------------------
-                    # 步骤C: 请求主线程清理UI和恢复状态
-                    # -------------------------------------------------------------
-                    def cleanup_ui_in_main_thread():
+                    # 3. 无论成功、失败还是中断，都保证在主线程执行清理
+                    def cleanup_ui():
                         if progress_dialog and progress_dialog.winfo_exists():
                             progress_dialog.destroy()
                         if not was_muted and self.is_muted:
                              self.toggle_mute_all()
-                        
-                        # 恢复主窗口
-                        self.root.attributes('-disabled', False)
-                        self.root.focus_force()
-
                         self.log("插播任务已完成或被中断。")
                         self.intercut_queue.task_done()
                     
-                    self.root.after(0, cleanup_ui_in_main_thread)
+                    self.root.after(0, cleanup_ui)
                     self.intercut_stop_event.clear()
         
         except Exception as e:
-            self.log(f"插播工作线程发生严重错误: {e}")
+            self.log(f"插播工作线程初始化时发生严重错误: {e}")
         finally:
             if speaker:
                 del speaker
