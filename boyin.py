@@ -848,6 +848,34 @@ class TimedBroadcastApp:
             date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
 
         def save_task():
+            # --- ↓↓↓ 新增的输入验证模块 ↓↓↓ ---
+            try:
+                repeat_count = int(repeat_entry.get().strip() or 1)
+                if repeat_count < 1:
+                    messagebox.showerror("输入错误", "“截取张数”必须是大于或等于 1 的整数。", parent=dialog)
+                    return
+            except ValueError:
+                messagebox.showerror("输入错误", "“截取张数”必须是一个有效的整数。", parent=dialog)
+                return
+
+            try:
+                interval_seconds = int(interval_entry.get().strip() or 0)
+                if interval_seconds < 0:
+                    messagebox.showerror("输入错误", "“间隔(秒)”必须是大于或等于 0 的整数。", parent=dialog)
+                    return
+            except ValueError:
+                messagebox.showerror("输入错误", "“间隔(秒)”必须是一个有效的整数。", parent=dialog)
+                return
+
+            if not weekday_entry.get().strip():
+                messagebox.showerror("输入错误", "“周几/几号”规则不能为空，请点击“选取...”进行设置。", parent=dialog)
+                return
+            
+            if not date_range_entry.get().strip():
+                messagebox.showerror("输入错误", "“日期范围”不能为空，请点击“设置...”进行配置。", parent=dialog)
+                return
+            # --- ↑↑↑ 验证模块结束 ↑↑↑ ---
+            
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
             if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
             is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
@@ -1243,6 +1271,16 @@ class TimedBroadcastApp:
             if not target_path:
                 messagebox.showerror("输入错误", "目标程序路径不能为空。", parent=dialog)
                 return
+
+            # --- ↓↓↓ 新增的输入验证模块 ↓↓↓ ---
+            if not weekday_entry.get().strip():
+                messagebox.showerror("输入错误", "“周几/几号”规则不能为空，请点击“选取...”进行设置。", parent=dialog)
+                return
+            
+            if not date_range_entry.get().strip():
+                messagebox.showerror("输入错误", "“日期范围”不能为空，请点击“设置...”进行配置。", parent=dialog)
+                return
+            # --- ↑↑↑ 验证模块结束 ↑↑↑ ---
 
             stop_time_str = stop_time_entry.get().strip()
             normalized_stop_time = ""
@@ -2051,33 +2089,68 @@ class TimedBroadcastApp:
         self.weekly_reboot_enabled_var = ttk.BooleanVar()
         self.weekly_reboot_time_var = ttk.StringVar()
         self.weekly_reboot_days_var = ttk.StringVar()
+
+        # --- ↓↓↓ 核心修改部分：为 command 添加验证逻辑 ↓↓↓ ---
+        
+        def validate_and_save_settings(var_to_check=None, related_vars=None, error_msg=""):
+            """通用验证和保存函数"""
+            # 只有在用户尝试“启用”时才进行检查
+            if var_to_check and var_to_check.get():
+                for r_var in related_vars:
+                    # 检查关联的输入框内容是否为空或仅包含前缀
+                    val = r_var.get().strip()
+                    if not val or val == "每周:":
+                        messagebox.showerror("设置无效", error_msg, parent=self.root)
+                        # 将开关拨回“关闭”状态
+                        var_to_check.set(False) 
+                        return # 终止保存
+            
+            # 如果验证通过或用户是“关闭”功能，则正常保存
+            self.save_settings()
+
         daily_frame = ttk.Frame(power_frame)
         daily_frame.pack(fill=X, pady=4)
         daily_frame.columnconfigure(1, weight=1)
+        # 每日关机不需要特殊验证，直接保存
         ttk.Checkbutton(daily_frame, text="每天关机    ", variable=self.daily_shutdown_enabled_var, bootstyle="round-toggle", command=self.save_settings).grid(row=0, column=0, sticky='w')
         daily_time_entry = ttk.Entry(daily_frame, textvariable=self.daily_shutdown_time_var, font=self.font_11)
         daily_time_entry.grid(row=0, column=1, sticky='we', padx=5)
         self._bind_mousewheel_to_entry(daily_time_entry, self._handle_time_scroll)
         ttk.Button(daily_frame, text="设置", bootstyle="primary-outline", command=lambda: self.show_single_time_dialog(self.daily_shutdown_time_var)).grid(row=0, column=2, sticky='e', padx=5)
+        
         weekly_frame = ttk.Frame(power_frame)
         weekly_frame.pack(fill=X, pady=4)
         weekly_frame.columnconfigure(1, weight=1)
-        ttk.Checkbutton(weekly_frame, text="每周关机    ", variable=self.weekly_shutdown_enabled_var, bootstyle="round-toggle", command=self.save_settings).grid(row=0, column=0, sticky='w')
+        # 每周关机：在保存前进行验证
+        ttk.Checkbutton(weekly_frame, text="每周关机    ", variable=self.weekly_shutdown_enabled_var, bootstyle="round-toggle", 
+                        command=lambda: validate_and_save_settings(
+                            self.weekly_shutdown_enabled_var, 
+                            [self.weekly_shutdown_days_var, self.weekly_shutdown_time_var],
+                            "无法启用“每周关机”，因为周几或时间未设置。"
+                        )).grid(row=0, column=0, sticky='w')
         weekly_days_entry = ttk.Entry(weekly_frame, textvariable=self.weekly_shutdown_days_var, font=self.font_11)
         weekly_days_entry.grid(row=0, column=1, sticky='we', padx=5)
         weekly_shutdown_time_entry = ttk.Entry(weekly_frame, textvariable=self.weekly_shutdown_time_var, font=self.font_11, width=15)
         weekly_shutdown_time_entry.grid(row=0, column=2, sticky='we', padx=5)
         self._bind_mousewheel_to_entry(weekly_shutdown_time_entry, self._handle_time_scroll)
         ttk.Button(weekly_frame, text="设置", bootstyle="primary-outline", command=lambda: self.show_power_week_time_dialog("设置每周关机", self.weekly_shutdown_days_var, self.weekly_shutdown_time_var)).grid(row=0, column=3, sticky='e', padx=5)
+        
         reboot_frame = ttk.Frame(power_frame)
         reboot_frame.pack(fill=X, pady=4)
         reboot_frame.columnconfigure(1, weight=1)
-        ttk.Checkbutton(reboot_frame, text="每周重启    ", variable=self.weekly_reboot_enabled_var, bootstyle="round-toggle", command=self.save_settings).grid(row=0, column=0, sticky='w')
+        # 每周重启：在保存前进行验证
+        ttk.Checkbutton(reboot_frame, text="每周重启    ", variable=self.weekly_reboot_enabled_var, bootstyle="round-toggle", 
+                        command=lambda: validate_and_save_settings(
+                            self.weekly_reboot_enabled_var,
+                            [self.weekly_reboot_days_var, self.weekly_reboot_time_var],
+                            "无法启用“每周重启”，因为周几或时间未设置。"
+                        )).grid(row=0, column=0, sticky='w')
         ttk.Entry(reboot_frame, textvariable=self.weekly_reboot_days_var, font=self.font_11).grid(row=0, column=1, sticky='we', padx=5)
         weekly_reboot_time_entry = ttk.Entry(reboot_frame, textvariable=self.weekly_reboot_time_var, font=self.font_11, width=15)
         weekly_reboot_time_entry.grid(row=0, column=2, sticky='we', padx=5)
         self._bind_mousewheel_to_entry(weekly_reboot_time_entry, self._handle_time_scroll)
         ttk.Button(reboot_frame, text="设置", bootstyle="primary-outline", command=lambda: self.show_power_week_time_dialog("设置每周重启", self.weekly_reboot_days_var, self.weekly_reboot_time_var)).grid(row=0, column=3, sticky='e', padx=5)
+        # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
 
         return settings_frame
 
@@ -2751,7 +2824,7 @@ class TimedBroadcastApp:
         ttk.Label(batch_count_frame, text="共").pack(side=LEFT)
         batch_count_entry = ttk.Entry(batch_count_frame, font=self.font_11, width=4)
         batch_count_entry.pack(side=LEFT, padx=(2,2))
-        ttk.Label(batch_count_frame, text="次  ").pack(side=LEFT)
+        ttk.Label(batch_count_frame, text="次   ").pack(side=LEFT)
 
         # 批量添加的触发按钮
         ttk.Button(batch_add_container, text="批量添加", 
@@ -2824,6 +2897,44 @@ class TimedBroadcastApp:
             weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
 
         def save_task():
+            # --- ↓↓↓ 新增的输入验证模块 ↓↓↓ ---
+            try:
+                volume = int(volume_entry.get().strip() or 80)
+                if not (0 <= volume <= 100):
+                    messagebox.showerror("输入错误", "音量必须是 0 到 100 之间的整数。", parent=dialog)
+                    return
+            except ValueError:
+                messagebox.showerror("输入错误", "音量必须是一个有效的整数。", parent=dialog)
+                return
+
+            if interval_var.get() == 'first':
+                try:
+                    interval_first = int(interval_first_entry.get().strip() or 1)
+                    if interval_first < 1:
+                        messagebox.showerror("输入错误", "“播 n 首”的次数必须大于或等于 1。", parent=dialog)
+                        return
+                except ValueError:
+                    messagebox.showerror("输入错误", "“播 n 首”的次数必须是一个有效的整数。", parent=dialog)
+                    return
+            else: # 'seconds'
+                try:
+                    interval_seconds = int(interval_seconds_entry.get().strip() or 1)
+                    if interval_seconds < 1:
+                        messagebox.showerror("输入错误", "“播 n 秒”的秒数必须大于或等于 1。", parent=dialog)
+                        return
+                except ValueError:
+                    messagebox.showerror("输入错误", "“播 n 秒”的秒数必须是一个有效的整数。", parent=dialog)
+                    return
+
+            if not weekday_entry.get().strip():
+                messagebox.showerror("输入错误", "“周几/几号”规则不能为空，请点击“选取...”进行设置。", parent=dialog)
+                return
+            
+            if not date_range_entry.get().strip():
+                messagebox.showerror("输入错误", "“日期范围”不能为空，请点击“设置...”进行配置。", parent=dialog)
+                return
+            # --- ↑↑↑ 验证模块结束 ↑↑↑ ---
+
             audio_path = audio_single_entry.get().strip() if audio_type_var.get() == "single" else audio_folder_entry.get().strip()
             if not audio_path: messagebox.showwarning("警告", "请选择音频文件或文件夹", parent=dialog); return
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
@@ -2838,8 +2949,9 @@ class TimedBroadcastApp:
             new_task_data = {
                 'name': name_entry.get().strip(), 'time': time_msg, 'content': audio_path, 'type': 'audio',
                 'audio_type': audio_type_var.get(), 'play_order': play_order_var.get(),
-                'volume': volume_entry.get().strip() or "80", 'interval_type': interval_var.get(),
-                'interval_first': interval_first_entry.get().strip(), 'interval_seconds': interval_seconds_entry.get().strip(),
+                'volume': str(volume), 'interval_type': interval_var.get(),
+                'interval_first': interval_first_entry.get().strip() or "1",
+                'interval_seconds': interval_seconds_entry.get().strip() or "600",
                 'weekday': weekday_entry.get().strip(), 'date_range': date_msg, 'delay': saved_delay_type,
                 'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'),
                 'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {}),
@@ -3006,7 +3118,7 @@ class TimedBroadcastApp:
         ttk.Label(batch_count_frame, text="共").pack(side=LEFT)
         batch_count_entry = ttk.Entry(batch_count_frame, font=self.font_11, width=4)
         batch_count_entry.pack(side=LEFT, padx=(2,2))
-        ttk.Label(batch_count_frame, text="次  ").pack(side=LEFT)
+        ttk.Label(batch_count_frame, text="次   ").pack(side=LEFT)
 
         # 批量添加的触发按钮
         ttk.Button(batch_add_container, text="批量添加", 
@@ -3085,6 +3197,44 @@ class TimedBroadcastApp:
             date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
 
         def save_task():
+            # --- ↓↓↓ 新增的输入验证模块 ↓↓↓ ---
+            try:
+                volume = int(volume_entry.get().strip() or 80)
+                if not (0 <= volume <= 100):
+                    messagebox.showerror("输入错误", "音量必须是 0 到 100 之间的整数。", parent=dialog)
+                    return
+            except ValueError:
+                messagebox.showerror("输入错误", "音量必须是一个有效的整数。", parent=dialog)
+                return
+
+            if interval_var.get() == 'first':
+                try:
+                    interval_first = int(interval_first_entry.get().strip() or 1)
+                    if interval_first < 1:
+                        messagebox.showerror("输入错误", "“播 n 首”的次数必须大于或等于 1。", parent=dialog)
+                        return
+                except ValueError:
+                    messagebox.showerror("输入错误", "“播 n 首”的次数必须是一个有效的整数。", parent=dialog)
+                    return
+            else: # 'seconds'
+                try:
+                    interval_seconds = int(interval_seconds_entry.get().strip() or 1)
+                    if interval_seconds < 1:
+                        messagebox.showerror("输入错误", "“播 n 秒”的秒数必须大于或等于 1。", parent=dialog)
+                        return
+                except ValueError:
+                    messagebox.showerror("输入错误", "“播 n 秒”的秒数必须是一个有效的整数。", parent=dialog)
+                    return
+
+            if not weekday_entry.get().strip():
+                messagebox.showerror("输入错误", "“周几/几号”规则不能为空，请点击“选取...”进行设置。", parent=dialog)
+                return
+            
+            if not date_range_entry.get().strip():
+                messagebox.showerror("输入错误", "“日期范围”不能为空，请点击“设置...”进行配置。", parent=dialog)
+                return
+            # --- ↑↑↑ 验证模块结束 ↑↑↑ ---
+            
             video_path = video_single_entry.get().strip() if video_type_var.get() == "single" else video_folder_entry.get().strip()
             if not video_path:
                 messagebox.showwarning("警告", "请选择一个视频文件或文件夹", parent=dialog)
@@ -3122,7 +3272,7 @@ class TimedBroadcastApp:
                 'type': 'video',
                 'video_type': video_type_var.get(),
                 'play_order': play_order_var.get(),
-                'volume': volume_entry.get().strip() or "80",
+                'volume': str(volume), # 使用验证过的 volume
                 'interval_type': interval_var.get(),
                 'interval_first': interval_first_entry.get().strip() or "1",
                 'interval_seconds': interval_seconds_entry.get().strip() or "600",
@@ -3322,7 +3472,7 @@ class TimedBroadcastApp:
         ttk.Label(batch_count_frame, text="共").pack(side=LEFT)
         batch_count_entry = ttk.Entry(batch_count_frame, font=self.font_11, width=4)
         batch_count_entry.pack(side=LEFT, padx=(2,2))
-        ttk.Label(batch_count_frame, text="次  ").pack(side=LEFT)
+        ttk.Label(batch_count_frame, text="次   ").pack(side=LEFT)
 
         # 批量添加的触发按钮
         ttk.Button(batch_add_container, text="批量添加", 
@@ -3369,7 +3519,7 @@ class TimedBroadcastApp:
             pitch_entry.insert(0, task.get('pitch', '0'))
             volume_entry.insert(0, task.get('volume', '80'))
             prompt_var.set(task.get('prompt', 0)); prompt_file_var.set(task.get('prompt_file', '')); prompt_volume_var.set(task.get('prompt_volume', '80'))
-            bgm_var.set(task.get('bgm', 0)); bgm_file_var.set(task.get('bgm_file', '')); bgm_volume_var.set(task.get('bgm_volume', '40'))
+            bgm_var.set(task.get('bgm', 0)); bgm_file_var.set(task.get('bgm_file', '')); bgm_volume_var.set(task.get('bgm_volume', '20'))
             start_time_entry.insert(0, task.get('time', ''))
             repeat_entry.insert(0, task.get('repeat', '1'))
             weekday_entry.insert(0, task.get('weekday', '每周:1234567'))
@@ -3380,7 +3530,7 @@ class TimedBroadcastApp:
             bg_image_order_var.set(task.get('bg_image_order', 'sequential'))
         else:
             speed_entry.insert(0, "0"); pitch_entry.insert(0, "0"); volume_entry.insert(0, "80")
-            prompt_var.set(0); prompt_volume_var.set("80"); bgm_var.set(0); bgm_volume_var.set("40")
+            prompt_var.set(0); prompt_volume_var.set("80"); bgm_var.set(0); bgm_volume_var.set("20")
             repeat_entry.insert(0, "1"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
 
         ad_params = {
@@ -3403,10 +3553,12 @@ class TimedBroadcastApp:
         self.ad_by_bgm_btn.config(command=lambda: self._create_advertisement('bgm', ad_params))
 
         def save_task():
+            # --- ↓↓↓ 融合了已有和新增的验证模块 ↓↓↓ ---
             try:
                 speed = int(speed_entry.get().strip() or '0')
                 pitch = int(pitch_entry.get().strip() or '0')
                 volume = int(volume_entry.get().strip() or '80')
+                repeat = int(repeat_entry.get().strip() or '1')
 
                 if not (-10 <= speed <= 10):
                     messagebox.showerror("输入错误", "语速必须在 -10 到 10 之间。", parent=dialog); return
@@ -3414,8 +3566,19 @@ class TimedBroadcastApp:
                     messagebox.showerror("输入错误", "音调必须在 -10 到 10 之间。", parent=dialog); return
                 if not (0 <= volume <= 100):
                     messagebox.showerror("输入错误", "音量必须在 0 到 100 之间。", parent=dialog); return
+                if repeat < 1:
+                    messagebox.showerror("输入错误", "“播 n 遍”的次数必须大于或等于 1。", parent=dialog); return
             except ValueError:
-                messagebox.showerror("输入错误", "语速、音调、音量必须是有效的整数。", parent=dialog); return
+                messagebox.showerror("输入错误", "语速、音调、音量、播报遍数必须是有效的整数。", parent=dialog); return
+            
+            if not weekday_entry.get().strip():
+                messagebox.showerror("输入错误", "“周几/几号”规则不能为空，请点击“选取...”进行设置。", parent=dialog)
+                return
+            
+            if not date_range_entry.get().strip():
+                messagebox.showerror("输入错误", "“日期范围”不能为空，请点击“设置...”进行配置。", parent=dialog)
+                return
+            # --- ↑↑↑ 验证模块结束 ↑↑↑ ---
             
             text_content = content_text.get('1.0', END).strip()
             if not text_content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
@@ -3465,15 +3628,13 @@ class TimedBroadcastApp:
             progress_dialog.title("请稍候")
             progress_dialog.resizable(False, False); progress_dialog.transient(dialog)
             
-            # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
             progress_dialog.attributes('-topmost', True)
-            dialog.attributes('-disabled', True) # 禁用父对话框
+            dialog.attributes('-disabled', True)
             
             def cleanup_progress():
-                dialog.attributes('-disabled', False) # 恢复父对话框
+                dialog.attributes('-disabled', False)
                 progress_dialog.destroy()
                 dialog.focus_force()
-            # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
             progress_dialog.protocol("WM_DELETE_WINDOW", cleanup_progress)
 
@@ -3539,7 +3700,7 @@ class TimedBroadcastApp:
             messagebox.showerror("错误", "播音文字内容不能为空。", parent=params['dialog']); return
         try:
             voice_volume = int(params['volume_entry'].get().strip() or '80')
-            bgm_volume = int(params['bgm_volume_var'].get().strip() or '40')
+            bgm_volume = int(params['bgm_volume_var'].get().strip() or '20')
         except ValueError:
             messagebox.showerror("错误", "音量必须是有效的整数。", parent=params['dialog']); return
 
@@ -4011,7 +4172,7 @@ class TimedBroadcastApp:
         try:
             interval_min = int(interval_entry.get())
             count = int(count_entry.get())
-            if interval_min <= 1 or count <= 1:
+            if interval_min < 1 or count <= 1:
                 messagebox.showwarning("输入无效", "“每分钟”和“一共次数”都必须是大于1的整数。", parent=parent_dialog)
                 return
         except (ValueError, TypeError):
@@ -4329,6 +4490,7 @@ class TimedBroadcastApp:
             time_var.set(normalized_time)
             self.save_settings()
             cleanup_and_destroy()
+
         bottom_frame = ttk.Frame(dialog); bottom_frame.pack(pady=15)
         ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=10)
         ttk.Button(bottom_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10)
@@ -4695,6 +4857,8 @@ class TimedBroadcastApp:
                     try: self.playback_command_queue.get_nowait()
                     except queue.Empty: break
 
+    # 将 "原始A" 代码中的整个 _intercut_worker 函数替换为下面的版本
+
     def _intercut_worker(self):
         """
         专用于处理插播任务的后台线程（最终版：彻底修复死锁）。
@@ -4705,16 +4869,12 @@ class TimedBroadcastApp:
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
             
             while self.running:
-                # 阻塞等待，直到有插播任务进来
                 task_data = self.intercut_queue.get()
                 
                 try:
                     self.log("接收到插播任务，开始执行...")
                     was_muted = self.is_muted
                     
-                    # --- ↓↓↓ 这是最核心的逻辑修正：不再互相等待 ↓↓↓ ---
-
-                    # 1. 在主线程中创建UI，并获取弹窗和停止按钮的引用
                     ui_elements = queue.Queue()
                     def setup_ui():
                         if not was_muted:
@@ -4738,12 +4898,11 @@ class TimedBroadcastApp:
                         stop_btn.pack(padx=20, pady=(0, 20), fill=tk.X)
                         
                         self.center_window(dialog)
-                        ui_elements.put(dialog) # 将创建好的对话框放入队列
+                        ui_elements.put(dialog)
 
                     self.root.after(0, setup_ui)
-                    progress_dialog = ui_elements.get() # 后台线程等待主线程完成UI创建
+                    progress_dialog = ui_elements.get()
 
-                    # 2. 执行语音播报 (这部分逻辑不变)
                     text = task_data['text']
                     params = task_data['params']
                     repeats = task_data['repeats']
@@ -4756,21 +4915,30 @@ class TimedBroadcastApp:
                     escaped_text = final_text_to_speak.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                     xml_text = f"<rate absspeed='{params.get('speed', '0')}'><pitch middle='{params.get('pitch', '0')}'>{escaped_text}</pitch></rate>"
                     
-                    speaker.Speak(xml_text, 1 | 2)
-                    time.sleep(0.1)
+                    speaker.Speak(xml_text, 1 | 2) # SVSF_ASYNC | SVSF_IS_XML
+
+                    # --- ↓↓↓ 核心修改：用更可靠的等待机制替换旧的while循环 ↓↓↓ ---
                     
-                    while speaker.Status.RunningState in [1, 2]:
+                    # 持续循环，直到语音播放完成或被手动停止
+                    while True:
+                        # 1. 优先检查我们的紧急停止信号
                         if self.intercut_stop_event.is_set():
-                            speaker.Speak("", 3)
+                            speaker.Speak("", 3) # SVSF_PURGEBEFORESPEAK, 强制清空并停止
                             self.log("插播被用户紧急停止！")
                             break
-                        # PumpWaitingMessages 在这里可能不是必需的，但保留无害
-                        pythoncom.PumpWaitingMessages() 
-                        time.sleep(0.05)
-                    time.sleep(1)
+
+                        # 2. 使用SAPI内置的等待方法，等待最多100毫秒
+                        #    如果语音在这100毫秒内播放完了，它会返回 True
+                        if speaker.WaitUntilDone(100):
+                            self.log("语音引擎报告播放完成。")
+                            break # 语音已正常结束，跳出循环
+                        
+                        # 如果100毫秒后还没结束，循环会继续，我们就可以在下一次循环开始时
+                        # 再次检查紧急停止信号，这保证了高响应性。
+
+                    # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
 
                 finally:
-                    # 3. 无论成功、失败还是中断，都保证在主线程执行清理
                     def cleanup_ui():
                         if progress_dialog and progress_dialog.winfo_exists():
                             progress_dialog.destroy()
@@ -6700,24 +6868,37 @@ class TimedBroadcastApp:
                     messagebox.showerror("格式错误", "一次性任务的日期或时间格式不正确。", parent=dialog)
                     return
                 new_todo_data['remind_datetime'] = f"{date_str} {time_str}"
-            else:
+            else: # recurring task
+                # --- ↓↓↓ 新增的输入验证模块 ↓↓↓ ---
                 try:
                     interval = int(recurring_interval_entry.get().strip() or '0')
                     if not (0 <= interval <= 1440): raise ValueError
                 except ValueError:
-                    messagebox.showerror("格式错误", "循环间隔必须是 0-1440 之间的整数。", parent=dialog)
+                    messagebox.showerror("格式错误", "循环间隔必须是 0 到 1440 之间的整数。", parent=dialog)
                     return
+                
+                if not recurring_weekday_entry.get().strip():
+                    messagebox.showerror("输入错误", "循环任务的“周几/几号”规则不能为空。", parent=dialog)
+                    return
+                
+                if not recurring_daterange_entry.get().strip():
+                    messagebox.showerror("输入错误", "循环任务的“日期范围”不能为空。", parent=dialog)
+                    return
+                # --- ↑↑↑ 验证模块结束 ↑↑↑ ---
+                
                 is_valid_time, time_msg = self._normalize_multiple_times_string(recurring_time_entry.get().strip())
                 if not is_valid_time:
                     messagebox.showerror("格式错误", time_msg, parent=dialog); return
                 is_valid_date, date_msg = self._normalize_date_range_string(recurring_daterange_entry.get().strip())
                 if not is_valid_date:
                     messagebox.showerror("格式错误", date_msg, parent=dialog); return
+                    
                 new_todo_data['start_times'] = time_msg
                 new_todo_data['weekday'] = recurring_weekday_entry.get().strip()
                 new_todo_data['date_range'] = date_msg
                 new_todo_data['interval_minutes'] = interval
                 new_todo_data['last_interval_run'] = ""
+                
             if todo_to_edit:
                 self.todos[index] = new_todo_data
             else:
