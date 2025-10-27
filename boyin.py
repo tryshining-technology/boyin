@@ -4709,7 +4709,6 @@ class TimedBroadcastApp:
                 task_data = self.intercut_queue.get()
                 
                 try:
-                    time.sleep(1)
                     self.log("接收到插播任务，开始执行...")
                     was_muted = self.is_muted
                     
@@ -4717,36 +4716,32 @@ class TimedBroadcastApp:
 
                     # 1. 在主线程中创建UI，并获取弹窗和停止按钮的引用
                     ui_elements = queue.Queue()
-
                     def setup_ui():
-                        # --- ▼▼▼ 核心修改：在这里添加1秒延迟 ▼▼▼ ---
-                        def delayed_mute_and_show():
-                            if not was_muted:
-                                self.toggle_mute_all()
-                            
-                            dialog = ttk.Toplevel(self.root)
-                            dialog.title("插播进行中")
-                            dialog.resizable(False, False)
-                            dialog.transient(self.root)
-                            dialog.attributes('-topmost', True)
-                            dialog.grab_set()
-                            dialog.protocol("WM_DELETE_WINDOW", lambda: None)
-                            
-                            ttk.Label(dialog, text="正在插播中,请等待结束或紧急停止...", font=self.font_12_bold, bootstyle="info").pack(padx=40, pady=(20, 10))
-                            
-                            def stop_intercut_now():
-                                self.log("用户请求紧急停止插播...")
-                                self.intercut_stop_event.set()
-                            
-                            stop_btn = ttk.Button(dialog, text="紧急停止", bootstyle="danger", command=stop_intercut_now)
-                            stop_btn.pack(padx=20, pady=(0, 20), fill=tk.X)
-                            
-                            self.center_window(dialog)
-                            ui_elements.put(dialog) # 将创建好的对话框放入队列
+                        if not was_muted:
+                            self.toggle_mute_all()
                         
-                        # 使用 after 延迟1000毫秒（1秒）后执行静音和弹窗显示
-                        self.root.after(1000, delayed_mute_and_show)
-                        # --- ▲▲▲ 核心修改结束 ▲▲▲ ---
+                        dialog = ttk.Toplevel(self.root)
+                        dialog.title("插播进行中")
+                        dialog.resizable(False, False)
+                        dialog.transient(self.root)
+                        dialog.attributes('-topmost', True)
+                        dialog.grab_set()
+                        dialog.protocol("WM_DELETE_WINDOW", lambda: None)
+                        
+                        ttk.Label(dialog, text="正在插播中,请等待结束或紧急停止...", font=self.font_12_bold, bootstyle="info").pack(padx=40, pady=(20, 10))
+                        
+                        def stop_intercut_now():
+                            self.log("用户请求紧急停止插播...")
+                            self.intercut_stop_event.set()
+                        
+                        stop_btn = ttk.Button(dialog, text="紧急停止", bootstyle="danger", command=stop_intercut_now)
+                        stop_btn.pack(padx=20, pady=(0, 20), fill=tk.X)
+                        
+                        self.center_window(dialog)
+                        ui_elements.put(dialog) # 将创建好的对话框放入队列
+
+                    self.root.after(0, setup_ui)
+                    progress_dialog = ui_elements.get() # 后台线程等待主线程完成UI创建
 
                     # 2. 执行语音播报 (这部分逻辑不变)
                     text = task_data['text']
@@ -4772,7 +4767,6 @@ class TimedBroadcastApp:
                         # PumpWaitingMessages 在这里可能不是必需的，但保留无害
                         pythoncom.PumpWaitingMessages() 
                         time.sleep(0.05)
-
                     time.sleep(1)
 
                 finally:
