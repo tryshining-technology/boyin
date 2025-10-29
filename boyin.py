@@ -3919,7 +3919,7 @@ class TimedBroadcastApp:
     def _synthesis_worker_edge_tts(self, text, voice_friendly_name, style_api_name, params, output_path, callback):
         """
         使用 Edge TTS 在后台线程中合成语音的封装函数（最终修复版）。
-        此版本始终构建完整的SSML，不再使用快捷参数，以确保绝对稳定性。
+        此版本始终构建完整的SSML，并明确传递 voice_id，确保所有功能稳定。
         """
         async def _synthesize_async():
             try:
@@ -3930,39 +3930,37 @@ class TimedBroadcastApp:
                 if not voice_id:
                     raise ValueError(f"未找到名为 '{voice_friendly_name}' 的 Edge TTS 语音。")
 
-                # 1. 准备语速和音调的参数值 (这次我们不加百分号)
+                # 1. 准备语速和音调的参数值
                 rate_val = int(params.get('speed', '0'))
                 scaled_rate = rate_val * 5
                 
                 pitch_val = int(params.get('pitch', '0'))
                 scaled_pitch = pitch_val * 5
-
-                # 2. 对要朗读的原始文本进行XML转义，这至关重要
+                
+                # 2. 对原始文本进行XML转义
                 escaped_text = escape(text)
 
                 # 3. 构建内部的朗读内容 (content_part)
-                #    无论是否有语气，都先用 <prosody> 标签包裹，控制语速和音调
-                #    SSML标准中，<prosody> 标签内的 rate/pitch 值是接受 '0%' 和 '+20%' 这种格式的
+                #    始终使用 <prosody> 标签来包裹，以控制语速和音调
                 rate_str_for_ssml = f"{'+' if scaled_rate >= 0 else ''}{scaled_rate}%"
                 pitch_str_for_ssml = f"{'+' if scaled_pitch >= 0 else ''}{scaled_pitch}%"
                 
                 content_part = f"<prosody rate='{rate_str_for_ssml}' pitch='{pitch_str_for_ssml}'>{escaped_text}</prosody>"
                 
-                # 4. 如果有语气风格，再在 <prosody> 的外部套上 <mstts:express-as> 标签
+                # 4. 如果有语气风格，再在外部套上 <mstts:express-as> 标签
                 if style_api_name:
                     content_part = f"<mstts:express-as style='{style_api_name}'>{content_part}</mstts:express-as>"
                 
-                # 5. 构建最终的、完整的SSML字符串
+                # 5. 构建最终的、完整的SSML字符串，但【不再包含】<voice>标签
+                #    因为 voice 将通过参数明确传递
                 final_ssml = f"""
                 <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>
-                    <voice name='{voice_id}'>
-                        {content_part}
-                    </voice>
+                    {content_part}
                 </speak>
                 """
 
-                # 6. 【关键】调用 Communicate 时，只传递最终的 SSML，绝不传递任何其他参数
-                communicate = edge_tts.Communicate(final_ssml)
+                # 6. 【关键修复】调用 Communicate 时，同时传递 SSML 文本 和 voice_id 参数
+                communicate = edge_tts.Communicate(final_ssml, voice=voice_id)
                 
                 with open(output_path, "wb") as f:
                     async for chunk in communicate.stream():
