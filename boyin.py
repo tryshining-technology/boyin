@@ -3914,6 +3914,8 @@ class TimedBroadcastApp:
         """获取预定义的 Edge TTS 语气风格列表"""
         return list(EDGE_TTS_STYLES.keys())
 
+    # --- ↓↓↓ 使用这个【架构正确的最终版】完整替换 _synthesis_worker_edge_tts 函数 ↓↓↓ ---
+
     def _synthesis_worker_edge_tts(self, text, voice_friendly_name, style_api_name, params, output_path, callback):
         """
         使用 Edge TTS 在后台线程中合成语音的封装函数（支持SSML风格）。
@@ -3921,38 +3923,42 @@ class TimedBroadcastApp:
         async def _synthesize_async():
             try:
                 import edge_tts
+                from xml.sax.saxutils import escape
                 
                 voice_id = EDGE_TTS_VOICES.get(voice_friendly_name)
                 if not voice_id:
                     raise ValueError(f"未找到名为 '{voice_friendly_name}' 的 Edge TTS 语音。")
 
-                # --- 【最终修正点】---
-                # 只有在值不为0时，才生成对应的参数字符串，并且正数不带'+'号
+                # 1. 准备语速和音调的参数值 (这次我们不加百分号)
                 rate_val = int(params.get('speed', '0'))
                 scaled_rate = rate_val * 5
-                rate_str = f"{scaled_rate}%" if rate_val != 0 else ""
                 
                 pitch_val = int(params.get('pitch', '0'))
                 scaled_pitch = pitch_val * 5
-                pitch_str = f"{scaled_pitch}%" if pitch_val != 0 else ""
-                # --- 【修正结束】---
-                
-                final_text = text
-                if style_api_name:
-                    from xml.sax.saxutils import escape
-                    escaped_text = escape(text)
-                    
-                    final_text = f"""
-                    <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>
-                        <voice name='{voice_id}'>
-                            <mstts:express-as style='{style_api_name}'>
-                                {escaped_text}
-                            </mstts:express-as>
-                        </voice>
-                    </speak>
-                    """
 
-                communicate = edge_tts.Communicate(final_text, voice_id, rate=rate_str, pitch=pitch_str)
+                # 2. 对要朗读的原始文本进行XML转义，这至关重要
+                escaped_text = escape(text)
+
+                # 3. 构建内部的朗读内容 (content_part)
+                content_part = escaped_text
+                if style_api_name:
+                    # 如果有语气风格，用 express-as 标签包裹
+                    content_part = f"<mstts:express-as style='{style_api_name}'>{escaped_text}</mstts:express-as>"
+                
+                # 4. 构建最终的、完整的SSML字符串
+                #    使用 <prosody> 标签来同时控制语速和音调
+                final_ssml = f"""
+                <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>
+                    <voice name='{voice_id}'>
+                        <prosody rate='{scaled_rate}%' pitch='{scaled_pitch}%'>
+                            {content_part}
+                        </prosody>
+                    </voice>
+                </speak>
+                """
+
+                # 5. 调用 Communicate 时，只传递最终的 SSML，不再传递 rate 和 pitch 参数
+                communicate = edge_tts.Communicate(final_ssml)
                 
                 with open(output_path, "wb") as f:
                     async for chunk in communicate.stream():
@@ -3963,6 +3969,14 @@ class TimedBroadcastApp:
 
             except Exception as e:
                 self.root.after(0, callback, {'success': False, 'error': str(e)})
+
+        try:
+            import asyncio
+            if sys.platform == "win32":
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            asyncio.run(_synthesize_async())
+        except Exception as e:
+            self.root.after(0, callback, {'success': False, 'error': str(e)})
 
         try:
             import asyncio
