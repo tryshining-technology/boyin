@@ -3918,48 +3918,53 @@ class TimedBroadcastApp:
 
     def _synthesis_worker_edge_tts(self, text, voice_friendly_name, style_api_name, params, output_path, callback):
         """
-        使用 Edge TTS 在后台线程中合成语音的封装函数（支持SSML风格）。
+        使用 Edge TTS 在后台线程中合成语音的封装函数（最终修复版）。
         """
         async def _synthesize_async():
             try:
                 import edge_tts
-                from xml.sax.saxutils import escape
                 
                 voice_id = EDGE_TTS_VOICES.get(voice_friendly_name)
                 if not voice_id:
                     raise ValueError(f"未找到名为 '{voice_friendly_name}' 的 Edge TTS 语音。")
 
-                # 1. 准备语速和音调的参数值 (这次我们不加百分号)
+                # 1. 准备语速和音调的参数字符串 (正数不带'+', 零值为空字符串)
                 rate_val = int(params.get('speed', '0'))
                 scaled_rate = rate_val * 5
+                rate_str = f"{scaled_rate}%" if rate_val != 0 else ""
                 
                 pitch_val = int(params.get('pitch', '0'))
                 scaled_pitch = pitch_val * 5
+                pitch_str = f"{scaled_pitch}%" if pitch_val != 0 else ""
 
-                # 2. 对要朗读的原始文本进行XML转义，这至关重要
-                escaped_text = escape(text)
-
-                # 3. 构建内部的朗读内容 (content_part)
-                content_part = escaped_text
+                communicate = None
+                
+                # 2. 根据是否有“语气风格”选择不同的调用方式
                 if style_api_name:
-                    # 如果有语气风格，用 express-as 标签包裹
-                    content_part = f"<mstts:express-as style='{style_api_name}'>{escaped_text}</mstts:express-as>"
-                
-                # 4. 构建最终的、完整的SSML字符串
-                #    使用 <prosody> 标签来同时控制语速和音调
-                final_ssml = f"""
-                <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>
-                    <voice name='{voice_id}'>
-                        <prosody rate='{scaled_rate}%' pitch='{scaled_pitch}%'>
-                            {content_part}
-                        </prosody>
-                    </voice>
-                </speak>
-                """
+                    # --- 方式一：有语气风格 ---
+                    # 手动构建SSML，但不包含<prosody>，并且不传递rate/pitch参数
+                    # 因为在SSML模式下，快捷参数会被忽略，且<prosody>可能不被支持
+                    from xml.sax.saxutils import escape
+                    escaped_text = escape(text)
+                    
+                    final_ssml = f"""
+                    <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>
+                        <voice name='{voice_id}'>
+                            <mstts:express-as style='{style_api_name}'>
+                                {escaped_text}
+                            </mstts:express-as>
+                        </voice>
+                    </speak>
+                    """
+                    communicate = edge_tts.Communicate(final_ssml)
+                    
+                else:
+                    # --- 方式二：没有语气风格（默认） ---
+                    # 只传递纯文本，并使用快捷参数来控制语速和音调
+                    # 这是edge-tts库的标准用法
+                    communicate = edge_tts.Communicate(text, voice_id, rate=rate_str, pitch=pitch_str)
 
-                # 5. 调用 Communicate 时，只传递最终的 SSML，不再传递 rate 和 pitch 参数
-                communicate = edge_tts.Communicate(final_ssml)
-                
+                # 3. 流式写入文件 (这部分逻辑不变)
                 with open(output_path, "wb") as f:
                     async for chunk in communicate.stream():
                         if chunk["type"] == "audio":
@@ -3969,22 +3974,6 @@ class TimedBroadcastApp:
 
             except Exception as e:
                 self.root.after(0, callback, {'success': False, 'error': str(e)})
-
-        try:
-            import asyncio
-            if sys.platform == "win32":
-                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-            asyncio.run(_synthesize_async())
-        except Exception as e:
-            self.root.after(0, callback, {'success': False, 'error': str(e)})
-
-        try:
-            import asyncio
-            if sys.platform == "win32":
-                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-            asyncio.run(_synthesize_async())
-        except Exception as e:
-            self.root.after(0, callback, {'success': False, 'error': str(e)})
 
         try:
             import asyncio
