@@ -3401,7 +3401,7 @@ class TimedBroadcastApp:
         engine_var = tk.StringVar(value="sapi")
         sapi_rb = ttk.Radiobutton(engine_frame, text="本地语音 (SAPI)", variable=engine_var, value="sapi")
         sapi_rb.pack(side=LEFT)
-        edge_rb = ttk.Radiobutton(engine_frame, text="在线语音 (Edge TTS, 推荐)", variable=engine_var, value="edge-tts")
+        edge_rb = ttk.Radiobutton(engine_frame, text="在线语音 (推荐)", variable=engine_var, value="edge-tts")
         edge_rb.pack(side=LEFT, padx=20)
 
         ttk.Label(content_frame, text="播音员:").grid(row=4, column=0, sticky='w', padx=5, pady=3)
@@ -3927,21 +3927,18 @@ class TimedBroadcastApp:
                 if not voice_id:
                     raise ValueError(f"未找到名为 '{voice_friendly_name}' 的 Edge TTS 语音。")
 
-                # --- 【修正点】---
-                # 将界面上的参数转换为 Edge TTS 需要的格式 (已修复 +0% 的问题)
+                # --- 【最终修正点】---
+                # 只有在值不为0时，才生成对应的参数字符串
                 rate_val = int(params.get('speed', '0'))
-                scaled_rate = rate_val * 5
-                rate_str = f"{'+' if scaled_rate > 0 else ''}{scaled_rate}%"
+                rate_str = f"{'+' if rate_val > 0 else ''}{rate_val * 5}%" if rate_val != 0 else ""
                 
                 pitch_val = int(params.get('pitch', '0'))
-                scaled_pitch = pitch_val * 5
-                pitch_str = f"{'+' if scaled_pitch > 0 else ''}{scaled_pitch}%"
+                pitch_str = f"{'+' if pitch_val > 0 else ''}{pitch_val * 5}%" if pitch_val != 0 else ""
                 # --- 【修正结束】---
                 
                 final_text = text
                 # 如果指定了风格，则构建SSML
                 if style_api_name:
-                    # 对原始文本进行XML转义，防止SSML结构被破坏
                     from xml.sax.saxutils import escape
                     escaped_text = escape(text)
                     
@@ -3955,6 +3952,7 @@ class TimedBroadcastApp:
                     </speak>
                     """
 
+                # 在调用 Communicate 时，我们传递 rate 和 pitch 参数
                 communicate = edge_tts.Communicate(final_text, voice_id, rate=rate_str, pitch=pitch_str)
                 
                 with open(output_path, "wb") as f:
