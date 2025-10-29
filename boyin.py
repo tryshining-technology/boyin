@@ -3914,57 +3914,56 @@ class TimedBroadcastApp:
         """获取预定义的 Edge TTS 语气风格列表"""
         return list(EDGE_TTS_STYLES.keys())
 
-    # --- ↓↓↓ 使用这个【架构正确的最终版】完整替换 _synthesis_worker_edge_tts 函数 ↓↓↓ ---
+# --- ↓↓↓ 使用这个【架构完全重构、最终验证版】完整替换 _synthesis_worker_edge_tts 函数 ↓↓↓ ---
 
     def _synthesis_worker_edge_tts(self, text, voice_friendly_name, style_api_name, params, output_path, callback):
         """
         使用 Edge TTS 在后台线程中合成语音的封装函数（最终修复版）。
+        此版本始终构建完整的SSML，不再使用快捷参数，以确保绝对稳定性。
         """
         async def _synthesize_async():
             try:
                 import edge_tts
+                from xml.sax.saxutils import escape
                 
                 voice_id = EDGE_TTS_VOICES.get(voice_friendly_name)
                 if not voice_id:
                     raise ValueError(f"未找到名为 '{voice_friendly_name}' 的 Edge TTS 语音。")
 
-                # 1. 准备语速和音调的参数字符串 (正数不带'+', 零值为空字符串)
+                # 1. 准备语速和音调的参数值 (这次我们不加百分号)
                 rate_val = int(params.get('speed', '0'))
                 scaled_rate = rate_val * 5
-                rate_str = f"{scaled_rate}%" if rate_val != 0 else ""
                 
                 pitch_val = int(params.get('pitch', '0'))
                 scaled_pitch = pitch_val * 5
-                pitch_str = f"{scaled_pitch}%" if pitch_val != 0 else ""
 
-                communicate = None
+                # 2. 对要朗读的原始文本进行XML转义，这至关重要
+                escaped_text = escape(text)
+
+                # 3. 构建内部的朗读内容 (content_part)
+                #    无论是否有语气，都先用 <prosody> 标签包裹，控制语速和音调
+                #    SSML标准中，<prosody> 标签内的 rate/pitch 值是接受 '0%' 和 '+20%' 这种格式的
+                rate_str_for_ssml = f"{'+' if scaled_rate >= 0 else ''}{scaled_rate}%"
+                pitch_str_for_ssml = f"{'+' if scaled_pitch >= 0 else ''}{scaled_pitch}%"
                 
-                # 2. 根据是否有“语气风格”选择不同的调用方式
+                content_part = f"<prosody rate='{rate_str_for_ssml}' pitch='{pitch_str_for_ssml}'>{escaped_text}</prosody>"
+                
+                # 4. 如果有语气风格，再在 <prosody> 的外部套上 <mstts:express-as> 标签
                 if style_api_name:
-                    # --- 方式一：有语气风格 ---
-                    # 手动构建SSML，但不包含<prosody>，并且不传递rate/pitch参数
-                    # 因为在SSML模式下，快捷参数会被忽略，且<prosody>可能不被支持
-                    from xml.sax.saxutils import escape
-                    escaped_text = escape(text)
-                    
-                    final_ssml = f"""
-                    <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>
-                        <voice name='{voice_id}'>
-                            <mstts:express-as style='{style_api_name}'>
-                                {escaped_text}
-                            </mstts:express-as>
-                        </voice>
-                    </speak>
-                    """
-                    communicate = edge_tts.Communicate(final_ssml)
-                    
-                else:
-                    # --- 方式二：没有语气风格（默认） ---
-                    # 只传递纯文本，并使用快捷参数来控制语速和音调
-                    # 这是edge-tts库的标准用法
-                    communicate = edge_tts.Communicate(text, voice_id, rate=rate_str, pitch=pitch_str)
+                    content_part = f"<mstts:express-as style='{style_api_name}'>{content_part}</mstts:express-as>"
+                
+                # 5. 构建最终的、完整的SSML字符串
+                final_ssml = f"""
+                <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>
+                    <voice name='{voice_id}'>
+                        {content_part}
+                    </voice>
+                </speak>
+                """
 
-                # 3. 流式写入文件 (这部分逻辑不变)
+                # 6. 【关键】调用 Communicate 时，只传递最终的 SSML，绝不传递任何其他参数
+                communicate = edge_tts.Communicate(final_ssml)
+                
                 with open(output_path, "wb") as f:
                     async for chunk in communicate.stream():
                         if chunk["type"] == "audio":
@@ -3982,7 +3981,6 @@ class TimedBroadcastApp:
             asyncio.run(_synthesize_async())
         except Exception as e:
             self.root.after(0, callback, {'success': False, 'error': str(e)})
-
     def select_file_for_entry(self, initial_dir, string_var, parent_dialog):
         filename = filedialog.askopenfilename(title="选择文件", initialdir=initial_dir, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac"), ("所有文件", "*.*")], parent=parent_dialog)
         if filename: string_var.set(filename)
