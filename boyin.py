@@ -3624,6 +3624,7 @@ class TimedBroadcastApp:
                 if play_now_flag: self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
 
             if selected_engine == 'sapi':
+                voice_params['voice'] = voice_var.get()
                 synthesis_thread = threading.Thread(target=self._synthesis_worker, args=(text_content, voice_params, output_path, _on_synthesis_complete))
             else:
                 style_api_name = EDGE_TTS_STYLES.get(style_var.get())
