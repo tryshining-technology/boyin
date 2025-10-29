@@ -145,20 +145,24 @@ REGISTRY_PARENT_KEY_PATH = r"Software\创翔科技"
 SECRET_SALT = "42492f00-d980-40e1-a17e-ba8094727636"
 AMAP_API_KEY = "c62d9b56d92792d1d11c8544f1b547dc"
 EDGE_TTS_VOICES = {
-    # --- 中国大陆 ---
+    # --- 中国大陆 (通用普通话) ---
     '晓晓 (女)': 'zh-CN-XiaoxiaoNeural',
     '晓伊 (女)': 'zh-CN-XiaoyiNeural',
     '云扬 (男)': 'zh-CN-YunyangNeural',
     '云希 (男)': 'zh-CN-YunxiNeural',
     '云健 (男)': 'zh-CN-YunjianNeural',
     '云夏 (男)': 'zh-CN-YunxiaNeural',
+    '云枫 (男/沉稳)': 'zh-CN-YunfengNeural',   # <-- 新增
+    '奕轩 (男/年轻)': 'zh-CN-YixuanNeural',   # <-- 新增
+    # --- 中国大陆 (地方口音) ---
     '晓北 (辽宁/女)': 'zh-CN-liaoning-XiaobeiNeural',
     '晓妮 (陕西/女)': 'zh-CN-shaanxi-XiaoniNeural',
-    # --- 中国香港 ---
+    '云希 (四川话/男)': 'zh-CN-sichuan-YunxiNeural', # <-- 新增
+    # --- 中国香港 (粤语) ---
     '曉佳 (女)': 'zh-HK-HiuGaaiNeural',
     '曉曼 (女)': 'zh-HK-HiuMaanNeural',
     '雲龍 (男)': 'zh-HK-WanLungNeural',
-    # --- 中国台湾 ---
+    # --- 中国台湾 (台湾普通话) ---
     '曉臻 (女)': 'zh-TW-HsiaoChenNeural',
     '曉雨 (女)': 'zh-TW-HsiaoYuNeural',
     '雲哲 (男)': 'zh-TW-YunJheNeural',
@@ -1479,7 +1483,7 @@ class TimedBroadcastApp:
         mac_addresses.sort()
         
         # 返回最优先的那个MAC地址
-        self.log(f"找到的最稳定MAC地址来自网卡: {mac_addresses[0][2]}")
+        #self.log(f"找到的最稳定MAC地址来自网卡: {mac_addresses[0][2]}")
         return mac_addresses[0][1]
 
     # --- ↓↓↓ 新增函数：生成授权签名 ↓↓↓ ---
@@ -3922,12 +3926,16 @@ class TimedBroadcastApp:
                 if not voice_id:
                     raise ValueError(f"未找到名为 '{voice_friendly_name}' 的 Edge TTS 语音。")
 
-                # 将界面上的参数转换为 Edge TTS 需要的格式
+                # --- 【修正点】---
+                # 将界面上的参数转换为 Edge TTS 需要的格式 (已修复 +0% 的问题)
                 rate_val = int(params.get('speed', '0'))
-                rate_str = f"{'+' if rate_val >= 0 else ''}{rate_val * 5}%"
+                scaled_rate = rate_val * 5
+                rate_str = f"{'+' if scaled_rate > 0 else ''}{scaled_rate}%"
                 
                 pitch_val = int(params.get('pitch', '0'))
-                pitch_str = f"{'+' if pitch_val >= 0 else ''}{pitch_val * 5}%"
+                scaled_pitch = pitch_val * 5
+                pitch_str = f"{'+' if scaled_pitch > 0 else ''}{scaled_pitch}%"
+                # --- 【修正结束】---
                 
                 final_text = text
                 # 如果指定了风格，则构建SSML
