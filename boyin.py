@@ -3922,22 +3922,22 @@ class TimedBroadcastApp:
             try:
                 import edge_tts
                 
-                # 从用户友好的名称转换回 API 需要的 voice ID
                 voice_id = EDGE_TTS_VOICES.get(voice_friendly_name)
                 if not voice_id:
                     raise ValueError(f"未找到名为 '{voice_friendly_name}' 的 Edge TTS 语音。")
 
                 # --- 【最终修正点】---
-                # 只有在值不为0时，才生成对应的参数字符串
+                # 只有在值不为0时，才生成对应的参数字符串，并且正数不带'+'号
                 rate_val = int(params.get('speed', '0'))
-                rate_str = f"{'+' if rate_val > 0 else ''}{rate_val * 5}%" if rate_val != 0 else ""
+                scaled_rate = rate_val * 5
+                rate_str = f"{scaled_rate}%" if rate_val != 0 else ""
                 
                 pitch_val = int(params.get('pitch', '0'))
-                pitch_str = f"{'+' if pitch_val > 0 else ''}{pitch_val * 5}%" if pitch_val != 0 else ""
+                scaled_pitch = pitch_val * 5
+                pitch_str = f"{scaled_pitch}%" if pitch_val != 0 else ""
                 # --- 【修正结束】---
                 
                 final_text = text
-                # 如果指定了风格，则构建SSML
                 if style_api_name:
                     from xml.sax.saxutils import escape
                     escaped_text = escape(text)
@@ -3952,7 +3952,6 @@ class TimedBroadcastApp:
                     </speak>
                     """
 
-                # 在调用 Communicate 时，我们传递 rate 和 pitch 参数
                 communicate = edge_tts.Communicate(final_text, voice_id, rate=rate_str, pitch=pitch_str)
                 
                 with open(output_path, "wb") as f:
@@ -3964,6 +3963,14 @@ class TimedBroadcastApp:
 
             except Exception as e:
                 self.root.after(0, callback, {'success': False, 'error': str(e)})
+
+        try:
+            import asyncio
+            if sys.platform == "win32":
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            asyncio.run(_synthesize_async())
+        except Exception as e:
+            self.root.after(0, callback, {'success': False, 'error': str(e)})
 
         try:
             import asyncio
