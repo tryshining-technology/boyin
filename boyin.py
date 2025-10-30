@@ -168,24 +168,24 @@ EDGE_TTS_VOICES = {
     '雲哲 (男)': 'zh-TW-YunJheNeural',
 }
 # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
-#EDGE_TTS_STYLES = {
-    #"默认": None,
-    #"新闻播报": "newscast",
-    #"客服": "customerservice",
-    #"智能助手": "assistant",
-    #"抒情": "lyrical",
-    #"高兴": "cheerful",
-    #"悲伤": "sad",
-    #"愤怒": "angry",
-    #"温柔": "gentle",
-    #"深情": "affectionate",
-    #"不满": "unhappy",
-    #"害怕": "fearful",
-    #"严肃": "serious",
-    #"广告": "advertisement_upbeat",
-    #"体育评论": "sports_commentary",
-    #"轻松叙述": "narration-relaxed",
-#}
+EDGE_TTS_STYLES = {
+    "默认": None,
+    "聊天": "chat",
+    "客服": "customerservice",
+    "智能助手": "assistant",
+    "新闻播报": "newscast",
+    "平静": "calm",
+    "高兴": "cheerful",
+    "深情": "affectionate",
+    "温柔": "gentle",
+    "抒情": "lyrical",
+    "诗歌朗读": "poetry-reading",
+    "悲伤": "sad",
+    "愤怒": "angry",
+    "不满": "disgruntled",
+    "害怕": "fearful",
+    "严肃": "serious",
+}
 
 
 
@@ -3354,7 +3354,7 @@ class TimedBroadcastApp:
 
 #第6部分
 #第6部分
-# --- ↓↓↓ 使用这个【完整、精简版】替换您现有的 open_voice_dialog 函数 ↓↓↓ ---
+# --- ↓↓↓ 使用这个【最终、完整的】版本替换您现有的 open_voice_dialog 函数 ↓↓↓ ---
 
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
@@ -3362,7 +3362,7 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
         dialog.resizable(True, True)
-        dialog.minsize(800, 620)
+        dialog.minsize(800, 650)
         dialog.transient(self.root)
 
         dialog.attributes('-topmost', True)
@@ -3414,18 +3414,38 @@ class TimedBroadcastApp:
         voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, font=self.font_11, state='readonly')
         voice_combo.grid(row=0, column=0, sticky='ew')
         
-        def update_voice_list(*args):
+        style_frame = ttk.Frame(voice_frame)
+        style_frame.grid(row=0, column=1, sticky='e', padx=(10, 0))
+        ttk.Label(style_frame, text="语气风格 (仅晓晓):").pack(side=LEFT)
+        style_var = tk.StringVar(value="默认")
+        style_combo = ttk.Combobox(style_frame, textvariable=style_var, values=self.get_edge_tts_styles(), font=self.font_11, state='disabled', width=12)
+        style_combo.pack(side=LEFT, padx=5)
+
+        def update_controls(*args):
             engine = engine_var.get()
-            if engine == "sapi":
-                voices = self.get_available_voices()
-                voice_combo['values'] = voices
-                if voices: voice_combo.set(voices[0])
+            selected_voice = voice_var.get()
+            
+            # 仅在引擎切换时更新播音员列表，避免循环触发
+            if args and args[0] == engine_var._name:
+                if engine == "sapi":
+                    voices = self.get_available_voices()
+                    voice_combo['values'] = voices
+                    if voices: voice_combo.set(voices[0])
+                else: # edge-tts
+                    voices = self.get_edge_tts_voices()
+                    voice_combo['values'] = voices
+                    if voices: voice_combo.set(voices[0])
+            
+            # 每次控件变化都检查语气风格框的状态
+            if engine == "edge-tts" and voice_var.get() == "晓晓 (女)":
+                style_combo.config(state='readonly')
             else:
-                voices = self.get_edge_tts_voices()
-                voice_combo['values'] = voices
-                if voices: voice_combo.set(voices[0])
-        
-        engine_var.trace_add("write", update_voice_list)
+                style_combo.config(state='disabled')
+                if style_var.get() != "默认":
+                    style_var.set("默认")
+
+        engine_var.trace_add("write", update_controls)
+        voice_var.trace_add("write", update_controls)
         
         speech_params_frame = ttk.Frame(content_frame)
         speech_params_frame.grid(row=5, column=1, columnspan=3, sticky='w', padx=5, pady=3)
@@ -3516,8 +3536,10 @@ class TimedBroadcastApp:
             content_text.text.insert('1.0', task.get('source_text', ''))
             saved_engine = task.get('engine', 'sapi')
             engine_var.set(saved_engine)
-            update_voice_list()
-            voice_var.set(task.get('voice', ''))
+            # update_controls 会在 engine_var set 后自动触发
+            dialog.after(50, lambda: voice_var.set(task.get('voice', ''))) # 延迟设置voice，确保列表已更新
+            dialog.after(60, lambda: style_var.set(task.get('style_display_name', '默认')))
+            
             speed_entry.insert(0, task.get('speed', '0')); pitch_entry.insert(0, task.get('pitch', '0')); volume_entry.insert(0, task.get('volume', '80'))
             prompt_var.set(task.get('prompt', 0)); prompt_file_var.set(task.get('prompt_file', '')); prompt_volume_var.set(task.get('prompt_volume', '80'))
             bgm_var.set(task.get('bgm', 0)); bgm_file_var.set(task.get('bgm_file', '')); bgm_volume_var.set(task.get('bgm_volume', '20'))
@@ -3529,7 +3551,7 @@ class TimedBroadcastApp:
             speed_entry.insert(0, "0"); pitch_entry.insert(0, "0"); volume_entry.insert(0, "80")
             prompt_var.set(0); prompt_volume_var.set("80"); bgm_var.set(0); bgm_volume_var.set("20")
             repeat_entry.insert(0, "1"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
-            update_voice_list()
+            update_controls()
 
         def save_task():
             try:
@@ -3553,7 +3575,7 @@ class TimedBroadcastApp:
             if is_edit_mode:
                 original_task = task_to_edit
                 if (text_content == original_task.get('source_text') and voice_var.get() == original_task.get('voice') and
-                    selected_engine == original_task.get('engine', 'sapi') and
+                    selected_engine == original_task.get('engine', 'sapi') and style_var.get() == original_task.get('style_display_name', '默认') and
                     speed_entry.get().strip() == original_task.get('speed', '0') and pitch_entry.get().strip() == original_task.get('pitch', '0') and
                     volume_entry.get().strip() == original_task.get('volume', '80')):
                     regeneration_needed = False; self.log("语音参数未变更，跳过重新生成文件。")
@@ -3565,7 +3587,7 @@ class TimedBroadcastApp:
                 return {
                     'name': name_entry.get().strip(), 'time': time_msg, 'type': 'voice', 'content': audio_path,
                     'wav_filename': filename_str, 'source_text': text_content, 'engine': selected_engine, 
-                    'voice': voice_var.get(),
+                    'voice': voice_var.get(), 'style_display_name': style_var.get(),
                     'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0",
                     'volume': volume_entry.get().strip() or "80", 'prompt': prompt_var.get(),
                     'prompt_file': prompt_file_var.get(), 'prompt_volume': prompt_volume_var.get(),
@@ -3617,8 +3639,11 @@ class TimedBroadcastApp:
                 voice_params['voice'] = voice_var.get()
                 synthesis_thread = threading.Thread(target=self._synthesis_worker, args=(text_content, voice_params, output_path, _on_synthesis_complete))
             else:
-                # 在精简版中，我们不传递 style_api_name
-                synthesis_thread = threading.Thread(target=self._synthesis_worker_edge_tts, args=(text_content, voice_var.get(), voice_params, output_path, _on_synthesis_complete))
+                style_api_name = None
+                if engine_var.get() == "edge-tts" and voice_var.get() == "晓晓 (女)":
+                    style_api_name = EDGE_TTS_STYLES.get(style_var.get())
+                
+                synthesis_thread = threading.Thread(target=self._synthesis_worker_edge_tts, args=(text_content, voice_var.get(), style_api_name, voice_params, output_path, _on_synthesis_complete))
             
             synthesis_thread.daemon = True; synthesis_thread.start()
 
@@ -3904,38 +3929,57 @@ class TimedBroadcastApp:
        # """获取预定义的 Edge TTS 语气风格列表"""
         #return list(EDGE_TTS_STYLES.keys())
 
-# --- ↓↓↓ 使用这个【极简、只处理核心功能的最终版】替换 _synthesis_worker_edge_tts 函数 ↓↓↓ ---
+# --- ↓↓↓ 使用这个【最终的、基于您正确分析的】完整替换 _synthesis_worker_edge_tts 函数 ↓↓↓ ---
 
-    def _synthesis_worker_edge_tts(self, text, voice_friendly_name, params, output_path, callback):
+    def _synthesis_worker_edge_tts(self, text, voice_friendly_name, style_api_name, params, output_path, callback):
         """
-        使用 Edge TTS 在后台线程中合成语音的封装函数（专注语速和音调）。
+        使用 Edge TTS 在后台线程中合成语音的封装函数（最终修复版）。
+        此版本始终构建一个完整的、结构正确的SSML字符串，以确保所有功能稳定。
         """
         async def _synthesize_async():
             try:
                 import edge_tts
+                from xml.sax.saxutils import escape
                 
                 voice_id = EDGE_TTS_VOICES.get(voice_friendly_name)
                 if not voice_id:
                     raise ValueError(f"未找到名为 '{voice_friendly_name}' 的 Edge TTS 语音。")
 
-                # 1. 准备语速和音调的参数字符串 (正数不带'+', 零值为空字符串)
+                # 1. 【核心修正】准备语速和音调的参数字符串，完全按照 SSML 标准
+                #    - 使用 `:+d` 格式化，确保正数和零值都带 `+` 号
+                #    - Pitch 单位使用 Hz
                 rate_val = int(params.get('speed', '0'))
                 scaled_rate = rate_val * 5
-                rate_str = f"{scaled_rate}%" if rate_val != 0 else ""
+                rate_str_for_ssml = f"{scaled_rate:+d}%"
                 
                 pitch_val = int(params.get('pitch', '0'))
                 scaled_pitch = pitch_val * 5
-                pitch_str = f"{scaled_pitch}%" if pitch_val != 0 else ""
+                pitch_str_for_ssml = f"{scaled_pitch:+d}Hz"
 
-                # 2. 【核心】直接调用 Communicate，只使用基础的快捷参数
-                communicate = edge_tts.Communicate(
-                    text,
-                    voice=voice_id,
-                    rate=rate_str,
-                    pitch=pitch_str
-                )
+                # 2. 对要朗读的原始文本进行XML转义
+                escaped_text = escape(text)
+
+                # 3. 构建核心朗读内容：始终使用 <prosody> 标签包裹文本
+                content_part = f"<prosody rate='{rate_str_for_ssml}' pitch='{pitch_str_for_ssml}'>{escaped_text}</prosody>"
                 
-                # 3. 流式写入文件
+                # 4. 如果有语气风格，再在 <prosody> 的外部套上 <mstts:express-as> 标签
+                if style_api_name:
+                    content_part = f"<mstts:express-as style='{style_api_name}'>{content_part}</mstts:express-as>"
+                
+                # 5. 构建最终的、包含 <voice> 标签的完整SSML字符串
+                #    【关键】确保整个SSML字符串没有多余的换行和空格，以增强解析器的兼容性
+                final_ssml = (
+                    f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' "
+                    f"xmlns:mstts='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>"
+                    f"<voice name='{voice_id}'>"
+                    f"{content_part}"
+                    f"</voice>"
+                    f"</speak>"
+                )
+
+                # 6. 【关键】调用 Communicate 时，只传递最终的 SSML，不传递任何其他快捷参数
+                communicate = edge_tts.Communicate(final_ssml)
+                
                 with open(output_path, "wb") as f:
                     async for chunk in communicate.stream():
                         if chunk["type"] == "audio":
