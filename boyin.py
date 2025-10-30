@@ -168,24 +168,24 @@ EDGE_TTS_VOICES = {
     '雲哲 (男)': 'zh-TW-YunJheNeural',
 }
 # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
-EDGE_TTS_STYLES = {
-    "默认": None,
-    "新闻播报": "newscast",
-    "客服": "customerservice",
-    "智能助手": "assistant",
-    "抒情": "lyrical",
-    "高兴": "cheerful",
-    "悲伤": "sad",
-    "愤怒": "angry",
-    "温柔": "gentle",
-    "深情": "affectionate",
-    "不满": "unhappy",
-    "害怕": "fearful",
-    "严肃": "serious",
-    "广告": "advertisement_upbeat",
-    "体育评论": "sports_commentary",
-    "轻松叙述": "narration-relaxed",
-}
+#EDGE_TTS_STYLES = {
+    #"默认": None,
+    #"新闻播报": "newscast",
+    #"客服": "customerservice",
+    #"智能助手": "assistant",
+    #"抒情": "lyrical",
+    #"高兴": "cheerful",
+    #"悲伤": "sad",
+    #"愤怒": "angry",
+    #"温柔": "gentle",
+    #"深情": "affectionate",
+    #"不满": "unhappy",
+    #"害怕": "fearful",
+    #"严肃": "serious",
+    #"广告": "advertisement_upbeat",
+    #"体育评论": "sports_commentary",
+    #"轻松叙述": "narration-relaxed",
+#}
 
 
 
@@ -3354,14 +3354,15 @@ class TimedBroadcastApp:
 
 #第6部分
 #第6部分
-    # 第6部分 (替换整个函数)
+# --- ↓↓↓ 使用这个【完整、精简版】替换您现有的 open_voice_dialog 函数 ↓↓↓ ---
+
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
         dialog.resizable(True, True)
-        dialog.minsize(800, 650) # 再次增加高度
+        dialog.minsize(800, 620)
         dialog.transient(self.root)
 
         dialog.attributes('-topmost', True)
@@ -3401,7 +3402,7 @@ class TimedBroadcastApp:
         engine_var = tk.StringVar(value="sapi")
         sapi_rb = ttk.Radiobutton(engine_frame, text="本地语音 (SAPI)", variable=engine_var, value="sapi")
         sapi_rb.pack(side=LEFT)
-        edge_rb = ttk.Radiobutton(engine_frame, text="在线语音 (推荐)", variable=engine_var, value="edge-tts")
+        edge_rb = ttk.Radiobutton(engine_frame, text="在线语音 (Edge TTS)", variable=engine_var, value="edge-tts")
         edge_rb.pack(side=LEFT, padx=20)
 
         ttk.Label(content_frame, text="播音员:").grid(row=4, column=0, sticky='w', padx=5, pady=3)
@@ -3413,26 +3414,16 @@ class TimedBroadcastApp:
         voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, font=self.font_11, state='readonly')
         voice_combo.grid(row=0, column=0, sticky='ew')
         
-        style_frame = ttk.Frame(voice_frame)
-        style_frame.grid(row=0, column=1, sticky='e', padx=(10, 0))
-        ttk.Label(style_frame, text="语气风格:").pack(side=LEFT)
-        style_var = tk.StringVar(value="默认")
-        style_combo = ttk.Combobox(style_frame, textvariable=style_var, values=self.get_edge_tts_styles(), font=self.font_11, state='readonly', width=12)
-        style_combo.pack(side=LEFT, padx=5)
-        
         def update_voice_list(*args):
             engine = engine_var.get()
             if engine == "sapi":
                 voices = self.get_available_voices()
                 voice_combo['values'] = voices
                 if voices: voice_combo.set(voices[0])
-                style_combo.config(state='disabled')
-                style_var.set("默认")
-            else: # edge-tts
+            else:
                 voices = self.get_edge_tts_voices()
                 voice_combo['values'] = voices
-                if voices: voice_combo.set(voices[0]) # 默认晓晓
-                style_combo.config(state='readonly')
+                if voices: voice_combo.set(voices[0])
         
         engine_var.trace_add("write", update_voice_list)
         
@@ -3527,7 +3518,6 @@ class TimedBroadcastApp:
             engine_var.set(saved_engine)
             update_voice_list()
             voice_var.set(task.get('voice', ''))
-            style_var.set(task.get('style_display_name', '默认'))
             speed_entry.insert(0, task.get('speed', '0')); pitch_entry.insert(0, task.get('pitch', '0')); volume_entry.insert(0, task.get('volume', '80'))
             prompt_var.set(task.get('prompt', 0)); prompt_file_var.set(task.get('prompt_file', '')); prompt_volume_var.set(task.get('prompt_volume', '80'))
             bgm_var.set(task.get('bgm', 0)); bgm_file_var.set(task.get('bgm_file', '')); bgm_volume_var.set(task.get('bgm_volume', '20'))
@@ -3563,7 +3553,7 @@ class TimedBroadcastApp:
             if is_edit_mode:
                 original_task = task_to_edit
                 if (text_content == original_task.get('source_text') and voice_var.get() == original_task.get('voice') and
-                    selected_engine == original_task.get('engine', 'sapi') and style_var.get() == original_task.get('style_display_name', '默认') and
+                    selected_engine == original_task.get('engine', 'sapi') and
                     speed_entry.get().strip() == original_task.get('speed', '0') and pitch_entry.get().strip() == original_task.get('pitch', '0') and
                     volume_entry.get().strip() == original_task.get('volume', '80')):
                     regeneration_needed = False; self.log("语音参数未变更，跳过重新生成文件。")
@@ -3575,7 +3565,7 @@ class TimedBroadcastApp:
                 return {
                     'name': name_entry.get().strip(), 'time': time_msg, 'type': 'voice', 'content': audio_path,
                     'wav_filename': filename_str, 'source_text': text_content, 'engine': selected_engine, 
-                    'voice': voice_var.get(), 'style_display_name': style_var.get(),
+                    'voice': voice_var.get(),
                     'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0",
                     'volume': volume_entry.get().strip() or "80", 'prompt': prompt_var.get(),
                     'prompt_file': prompt_file_var.get(), 'prompt_volume': prompt_volume_var.get(),
@@ -3627,8 +3617,8 @@ class TimedBroadcastApp:
                 voice_params['voice'] = voice_var.get()
                 synthesis_thread = threading.Thread(target=self._synthesis_worker, args=(text_content, voice_params, output_path, _on_synthesis_complete))
             else:
-                style_api_name = EDGE_TTS_STYLES.get(style_var.get())
-                synthesis_thread = threading.Thread(target=self._synthesis_worker_edge_tts, args=(text_content, voice_var.get(), style_api_name, voice_params, output_path, _on_synthesis_complete))
+                # 在精简版中，我们不传递 style_api_name
+                synthesis_thread = threading.Thread(target=self._synthesis_worker_edge_tts, args=(text_content, voice_var.get(), voice_params, output_path, _on_synthesis_complete))
             
             synthesis_thread.daemon = True; synthesis_thread.start()
 
@@ -3910,16 +3900,15 @@ class TimedBroadcastApp:
         """获取预定义的 Edge TTS 播音员列表"""
         return list(EDGE_TTS_VOICES.keys())
 
-    def get_edge_tts_styles(self):
-        """获取预定义的 Edge TTS 语气风格列表"""
-        return list(EDGE_TTS_STYLES.keys())
+    #def get_edge_tts_styles(self):
+       # """获取预定义的 Edge TTS 语气风格列表"""
+        #return list(EDGE_TTS_STYLES.keys())
 
-# --- ↓↓↓ 使用这个【极简且最终正确版】完整替换 _synthesis_worker_edge_tts 函数 ↓↓↓ ---
+# --- ↓↓↓ 使用这个【极简、只处理核心功能的最终版】替换 _synthesis_worker_edge_tts 函数 ↓↓↓ ---
 
-    def _synthesis_worker_edge_tts(self, text, voice_friendly_name, style_api_name, params, output_path, callback):
+    def _synthesis_worker_edge_tts(self, text, voice_friendly_name, params, output_path, callback):
         """
-        使用 Edge TTS 在后台线程中合成语音的封装函数（最终修复版）。
-        此版本回归 edge-tts 的标准用法：只传递纯文本和快捷参数。
+        使用 Edge TTS 在后台线程中合成语音的封装函数（专注语速和音调）。
         """
         async def _synthesize_async():
             try:
@@ -3938,16 +3927,15 @@ class TimedBroadcastApp:
                 scaled_pitch = pitch_val * 5
                 pitch_str = f"{scaled_pitch}%" if pitch_val != 0 else ""
 
-                # 2. 【核心修正】直接调用 Communicate，将所有信息作为参数传递
+                # 2. 【核心】直接调用 Communicate，只使用基础的快捷参数
                 communicate = edge_tts.Communicate(
                     text,
                     voice=voice_id,
                     rate=rate_str,
-                    pitch=pitch_str,
-                    style=style_api_name  # 将语气风格的 API 名称直接传递给 style 参数
+                    pitch=pitch_str
                 )
                 
-                # 3. 流式写入文件 (这部分逻辑不变)
+                # 3. 流式写入文件
                 with open(output_path, "wb") as f:
                     async for chunk in communicate.stream():
                         if chunk["type"] == "audio":
