@@ -3376,6 +3376,7 @@ class TimedBroadcastApp:
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
         main_frame.columnconfigure(0, weight=1)
+        #main_frame.rowconfigure(1, weight=1) 暂时不用这个代码
 
         content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
@@ -3906,9 +3907,9 @@ class TimedBroadcastApp:
         """获取预定义的 Edge TTS 播音员列表"""
         return list(EDGE_TTS_VOICES.keys())
 
-    #def get_edge_tts_styles(self):
-       # """获取预定义的 Edge TTS 语气风格列表"""
-        #return list(EDGE_TTS_STYLES.keys())
+    def get_edge_tts_styles(self):
+        """获取预定义的 Edge TTS 语气风格列表"""
+        return list(EDGE_TTS_STYLES.keys())
 
 # --- ↓↓↓ 使用这个【采纳了正确命名空间的最终版】替换 _synthesis_worker_edge_tts 函数 ↓↓↓ ---
 
