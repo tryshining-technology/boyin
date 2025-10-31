@@ -21,8 +21,8 @@ import re
 import ctypes
 import hashlib
 import requests
-import asyncio
 import edge_tts
+import asyncio
 
 # --- ↓↓↓ 新增代码：全局隐藏 subprocess 调用的控制台窗口 ↓↓↓ ---
 
@@ -147,24 +147,27 @@ SECRET_SALT = "42492f00-d980-40e1-a17e-ba8094727636"
 AMAP_API_KEY = "c62d9b56d92792d1d11c8544f1b547dc"
 # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
 EDGE_TTS_VOICES = {
-    # --- 中国大陆 ---
-    '晓晓 (女)':         'zh-CN-XiaoxiaoNeural',
-    '晓伊 (女)':         'zh-CN-XiaoyiNeural',
-    '云扬 (男)':         'zh-CN-YunyangNeural',
-    '云希 (男)':         'zh-CN-YunxiNeural',
-    '云健 (男)':         'zh-CN-YunjianNeural',
-    '云夏 (男)':         'zh-CN-YunxiaNeural',
-    '晓北-辽宁 (女)':    'zh-CN-liaoning-XiaobeiNeural',
-    '晓妮-陕西 (女)':    'zh-CN-shaanxi-XiaoniNeural',
-    # --- 中国香港 ---
-    '曉佳 (香港女)':         'zh-HK-HiuGaaiNeural',
-    '曉曼 (香港女)':         'zh-HK-HiuMaanNeural',
-    '雲龍 (香港男)':         'zh-HK-WanLungNeural',
-    # --- 中国台湾 ---
-    '曉臻 (台湾女)':         'zh-TW-HsiaoChenNeural',
-    '曉雨 (台湾女)':         'zh-TW-HsiaoYuNeural',
-    '雲哲 (台湾男)':         'zh-TW-YunJheNeural',
+    # --- 中国大陆 (8个) ---
+    '在线-晓晓 (女)': 'zh-CN-XiaoxiaoNeural',
+    '在线-云扬 (男)': 'zh-CN-YunyangNeural',  
+    '在线-晓伊 (女)': 'zh-CN-XiaoyiNeural',
+    '在线-云健 (男)': 'zh-CN-YunjianNeural',
+    '在线-云希 (男)': 'zh-CN-YunxiNeural',
+    '在线-云夏 (男)': 'zh-CN-YunxiaNeural',
+    '在线-辽宁-晓北 (女)': 'zh-CN-liaoning-XiaobeiNeural',
+    '在线-陕西-晓妮 (女)': 'zh-CN-shaanxi-XiaoniNeural',
+    
+    # --- 中国香港 (3个) ---
+    '在线-香港-曉佳 (女)': 'zh-HK-HiuGaaiNeural',
+    '在线-香港-曉曼 (女)': 'zh-HK-HiuMaanNeural',
+    '在线-香港-雲龍 (男)': 'zh-HK-WanLungNeural',
+    
+    # --- 中国台湾 (3个) ---
+    '在线-台湾-曉臻 (女)': 'zh-TW-HsiaoChenNeural',
+    '在线-台湾-雲哲 (男)': 'zh-TW-YunJheNeural',
+    '在线-台湾-曉雨 (女)': 'zh-TW-HsiaoYuNeural',
 }
+
 
 class TimedBroadcastApp:
     def __init__(self, root):
@@ -3331,13 +3334,14 @@ class TimedBroadcastApp:
 
 #第6部分
 #第6部分
+# 第6部分 (替换整个函数)
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改语音节目" if is_edit_mode else "添加语音节目")
         dialog.resizable(True, True)
-        dialog.minsize(800, 620) # 稍微增加高度以容纳新控件
+        dialog.minsize(800, 580)
         dialog.transient(self.root)
 
         dialog.attributes('-topmost', True)
@@ -3356,7 +3360,6 @@ class TimedBroadcastApp:
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
 
-        # --- 节目名称 和 播音文字 (无变化) ---
         ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -3371,44 +3374,36 @@ class TimedBroadcastApp:
         
         script_btn_frame = ttk.Frame(content_frame)
         script_btn_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=(0, 2))
-        ttk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text.text, dialog), bootstyle="outline").pack(side=LEFT)
-        ttk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text.text, name_entry, dialog), bootstyle="outline").pack(side=LEFT, padx=10)
+        ttk.Button(script_btn_frame, text="导入文稿", command=lambda: self._import_voice_script(content_text, dialog), bootstyle="outline").pack(side=LEFT)
+        ttk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text, name_entry, dialog), bootstyle="outline").pack(side=LEFT, padx=10)
 
-        # --- ↓↓↓ 新增：播音引擎选择 (Radiobutton) ↓↓↓ ---
-        ttk.Label(content_frame, text="播音引擎:").grid(row=3, column=0, sticky='w', padx=5, pady=5)
-        
+        ad_btn_frame = ttk.Frame(script_btn_frame)
+        ad_btn_frame.pack(side=LEFT, padx=20)
+
+        self.ad_by_voice_btn = ttk.Button(ad_btn_frame, text="按语音长度制作广告", 
+                                          command=lambda: self._create_advertisement('voice'))
+        self.ad_by_voice_btn.pack(side=LEFT)
+
+        self.ad_by_bgm_btn = ttk.Button(ad_btn_frame, text="按背景音乐长度制作广告", 
+                                        command=lambda: self._create_advertisement('bgm'))
+        self.ad_by_bgm_btn.pack(side=LEFT, padx=10)
+
+        if self.auth_info['status'] != 'Permanent':
+            self.ad_by_voice_btn.config(state=DISABLED)
+            self.ad_by_bgm_btn.config(state=DISABLED)
+
+        ttk.Label(content_frame, text="引擎类型:").grid(row=3, column=0, sticky='w', padx=5, pady=3)
         engine_frame = ttk.Frame(content_frame)
-        engine_frame.grid(row=3, column=1, columnspan=3, sticky='w', pady=5)
+        engine_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5)
         
-        engine_choice_var = tk.StringVar(value="local") # 默认选择本地
-
-        def switch_engine_and_update_voices():
-            engine = engine_choice_var.get()
-            voice_combo.set('') # 切换时清空当前选择
-            
-            if engine == 'local':
-                voices = self.get_available_voices()
-                voice_combo['values'] = voices
-                if voices:
-                    voice_combo.set(voices[0])
-            elif engine == 'online':
-                voices = self.get_edge_tts_voices()
-                voice_combo['values'] = voices
-                if voices:
-                    voice_combo.set(voices[0])
-
-        ttk.Radiobutton(
-            engine_frame, text="本地语音 (SAPI)", variable=engine_choice_var, 
-            value="local", command=switch_engine_and_update_voices
-        ).pack(side=LEFT, padx=(0, 20))
-
-        ttk.Radiobutton(
-            engine_frame, text="在线语音 (Edge TTS)", variable=engine_choice_var, 
-            value="online", command=switch_engine_and_update_voices
-        ).pack(side=LEFT)
-        # --- ↑↑↑ 播音引擎选择结束 ↑↑↑ ---
-
-        # --- 播音员 和 参数 (布局微调，现在是第4行) ---
+        voice_engine_var = tk.StringVar(value="local")
+        
+        local_rb = ttk.Radiobutton(engine_frame, text="本地语音 (SAPI)", variable=voice_engine_var, value="local")
+        local_rb.pack(side=LEFT, padx=(0, 15))
+        
+        online_rb = ttk.Radiobutton(engine_frame, text="在线语音 (Edge)", variable=voice_engine_var, value="online")
+        online_rb.pack(side=LEFT)
+        
         ttk.Label(content_frame, text="播音员:").grid(row=4, column=0, sticky='w', padx=5, pady=3)
         voice_frame = ttk.Frame(content_frame)
         voice_frame.grid(row=4, column=1, columnspan=3, sticky='ew', padx=5, pady=3)
@@ -3418,8 +3413,36 @@ class TimedBroadcastApp:
         voice_combo = ttk.Combobox(voice_frame, textvariable=voice_var, font=self.font_11, state='readonly')
         voice_combo.grid(row=0, column=0, sticky='ew')
         
+        def _update_voice_options(*args):
+            engine = voice_engine_var.get()
+            current_voice = voice_var.get()
+            
+            if engine == "local":
+                available_voices = self.get_available_voices()
+                voice_combo['values'] = available_voices
+                if available_voices:
+                    if current_voice in available_voices:
+                        voice_var.set(current_voice)
+                    else:
+                        voice_var.set(available_voices[0])
+                else:
+                    voice_var.set("")
+            else: 
+                available_voices = list(EDGE_TTS_VOICES.keys())
+                voice_combo['values'] = available_voices
+                if available_voices:
+                    if current_voice in available_voices:
+                        voice_var.set(current_voice)
+                    else:
+                        voice_var.set(available_voices[0])
+                else:
+                    voice_var.set("")
+
+        voice_engine_var.trace_add("write", _update_voice_options)
+        
         speech_params_frame = ttk.Frame(voice_frame)
         speech_params_frame.grid(row=0, column=1, sticky='e', padx=(10, 0))
+
         ttk.Label(speech_params_frame, text="语速:").pack(side=LEFT)
         speed_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=5); speed_entry.pack(side=LEFT, padx=(2, 5))
         ttk.Label(speech_params_frame, text="音调:").pack(side=LEFT)
@@ -3427,71 +3450,96 @@ class TimedBroadcastApp:
         ttk.Label(speech_params_frame, text="音量:").pack(side=LEFT)
         volume_entry = ttk.Entry(speech_params_frame, font=self.font_11, width=5); volume_entry.pack(side=LEFT, padx=(2, 0))
 
-        # --- 提示音、背景音乐等 (从您原来的代码中复制过来，保持不变) ---
-        media_frame = ttk.Frame(content_frame)
-        media_frame.grid(row=5, column=0, columnspan=4, sticky='ew', padx=5, pady=(5,0))
-        prompt_var, bgm_var, bg_image_var = tk.IntVar(), tk.IntVar(), tk.IntVar(value=0)
+        prompt_var = tk.IntVar(); prompt_frame = ttk.Frame(content_frame)
+        prompt_frame.grid(row=5, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
+        prompt_frame.columnconfigure(1, weight=1)
+        ttk.Checkbutton(prompt_frame, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
         prompt_file_var, prompt_volume_var = tk.StringVar(), tk.StringVar()
+        prompt_file_entry = ttk.Entry(prompt_frame, textvariable=prompt_file_var, font=self.font_11); prompt_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        ttk.Button(prompt_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var, dialog), bootstyle="outline", width=2).grid(row=0, column=2)
+        
+        prompt_vol_frame = ttk.Frame(prompt_frame)
+        prompt_vol_frame.grid(row=0, column=3, sticky='e')
+        ttk.Label(prompt_vol_frame, text="音量(0-100):").pack(side=LEFT, padx=(10,5))
+        ttk.Entry(prompt_vol_frame, textvariable=prompt_volume_var, font=self.font_11, width=8).pack(side=LEFT, padx=5)
+        
+        bgm_var = tk.IntVar(); bgm_frame = ttk.Frame(content_frame)
+        bgm_frame.grid(row=6, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
+        bgm_frame.columnconfigure(1, weight=1)
+        ttk.Checkbutton(bgm_frame, text="背景音乐:", variable=bgm_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
         bgm_file_var, bgm_volume_var = tk.StringVar(), tk.StringVar()
-        bg_image_path_var, bg_image_order_var = tk.StringVar(), tk.StringVar(value="sequential")
-        ttk.Checkbutton(media_frame, text="提示音:", variable=prompt_var, bootstyle="round-toggle").pack(side=LEFT, padx=(0,5))
-        prompt_file_entry = ttk.Entry(media_frame, textvariable=prompt_file_var, font=self.font_11, width=15)
-        prompt_file_entry.pack(side=LEFT)
-        ttk.Button(media_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var, dialog), bootstyle="outline", width=2).pack(side=LEFT, padx=(2,5))
-        ttk.Label(media_frame, text="音量:").pack(side=LEFT)
-        ttk.Entry(media_frame, textvariable=prompt_volume_var, font=self.font_11, width=4).pack(side=LEFT)
-        ttk.Separator(media_frame, orient=VERTICAL).pack(side=LEFT, fill='y', padx=8, pady=2)
-        ttk.Checkbutton(media_frame, text="背景音乐:", variable=bgm_var, bootstyle="round-toggle").pack(side=LEFT, padx=(0,5))
-        bgm_file_entry = ttk.Entry(media_frame, textvariable=bgm_file_var, font=self.font_11, width=15)
-        bgm_file_entry.pack(side=LEFT)
-        ttk.Button(media_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var, dialog), bootstyle="outline", width=2).pack(side=LEFT, padx=(2,5))
-        ttk.Label(media_frame, text="音量:").pack(side=LEFT)
-        ttk.Entry(media_frame, textvariable=bgm_volume_var, font=self.font_11, width=4).pack(side=LEFT)
-        ttk.Separator(media_frame, orient=VERTICAL).pack(side=LEFT, fill='y', padx=8, pady=2)
-        bg_image_cb = ttk.Checkbutton(media_frame, text="背景图片:", variable=bg_image_var, bootstyle="round-toggle")
-        bg_image_cb.pack(side=LEFT, padx=(0,5))
+        bgm_file_entry = ttk.Entry(bgm_frame, textvariable=bgm_file_var, font=self.font_11); bgm_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        ttk.Button(bgm_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var, dialog), bootstyle="outline", width=2).grid(row=0, column=2)
+        
+        bgm_vol_frame = ttk.Frame(bgm_frame)
+        bgm_vol_frame.grid(row=0, column=3, sticky='e')
+        ttk.Label(bgm_vol_frame, text="音量(0-100):").pack(side=LEFT, padx=(10,5))
+        ttk.Entry(bgm_vol_frame, textvariable=bgm_volume_var, font=self.font_11, width=8).pack(side=LEFT, padx=5)
+
+        bg_image_var = tk.IntVar(value=0)
+        bg_image_path_var = tk.StringVar()
+        bg_image_order_var = tk.StringVar(value="sequential")
+
+        bg_image_frame = ttk.Frame(content_frame)
+        bg_image_frame.grid(row=7, column=1, columnspan=3, sticky='ew', padx=5, pady=5)
+        bg_image_frame.columnconfigure(1, weight=1)
+        bg_image_cb = ttk.Checkbutton(bg_image_frame, text="背景图片:", variable=bg_image_var, bootstyle="round-toggle")
+        bg_image_cb.grid(row=0, column=0, sticky='w')
         if not IMAGE_AVAILABLE: bg_image_cb.config(state=DISABLED, text="背景图片(Pillow未安装):")
-        bg_image_entry = ttk.Entry(media_frame, textvariable=bg_image_path_var, font=self.font_11, width=15)
-        bg_image_entry.pack(side=LEFT)
+
+        bg_image_entry = ttk.Entry(bg_image_frame, textvariable=bg_image_path_var, font=self.font_11)
+        bg_image_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        
+        bg_image_btn_frame = ttk.Frame(bg_image_frame)
+        bg_image_btn_frame.grid(row=0, column=2, sticky='e')
         def select_folder(entry_widget):
             foldername = filedialog.askdirectory(title="选择文件夹", initialdir=application_path, parent=dialog)
             if foldername: entry_widget.delete(0, END); entry_widget.insert(0, foldername)
-        ttk.Button(media_frame, text="选取", command=lambda: select_folder(bg_image_entry), bootstyle="outline").pack(side=LEFT, padx=2)
-        ttk.Radiobutton(media_frame, text="顺序", variable=bg_image_order_var, value="sequential").pack(side=LEFT, padx=(5,0))
-        ttk.Radiobutton(media_frame, text="随机", variable=bg_image_order_var, value="random").pack(side=LEFT)
+        ttk.Button(bg_image_btn_frame, text="选取...", command=lambda: select_folder(bg_image_entry), bootstyle="outline").pack(side=LEFT, padx=5)
+        ttk.Radiobutton(bg_image_btn_frame, text="顺序", variable=bg_image_order_var, value="sequential").pack(side=LEFT, padx=(10,0))
+        ttk.Radiobutton(bg_image_btn_frame, text="随机", variable=bg_image_order_var, value="random").pack(side=LEFT)
 
-        # --- 时间设置 和 其他设置 (从您原来的代码中复制过来，保持不变) ---
         time_frame = ttk.LabelFrame(main_frame, text="时间", padding=10)
         time_frame.grid(row=1, column=0, sticky='ew', pady=2)
         time_frame.columnconfigure(1, weight=1)
+        
         ttk.Label(time_frame, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         start_time_entry = ttk.Entry(time_frame, font=self.font_11)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
         ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
+        
         batch_add_container = ttk.Frame(time_frame)
         batch_add_container.grid(row=0, column=4, rowspan=3, sticky='n', padx=5)
+
         batch_interval_frame = ttk.Frame(batch_add_container)
         batch_interval_frame.pack(pady=(0, 2))
         ttk.Label(batch_interval_frame, text="每").pack(side=LEFT)
         batch_interval_entry = ttk.Entry(batch_interval_frame, font=self.font_11, width=4)
         batch_interval_entry.pack(side=LEFT, padx=(2,2))
         ttk.Label(batch_interval_frame, text="分钟").pack(side=LEFT)
+
         batch_count_frame = ttk.Frame(batch_add_container)
         batch_count_frame.pack(pady=(0, 5))
         ttk.Label(batch_count_frame, text="共").pack(side=LEFT)
         batch_count_entry = ttk.Entry(batch_count_frame, font=self.font_11, width=4)
         batch_count_entry.pack(side=LEFT, padx=(2,2))
         ttk.Label(batch_count_frame, text="次   ").pack(side=LEFT)
-        ttk.Button(batch_add_container, text="批量添加", command=lambda: self._apply_batch_time_addition(start_time_entry, batch_interval_entry, batch_count_entry, dialog), bootstyle="outline-info").pack(fill=X)
+
+        ttk.Button(batch_add_container, text="批量添加", 
+                   command=lambda: self._apply_batch_time_addition(start_time_entry, batch_interval_entry, batch_count_entry, dialog), 
+                   bootstyle="outline-info").pack(fill=X)
+
         ttk.Label(time_frame, text="播 n 遍:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
         repeat_entry = ttk.Entry(time_frame, font=self.font_11, width=12)
         repeat_entry.grid(row=1, column=1, sticky='w', padx=5, pady=2)
+        
         ttk.Label(time_frame, text="周几/几号:").grid(row=2, column=0, sticky='e', padx=5, pady=2)
         weekday_entry = ttk.Entry(time_frame, font=self.font_11)
         weekday_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=2)
         ttk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bootstyle="outline").grid(row=2, column=3, padx=5)
+        
         ttk.Label(time_frame, text="日期范围:").grid(row=3, column=0, sticky='e', padx=5, pady=2)
         date_range_entry = ttk.Entry(time_frame, font=self.font_11)
         date_range_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=2)
@@ -3501,6 +3549,7 @@ class TimedBroadcastApp:
         other_frame = ttk.LabelFrame(main_frame, text="其它", padding=15)
         other_frame.grid(row=2, column=0, sticky='ew', pady=4)
         other_frame.columnconfigure(1, weight=1)
+        
         delay_var = tk.StringVar(value="delay")
         ttk.Label(other_frame, text="模式:").grid(row=0, column=0, sticky='nw', padx=5, pady=2)
         delay_frame = ttk.Frame(other_frame)
@@ -3508,20 +3557,23 @@ class TimedBroadcastApp:
         ttk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们", variable=delay_var, value="ontime").pack(anchor='w', pady=1)
         ttk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候（默认）", variable=delay_var, value="delay").pack(anchor='w', pady=1)
         ttk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate").pack(anchor='w', pady=1)
+        
         dialog_button_frame = ttk.Frame(other_frame)
         dialog_button_frame.grid(row=0, column=2, sticky='se', padx=20, pady=10)
 
-        # --- 数据填充逻辑 (有修改) ---
         if is_edit_mode:
             task = task_to_edit
-            saved_engine = task.get('engine', 'local') # 获取保存的引擎，默认为local
-            engine_choice_var.set(saved_engine)
-            
             name_entry.insert(0, task.get('name', ''))
-            content_text.text.insert('1.0', task.get('source_text', ''))
+            content_text.insert('1.0', task.get('source_text', ''))
+
+            saved_voice = task.get('voice', '')
+            if saved_voice in EDGE_TTS_VOICES:
+                voice_engine_var.set("online")
+            else:
+                voice_engine_var.set("local")
             
-            switch_engine_and_update_voices() # 关键：先根据引擎更新列表
-            voice_var.set(task.get('voice', '')) # 再设置选中的播音员
+            _update_voice_options()
+            voice_var.set(saved_voice)
 
             speed_entry.insert(0, task.get('speed', '0'))
             pitch_entry.insert(0, task.get('pitch', '0'))
@@ -3537,14 +3589,25 @@ class TimedBroadcastApp:
             bg_image_path_var.set(task.get('bg_image_path', ''))
             bg_image_order_var.set(task.get('bg_image_order', 'sequential'))
         else:
-            switch_engine_and_update_voices() # 新建任务时，也需要初始化列表
+            _update_voice_options()
             speed_entry.insert(0, "0"); pitch_entry.insert(0, "0"); volume_entry.insert(0, "80")
             prompt_var.set(0); prompt_volume_var.set("80"); bgm_var.set(0); bgm_volume_var.set("20")
             repeat_entry.insert(0, "1"); weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
 
-        # --- 保存任务逻辑 (核心修改) ---
+        ad_params = {
+            'dialog': dialog, 'name_entry': name_entry, 'content_text': content_text,
+            'voice_var': voice_var, 'speed_entry': speed_entry, 'pitch_entry': pitch_entry,
+            'volume_entry': volume_entry, 'prompt_var': prompt_var,
+            'prompt_file_var': prompt_file_var, 'prompt_volume_var': prompt_volume_var,
+            'bgm_var': bgm_var, 'bgm_file_var': bgm_file_var, 'bgm_volume_var': bgm_volume_var,
+            # --- ↓↓↓ 新增：将引擎选择也传递给广告制作函数 ---
+            'voice_engine_var': voice_engine_var,
+        }
+
+        self.ad_by_voice_btn.config(command=lambda: self._create_advertisement('voice', ad_params))
+        self.ad_by_bgm_btn.config(command=lambda: self._create_advertisement('bgm', ad_params))
+
         def save_task():
-            # ... (您原有的输入验证逻辑，保持不变) ...
             try:
                 speed = int(speed_entry.get().strip() or '0')
                 pitch = int(pitch_entry.get().strip() or '0')
@@ -3555,40 +3618,44 @@ class TimedBroadcastApp:
                 if not (0 <= volume <= 100): messagebox.showerror("输入错误", "音量必须在 0 到 100 之间。", parent=dialog); return
                 if repeat < 1: messagebox.showerror("输入错误", "“播 n 遍”的次数必须大于或等于 1。", parent=dialog); return
             except ValueError: messagebox.showerror("输入错误", "语速、音调、音量、播报遍数必须是有效的整数。", parent=dialog); return
-            if not weekday_entry.get().strip(): messagebox.showerror("输入错误", "“周几/几号”规则不能为空。", parent=dialog); return
-            if not date_range_entry.get().strip(): messagebox.showerror("输入错误", "“日期范围”不能为空。", parent=dialog); return
+            if not weekday_entry.get().strip(): messagebox.showerror("输入错误", "“周几/几号”规则不能为空...", parent=dialog); return
+            if not date_range_entry.get().strip(): messagebox.showerror("输入错误", "“日期范围”不能为空...", parent=dialog); return
             
-            text_content = content_text.text.get('1.0', END).strip()
+            text_content = content_text.get('1.0', END).strip()
             if not text_content: messagebox.showwarning("警告", "请输入播音文字内容", parent=dialog); return
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
             if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
             is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
             if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
-
-            # 检查是否需要重新生成语音文件
+            
             regeneration_needed = True
-            selected_engine = engine_choice_var.get()
+            selected_voice = voice_var.get()
+            is_online_voice = voice_engine_var.get() == 'online'
+
             if is_edit_mode:
                 original_task = task_to_edit
-                if (selected_engine == original_task.get('engine', 'local') and
-                    text_content == original_task.get('source_text') and
-                    voice_var.get() == original_task.get('voice') and
+                is_original_online = original_task.get('voice', '') in EDGE_TTS_VOICES
+                
+                if (text_content == original_task.get('source_text') and
+                    selected_voice == original_task.get('voice') and
                     speed_entry.get().strip() == original_task.get('speed', '0') and
                     pitch_entry.get().strip() == original_task.get('pitch', '0') and
-                    volume_entry.get().strip() == original_task.get('volume', '80')):
-                    regeneration_needed = False
-                    self.log("语音参数未变更，跳过重新生成音频文件。")
+                    is_online_voice == is_original_online):
+                    if not is_online_voice and volume_entry.get().strip() == original_task.get('volume', '80'):
+                        regeneration_needed = False
+                    elif is_online_voice:
+                        regeneration_needed = False
+                
+                if not regeneration_needed: self.log("语音内容未变更，跳过重新生成音频文件。")
 
-            def build_task_data(audio_path, filename_str):
+            def build_task_data(audio_path, audio_filename_str):
                 play_mode = delay_var.get()
                 play_this_task_now = (play_mode == 'immediate')
                 saved_delay_type = 'delay' if play_mode == 'immediate' else play_mode
+
                 return {
-                    'name': name_entry.get().strip(), 'time': time_msg, 'type': 'voice', 
-                    'content': audio_path,
-                    'engine': selected_engine,  # <-- 新增：保存引擎类型
-                    'wav_filename': filename_str, # 我们继续使用这个字段名来存储文件名
-                    'source_text': text_content, 'voice': voice_var.get(),
+                    'name': name_entry.get().strip(), 'time': time_msg, 'type': 'voice', 'content': audio_path,
+                    'wav_filename': audio_filename_str, 'source_text': text_content, 'voice': voice_var.get(),
                     'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0",
                     'volume': volume_entry.get().strip() or "80", 'prompt': prompt_var.get(),
                     'prompt_file': prompt_file_var.get(), 'prompt_volume': prompt_volume_var.get(),
@@ -3597,72 +3664,71 @@ class TimedBroadcastApp:
                     'date_range': date_msg, 'delay': saved_delay_type,
                     'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'),
                     'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {}),
-                    'bg_image_enabled': bg_image_var.get(), 'bg_image_path': bg_image_path_var.get().strip(),
+                    'bg_image_enabled': bg_image_var.get(),
+                    'bg_image_path': bg_image_path_var.get().strip(),
                     'bg_image_order': bg_image_order_var.get()
                 }, play_this_task_now
 
             if not regeneration_needed:
                 new_task_data, play_now_flag = build_task_data(task_to_edit.get('content'), task_to_edit.get('wav_filename'))
-                if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息", parent=dialog); return
-                self.tasks[index] = new_task_data
-                self.log(f"已修改语音节目(未重新生成语音): {new_task_data['name']}")
+                if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息...", parent=dialog); return
+                self.tasks[index] = new_task_data; self.log(f"已修改语音节目(未重新生成语音): {new_task_data['name']}")
                 self.update_task_list(); self.save_tasks(); cleanup_and_destroy()
                 if play_now_flag: self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
                 return
 
             progress_dialog = ttk.Toplevel(dialog)
-            progress_dialog.title("请稍候"); progress_dialog.resizable(False, False); progress_dialog.transient(dialog)
-            progress_dialog.attributes('-topmost', True); dialog.attributes('-disabled', True)
+            progress_dialog.title("请稍候")
+            progress_dialog.resizable(False, False); progress_dialog.transient(dialog)
+            
+            progress_dialog.attributes('-topmost', True)
+            dialog.attributes('-disabled', True)
+            
             def cleanup_progress():
-                dialog.attributes('-disabled', False); progress_dialog.destroy(); dialog.focus_force()
+                dialog.attributes('-disabled', False)
+                progress_dialog.destroy()
+                dialog.focus_force()
+
             progress_dialog.protocol("WM_DELETE_WINDOW", cleanup_progress)
-            ttk.Label(progress_dialog, text="语音文件生成中...", font=self.font_11).pack(expand=True, padx=20, pady=20)
+            ttk.Label(progress_dialog, text="语音文件生成中，请稍后...", font=self.font_11).pack(expand=True, padx=20, pady=20)
             self.center_window(progress_dialog, parent=dialog)
             
-            # --- 根据引擎决定文件扩展名 ---
-            file_extension = ".wav" if selected_engine == 'local' else ".mp3"
-            new_filename = f"{int(time.time())}_{random.randint(1000, 9999)}{file_extension}"
-            output_path = os.path.join(AUDIO_FOLDER, new_filename)
-            voice_params = {'voice': voice_var.get(), 'speed': speed_entry.get().strip() or "0", 'pitch': pitch_entry.get().strip() or "0", 'volume': volume_entry.get().strip() or "80"}
+            if is_online_voice:
+                new_audio_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.mp3"
+            else:
+                new_audio_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.wav"
+            
+            output_path = os.path.join(AUDIO_FOLDER, new_audio_filename)
+            voice_params = {
+                'voice': voice_var.get(), 'speed': speed_entry.get().strip() or "0", 
+                'pitch': pitch_entry.get().strip() or "0", 'volume': volume_entry.get().strip() or "80"
+            }
             
             def _on_synthesis_complete(result):
                 cleanup_progress()
-                if not result['success']:
-                    messagebox.showerror("错误", f"无法生成语音文件: {result['error']}", parent=dialog)
-                    return
-                
+                if not result['success']: messagebox.showerror("错误", f"无法生成语音文件: {result['error']}", parent=dialog); return
                 if is_edit_mode and 'wav_filename' in task_to_edit:
-                    old_file_path = os.path.join(AUDIO_FOLDER, task_to_edit['wav_filename'])
-                    if os.path.exists(old_file_path):
-                        try:
-                            os.remove(old_file_path)
-                            self.log(f"已删除旧音频文件: {task_to_edit['wav_filename']}")
-                        except Exception as e:
-                            self.log(f"删除旧音频文件失败: {e}")
+                    old_audio_path = os.path.join(AUDIO_FOLDER, task_to_edit['wav_filename'])
+                    if os.path.exists(old_audio_path):
+                        try: os.remove(old_audio_path); self.log(f"已删除旧语音文件: {task_to_edit['wav_filename']}")
+                        except Exception as e: self.log(f"删除旧语音文件失败: {e}")
                 
-                new_task_data, play_now_flag = build_task_data(output_path, new_filename)
-                if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息", parent=dialog); return
-                
-                if is_edit_mode:
-                    self.tasks[index] = new_task_data
-                    self.log(f"已修改语音节目(并重新生成语音): {new_task_data['name']}")
-                else:
-                    self.tasks.append(new_task_data)
-                    self.log(f"已添加语音节目: {new_task_data['name']}")
-                    
+                new_task_data, play_now_flag = build_task_data(output_path, new_audio_filename)
+                if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息...", parent=dialog); return
+                if is_edit_mode: self.tasks[index] = new_task_data; self.log(f"已修改语音节目(并重新生成语音): {new_task_data['name']}")
+                else: self.tasks.append(new_task_data); self.log(f"已添加语音节目: {new_task_data['name']}")
                 self.update_task_list(); self.save_tasks(); cleanup_and_destroy()
                 if play_now_flag: self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task_data, "manual_play")))
             
-            # --- 关键的逻辑分支！ ---
-            if selected_engine == 'local':
-                self.log("使用本地SAPI引擎生成语音...")
-                synthesis_thread = threading.Thread(target=self._synthesis_worker, args=(text_content, voice_params, output_path, _on_synthesis_complete))
-            else: # 'online'
-                self.log("使用在线Edge TTS引擎生成语音...")
-                synthesis_thread = threading.Thread(target=self._edge_tts_synthesis_worker, args=(text_content, voice_params, output_path, _on_synthesis_complete))
+            # --- ↓↓↓ 核心逻辑：根据引擎选择不同的工作线程 ↓↓↓ ---
+            if is_online_voice:
+                s_thread = threading.Thread(target=self._synthesis_worker_edge, args=(text_content, voice_params, output_path, _on_synthesis_complete))
+            else:
+                s_thread = threading.Thread(target=self._synthesis_worker, args=(text_content, voice_params, output_path, _on_synthesis_complete))
             
-            synthesis_thread.daemon = True
-            synthesis_thread.start()
+            s_thread.daemon = True
+            s_thread.start()
+            # --- ↑↑↑ 核心逻辑结束 ↑↑↑ ---
 
         button_text = "保存修改" if is_edit_mode else "添加"
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
@@ -3710,7 +3776,6 @@ class TimedBroadcastApp:
         progress_dialog.resizable(False, False)
         progress_dialog.transient(params['dialog'])
         
-        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
         progress_dialog.attributes('-topmost', True)
         params['dialog'].attributes('-disabled', True)
         
@@ -3718,7 +3783,6 @@ class TimedBroadcastApp:
             params['dialog'].attributes('-disabled', False)
             progress_dialog.destroy()
             params['dialog'].focus_force()
-        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         progress_dialog.protocol("WM_DELETE_WINDOW", cleanup_progress)
 
@@ -3728,30 +3792,58 @@ class TimedBroadcastApp:
         progress.pack(pady=10, padx=20)
         self.center_window(progress_dialog, parent=params['dialog'])
 
+        # --- ↓↓↓ 核心修改区域：适配在线/离线语音生成 ↓↓↓ ---
         def worker():
-            temp_wav_path = None
+            temp_audio_path = None # 可以是 .wav 或 .mp3
             try:
                 self.root.after(0, lambda: progress_label.config(text="步骤1/4: 生成语音..."))
                 self.root.after(0, lambda: progress.config(value=10))
 
-                temp_wav_filename = f"temp_ad_{int(time.time())}.wav"
-                temp_wav_path = os.path.join(AUDIO_FOLDER, temp_wav_filename)
-                
                 voice_params = {
                     'voice': params['voice_var'].get(),
                     'speed': params['speed_entry'].get().strip() or "0",
                     'pitch': params['pitch_entry'].get().strip() or "0",
-                    'volume': '100'
+                    'volume': '100' # 语音合成时总是用最大音量，混合时再调整
                 }
+
+                is_online_engine = params['voice_engine_var'].get() == 'online'
                 
-                if not self._synthesize_text_to_wav(text_content, voice_params, temp_wav_path):
-                    raise Exception("语音合成失败！")
+                # 根据引擎选择不同的文件名和生成函数
+                if is_online_engine:
+                    temp_audio_filename = f"temp_ad_{int(time.time())}.mp3"
+                    temp_audio_path = os.path.join(AUDIO_FOLDER, temp_audio_filename)
+                    
+                    # 使用阻塞方式调用在线合成（在新线程中），等待其完成
+                    synthesis_success = threading.Event()
+                    error_message = ""
+                    def online_callback(result):
+                        nonlocal error_message
+                        if result['success']:
+                            synthesis_success.set()
+                        else:
+                            error_message = result.get('error', '未知在线合成错误')
+                            synthesis_success.set()
+                    
+                    s_thread = threading.Thread(target=self._synthesis_worker_edge, args=(text_content, voice_params, temp_audio_path, online_callback))
+                    s_thread.start()
+                    s_thread.join() # 等待在线合成线程结束
+                    
+                    if error_message:
+                        raise Exception(f"在线语音合成失败: {error_message}")
+
+                else: # 本地 SAPI 引擎
+                    temp_audio_filename = f"temp_ad_{int(time.time())}.wav"
+                    temp_audio_path = os.path.join(AUDIO_FOLDER, temp_audio_filename)
+                    if not self._synthesize_text_to_wav(text_content, voice_params, temp_audio_path):
+                        raise Exception("本地语音合成失败！")
 
                 self.root.after(0, lambda: progress_label.config(text="步骤2/4: 分析音频..."))
                 self.root.after(0, lambda: progress.config(value=30))
-
-                voice_audio = AudioSegment.from_wav(temp_wav_path)
+                
+                # pydub 可以自动处理 wav 和 mp3
+                voice_audio = AudioSegment.from_file(temp_audio_path)
                 bgm_audio = AudioSegment.from_file(bgm_path)
+        # --- ↑↑↑ 核心修改区域结束 ↑↑↑ ---
 
                 voice_duration_ms = len(voice_audio)
                 bgm_duration_ms = len(bgm_audio)
@@ -3822,9 +3914,9 @@ class TimedBroadcastApp:
                 self.root.after(0, lambda: messagebox.showerror("制作失败", f"发生错误：\n{e}", parent=params['dialog']))
             
             finally:
-                if temp_wav_path and os.path.exists(temp_wav_path):
-                    try: os.remove(temp_wav_path)
-                    except Exception as e_del: self.log(f"删除临时文件 {temp_wav_path} 失败: {e_del}")
+                if temp_audio_path and os.path.exists(temp_audio_path):
+                    try: os.remove(temp_audio_path)
+                    except Exception as e_del: self.log(f"删除临时文件 {temp_audio_path} 失败: {e_del}")
                 self.root.after(0, cleanup_progress)
 
         threading.Thread(target=worker, daemon=True).start()
@@ -3895,50 +3987,6 @@ class TimedBroadcastApp:
         except Exception as e:
             self.root.after(0, callback, {'success': False, 'error': str(e)})
 
-    def _edge_tts_synthesis_worker(self, text, voice_params, output_path, callback):
-        """
-        在后台线程中运行 Edge TTS 异步任务，并直接生成 MP3 文件。
-        """
-        async def async_main() -> None:
-            """
-            异步执行语音合成的核心逻辑。
-            """
-            # 1. 格式化语速和音调参数
-            rate_val = int(voice_params.get('speed', '0')) * 5
-            pitch_val = int(voice_params.get('pitch', '0')) * 5
-            
-            rate_str = f"+{rate_val}%" if rate_val >= 0 else f"{rate_val}%"
-            pitch_str = f"+{pitch_val}Hz" if pitch_val >= 0 else f"{pitch_val}Hz"
-            
-            # 2. 从友好名称获取 voice_id
-            voice_name = voice_params.get('voice')
-            voice_id = EDGE_TTS_VOICES.get(voice_name)
-            if not voice_id:
-                raise ValueError(f"未找到名为 '{voice_name}' 的在线播音员ID")
-
-            # 3. 执行合成，将音频流直接写入目标 MP3 文件
-            communicate = edge_tts.Communicate(text, voice_id, rate=rate_str, pitch=pitch_str)
-            await communicate.save(output_path)
-
-        # --- 线程的主体部分 ---
-        try:
-            # 为这个线程创建一个新的 asyncio 事件循环
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            # 运行异步任务直到完成
-            loop.run_until_complete(async_main())
-            loop.close()
-            
-            # 成功后，通过 root.after 安全地将结果传回主线程
-            self.root.after(0, callback, {'success': True})
-
-        except Exception as e:
-            self.log(f"Edge TTS 语音合成失败: {e}")
-            # 失败后，同样将错误信息传回主线程
-            self.root.after(0, callback, {'success': False, 'error': str(e)})
-    # --- ↑↑↑ 新方法粘贴结束 ↑↑↑ ---
-
     def _synthesize_text_to_wav(self, text, voice_params, output_path):
         if not WIN32_AVAILABLE:
             raise ImportError("pywin32 模块未安装，无法进行语音合成。")
@@ -3980,9 +4028,40 @@ class TimedBroadcastApp:
             self.log(f"警告: 使用 win32com 获取语音列表失败 - {e}")
             return []
 
-    def get_edge_tts_voices(self):
-        """返回预定义的 Edge TTS 中文播-音员列表"""
-        return list(EDGE_TTS_VOICES.keys())
+    async def _edge_tts_async_task(self, text, voice_params, output_path):
+        """
+        执行 Edge TTS 异步任务的核心部分。
+        """
+        voice_id = EDGE_TTS_VOICES.get(voice_params.get('voice'))
+        if not voice_id:
+            raise ValueError(f"无效的在线语音名称: {voice_params.get('voice')}")
+
+        # 将 -10~10 的范围映射到 Edge TTS 需要的格式
+        rate_val = int(voice_params.get('speed', 0)) * 5
+        pitch_val = int(voice_params.get('pitch', 0)) * 5
+        
+        rate_str = f"+{rate_val}%" if rate_val >= 0 else f"{rate_val}%"
+        pitch_str = f"+{pitch_val}Hz" if pitch_val >= 0 else f"{pitch_val}Hz"
+
+        communicate = edge_tts.Communicate(text, voice_id, rate=rate_str, pitch=pitch_str)
+        with open(output_path, "wb") as file:
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    file.write(chunk["data"])
+
+    def _synthesis_worker_edge(self, text, voice_params, output_path, callback):
+        """
+        在独立线程中运行 Edge TTS 异步任务的包装器。
+        """
+        try:
+            # 创建并运行一个新的 asyncio 事件循环
+            asyncio.run(self._edge_tts_async_task(text, voice_params, output_path))
+            # 任务成功，通过 after 调用主线程的回调函数
+            self.root.after(0, callback, {'success': True})
+        except Exception as e:
+            # 任务失败，记录日志并通过回调返回错误信息
+            self.log(f"在线语音合成失败: {e}")
+            self.root.after(0, callback, {'success': False, 'error': str(e)})
 
     def select_file_for_entry(self, initial_dir, string_var, parent_dialog):
         filename = filedialog.askopenfilename(title="选择文件", initialdir=initial_dir, filetypes=[("音频文件", "*.mp3 *.wav *.ogg *.flac"), ("所有文件", "*.*")], parent=parent_dialog)
