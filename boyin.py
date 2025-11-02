@@ -2773,7 +2773,6 @@ class TimedBroadcastApp:
         choice_dialog.resizable(False, False)
         choice_dialog.transient(self.root)
         
-        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
         choice_dialog.attributes('-topmost', True)
         self.root.attributes('-disabled', True)
         
@@ -2781,10 +2780,15 @@ class TimedBroadcastApp:
             self.root.attributes('-disabled', False)
             choice_dialog.destroy()
             self.root.focus_force()
-        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
-        def open_and_cleanup(dialog_opener_func):
-            dialog_opener_func(choice_dialog)
+        # 修正了 open_and_cleanup 逻辑，使其更通用
+        def open_and_cleanup(dialog_opener_func, *args):
+            choice_dialog.destroy()
+            self.root.attributes('-disabled', False)
+            # 创建一个临时的父窗口，因为它会被立即销毁
+            temp_parent = ttk.Toplevel(self.root)
+            temp_parent.withdraw()
+            dialog_opener_func(temp_parent, *args)
 
         main_frame = ttk.Frame(choice_dialog, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
@@ -2808,10 +2812,280 @@ class TimedBroadcastApp:
         if not VLC_AVAILABLE:
             video_btn.config(state=DISABLED, text="🎬→视频节目 (VLC未安装)")
 
+        # --- ↓↓↓ 位置调整：将“打铃模式”按钮移动到这里 ↓↓↓ ---
+        bell_btn = ttk.Button(btn_frame, text="🔔→打铃模式",
+                             bootstyle="warning", width=20, command=lambda: open_and_cleanup(self.open_bell_scheduler_dialog))
+        bell_btn.pack(pady=8, ipady=8, fill=X)
+        # --- ↑↑↑ 调整结束 ↑↑↑ ---
+
         choice_dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         self.center_window(choice_dialog, parent=self.root)
 #第5部分
 #第5部分
+    def open_bell_scheduler_dialog(self, parent_dialog):
+        """打开校铃/厂铃计划生成器对话框"""
+        # 这个 parent_dialog 是我们传递过来的临时占位符，先销毁它
+        if parent_dialog and parent_dialog.winfo_exists():
+            parent_dialog.destroy()
+        
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("校铃/厂铃时间表助手")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
+            dialog.destroy()
+            self.root.focus_force()
+
+        main_frame = ttk.Frame(dialog, padding=15)
+        main_frame.pack(fill=BOTH, expand=True)
+        main_frame.columnconfigure(0, weight=3) # 左侧区域
+        main_frame.columnconfigure(1, weight=2) # 右侧预览区域
+
+        # --- 左侧：设置区域 ---
+        left_frame = ttk.Frame(main_frame)
+        left_frame.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
+
+        # 铃声文件设置
+        bell_files_lf = ttk.LabelFrame(left_frame, text="1. 铃声文件设置", padding=10)
+        bell_files_lf.pack(fill=X, pady=5)
+        bell_files_lf.columnconfigure(1, weight=1)
+        
+        up_bell_var, down_bell_var, bell_volume_var = tk.StringVar(), tk.StringVar(), tk.StringVar(value="80")
+        
+        ttk.Label(bell_files_lf, text="上课/上班铃:").grid(row=0, column=0, sticky='e', padx=5)
+        ttk.Entry(bell_files_lf, textvariable=up_bell_var, font=self.font_11).grid(row=0, column=1, sticky='ew')
+        ttk.Button(bell_files_lf, text="选取", bootstyle="outline", width=5, command=lambda: self.select_file_for_entry(AUDIO_FOLDER, up_bell_var, dialog)).grid(row=0, column=2, padx=5)
+
+        ttk.Label(bell_files_lf, text="下课/下班铃:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        ttk.Entry(bell_files_lf, textvariable=down_bell_var, font=self.font_11).grid(row=1, column=1, sticky='ew')
+        ttk.Button(bell_files_lf, text="选取", bootstyle="outline", width=5, command=lambda: self.select_file_for_entry(AUDIO_FOLDER, down_bell_var, dialog)).grid(row=1, column=2, padx=5)
+        
+        ttk.Label(bell_files_lf, text="统一音量:").grid(row=2, column=0, sticky='e', padx=5)
+        ttk.Entry(bell_files_lf, textvariable=bell_volume_var, width=8, font=self.font_11).grid(row=2, column=1, sticky='w')
+        ttk.Label(bell_files_lf, text="(0-100)", font=self.font_9, bootstyle="secondary").grid(row=2, column=1, sticky='w', padx=70)
+
+        # 时间规则设置
+        schedule_lf = ttk.LabelFrame(left_frame, text="2. 通用规则设置", padding=10)
+        schedule_lf.pack(fill=X, pady=5)
+        schedule_lf.columnconfigure(1, weight=1)
+
+        weekday_var = tk.StringVar(value="每周:12345")
+        daterange_var = tk.StringVar(value="2025-01-01 ~ 2099-12-31")
+
+        ttk.Label(schedule_lf, text="周几执行:").grid(row=0, column=0, sticky='e', padx=5)
+        weekday_entry_schedule = ttk.Entry(schedule_lf, textvariable=weekday_var, font=self.font_11)
+        weekday_entry_schedule.grid(row=0, column=1, sticky='ew')
+        ttk.Button(schedule_lf, text="选取", bootstyle="outline", width=5, command=lambda: self.show_weekday_settings_dialog(weekday_entry_schedule)).grid(row=0, column=2, padx=5)
+
+        ttk.Label(schedule_lf, text="日期范围:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        daterange_entry_schedule = ttk.Entry(schedule_lf, textvariable=daterange_var, font=self.font_11)
+        daterange_entry_schedule.grid(row=1, column=1, sticky='ew')
+        ttk.Button(schedule_lf, text="设置", bootstyle="outline", width=5, command=lambda: self.show_daterange_settings_dialog(daterange_entry_schedule)).grid(row=1, column=2, padx=5)
+
+        # 课程时间设置
+        class_time_lf = ttk.LabelFrame(left_frame, text="3. 时间点设置", padding=10)
+        class_time_lf.pack(fill=X, pady=5)
+        
+        notebook = ttk.Notebook(class_time_lf)
+        notebook.pack(fill=BOTH, expand=True, pady=5)
+
+        am_tab, pm_tab = ttk.Frame(notebook, padding=10), ttk.Frame(notebook, padding=10)
+        notebook.add(am_tab, text=" 上午/白班 ")
+        notebook.add(pm_tab, text=" 下午/晚班 ")
+
+        def create_session_ui(parent, prefix):
+            parent.columnconfigure(1, weight=1)
+            
+            vars = {
+                'start_time': tk.StringVar(value="08:00:00" if prefix == "上午" else "14:00:00"),
+                'periods': tk.StringVar(value="4" if prefix == "上午" else "3"),
+                'duration': tk.StringVar(value="45"),
+                'short_break': tk.StringVar(value="10"),
+                'use_long_break': tk.BooleanVar(value=True if prefix == "上午" else False),
+                'long_break_after': tk.StringVar(value="2"),
+                'long_break_duration': tk.StringVar(value="25")
+            }
+
+            ttk.Label(parent, text=f"{prefix}第一节开始时间:").grid(row=0, column=0, sticky='e', padx=5)
+            start_time_entry = ttk.Entry(parent, textvariable=vars['start_time'], width=12, font=self.font_11)
+            start_time_entry.grid(row=0, column=1, columnspan=2, sticky='w')
+            self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
+
+            ttk.Label(parent, text=f"{prefix}课程/工作节数:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
+            ttk.Entry(parent, textvariable=vars['periods'], width=12, font=self.font_11).grid(row=1, column=1, columnspan=2, sticky='w')
+            
+            ttk.Label(parent, text="每节时长(分钟):").grid(row=2, column=0, sticky='e', padx=5, pady=2)
+            ttk.Entry(parent, textvariable=vars['duration'], width=12, font=self.font_11).grid(row=2, column=1, columnspan=2, sticky='w')
+
+            ttk.Label(parent, text="课间/休息时长(分钟):").grid(row=3, column=0, sticky='e', padx=5, pady=2)
+            ttk.Entry(parent, textvariable=vars['short_break'], width=12, font=self.font_11).grid(row=3, column=1, columnspan=2, sticky='w')
+            
+            long_break_cb = ttk.Checkbutton(parent, text="启用大课间/长休息", variable=vars['use_long_break'], bootstyle="round-toggle")
+            long_break_cb.grid(row=4, column=0, columnspan=3, pady=5)
+
+            long_break_frame = ttk.Frame(parent)
+            long_break_frame.grid(row=5, column=0, columnspan=3, sticky='w', padx=25)
+            ttk.Label(long_break_frame, text="在第").pack(side=LEFT)
+            ttk.Entry(long_break_frame, textvariable=vars['long_break_after'], width=5, font=self.font_11).pack(side=LEFT, padx=2)
+            ttk.Label(long_break_frame, text="节后，休息").pack(side=LEFT)
+            ttk.Entry(long_break_frame, textvariable=vars['long_break_duration'], width=5, font=self.font_11).pack(side=LEFT, padx=2)
+            ttk.Label(long_break_frame, text="分钟").pack(side=LEFT)
+
+            return vars
+
+        am_vars = create_session_ui(am_tab, "上午")
+        pm_vars = create_session_ui(pm_tab, "下午")
+
+        # --- 右侧：预览区域 ---
+        right_frame = ttk.Frame(main_frame)
+        right_frame.grid(row=0, column=1, sticky='nsew')
+        right_frame.rowconfigure(0, weight=1)
+        right_frame.columnconfigure(0, weight=1)
+
+        preview_lf = ttk.LabelFrame(right_frame, text="4. 生成预览", padding=10)
+        preview_lf.pack(fill=BOTH, expand=True)
+        preview_lf.rowconfigure(0, weight=1)
+        preview_lf.columnconfigure(0, weight=1)
+        
+        preview_text = ScrolledText(preview_lf, height=15, font=self.font_11, wrap=WORD)
+        preview_text.grid(row=0, column=0, sticky='nsew')
+        preview_text.text.config(state=DISABLED)
+        
+        # --- 底部按钮 ---
+        bottom_frame = ttk.Frame(dialog)
+        bottom_frame.pack(fill=X, padx=15, pady=(5, 10))
+        
+        # 将 commit_btn 提前定义，以便在预览函数中控制其状态
+        commit_btn = ttk.Button(bottom_frame, text="添加至节目单", bootstyle="success", state=DISABLED, command=lambda: self._commit_bells_to_schedule(
+            preview_text, up_bell_var, down_bell_var, bell_volume_var, weekday_var, daterange_var,
+            am_vars, pm_vars, dialog, cleanup_and_destroy
+        ))
+
+        preview_btn = ttk.Button(bottom_frame, text="生成预览", bootstyle="info", command=lambda: self._generate_and_preview_bells(
+            preview_text, up_bell_var, down_bell_var, bell_volume_var, am_vars, pm_vars, commit_btn, dialog
+        ))
+        preview_btn.pack(side=LEFT, padx=10, ipady=4)
+        commit_btn.pack(side=LEFT, padx=10, ipady=4)
+
+        ttk.Button(bottom_frame, text="取消", bootstyle="secondary", command=cleanup_and_destroy).pack(side=RIGHT, padx=10, ipady=4)
+
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
+        dialog.after(100, lambda: self.center_window(dialog, parent=self.root))
+
+    def _generate_and_preview_bells(self, preview_text_widget, up_bell_var, down_bell_var, bell_volume_var, am_vars, pm_vars, commit_btn, parent_dialog):
+        """计算并显示铃声时间表的预览"""
+        try:
+            # 验证铃声文件和音量
+            if not up_bell_var.get().strip() or not down_bell_var.get().strip():
+                messagebox.showerror("输入错误", "请必须选择“上课铃声”和“下课铃声”文件。", parent=parent_dialog)
+                return
+            volume = int(bell_volume_var.get())
+            if not (0 <= volume <= 100): raise ValueError("音量必须在 0-100 之间")
+
+            preview_content = []
+            
+            def calculate_session(prefix, session_vars):
+                start_time_str = self._normalize_time_string(session_vars['start_time'].get())
+                if not start_time_str: raise ValueError(f"{prefix}开始时间格式错误")
+                current_time = datetime.strptime(start_time_str, "%H:%M:%S")
+                
+                periods_str = session_vars['periods'].get().strip()
+                periods = int(periods_str) if periods_str else 0
+                if periods < 0: raise ValueError("节数不能为负数")
+                if periods == 0: return
+                
+                duration_min = int(session_vars['duration'].get())
+                short_break_min = int(session_vars['short_break'].get())
+                use_long_break = session_vars['use_long_break'].get()
+                long_break_after = int(session_vars['long_break_after'].get()) if use_long_break else -1
+                long_break_duration_min = int(session_vars['long_break_duration'].get()) if use_long_break else 0
+
+                for i in range(1, periods + 1):
+                    preview_content.append(f"[{prefix}第{i}节 上课铃] {current_time.strftime('%H:%M:%S')}")
+                    current_time += timedelta(minutes=duration_min)
+                    preview_content.append(f"[{prefix}第{i}节 下课铃] {current_time.strftime('%H:%M:%S')}")
+
+                    if i < periods:
+                        if use_long_break and i == long_break_after:
+                            current_time += timedelta(minutes=long_break_duration_min)
+                        else:
+                            current_time += timedelta(minutes=short_break_min)
+            
+            calculate_session("上午", am_vars)
+            if preview_content and int(pm_vars['periods'].get().strip() or 0) > 0:
+                preview_content.append("-" * 30)
+            calculate_session("下午", pm_vars)
+
+            preview_text_widget.text.config(state=NORMAL)
+            preview_text_widget.text.delete('1.0', END)
+            preview_text_widget.text.insert('1.0', "\n".join(preview_content))
+            preview_text_widget.text.config(state=DISABLED)
+
+            commit_btn.config(state=NORMAL if preview_content else DISABLED)
+
+        except (ValueError, TypeError) as e:
+            messagebox.showerror("输入错误", f"请检查所有时间、时长和节数是否为有效的纯数字。\n\n错误详情: {e}", parent=parent_dialog)
+            commit_btn.config(state=DISABLED)
+            return
+
+    def _commit_bells_to_schedule(self, preview_text_widget, up_bell_var, down_bell_var, bell_volume_var, weekday_var, daterange_var, am_vars, pm_vars, parent_dialog, close_callback):
+        """将预览中的铃声任务打包成一个任务组，并添加到主节目列表"""
+        preview_content = preview_text_widget.text.get('1.0', END).strip()
+        if not preview_content:
+            messagebox.showwarning("无内容", "预览为空，无法添加。", parent=parent_dialog)
+            return
+            
+        generated_times = []
+        lines = preview_content.split('\n')
+        for line in lines:
+            if not line.strip() or line.startswith('-'):
+                continue
+            
+            match = re.match(r'\[(.*?)\]\s*(\d{2}:\d{2}:\d{2})', line)
+            if not match:
+                continue
+            
+            task_name = match.group(1).strip()
+            task_time = match.group(2).strip()
+            bell_type = 'up' if "上课" in task_name or "上班" in task_name else 'down'
+            generated_times.append({'name': task_name, 'time': task_time, 'bell_type': bell_type})
+        
+        if not generated_times:
+            messagebox.showwarning("无内容", "未能从预览中解析出有效的时间点。", parent=parent_dialog)
+            return
+
+        # 创建一个单一的“铃声计划”任务对象
+        new_bell_schedule_task = {
+            'name': "校园/工厂作息铃声", # 将来可以增加一个输入框让用户自定义
+            'type': 'bell_schedule', # 这是一个新的、特殊的任务类型
+            'status': '启用',
+            'weekday': weekday_var.get(),
+            'date_range': daterange_var.get(),
+            'up_bell_file': up_bell_var.get(),
+            'down_bell_file': down_bell_var.get(),
+            'volume': bell_volume_var.get(),
+            # 保存所有UI上的参数，以便将来可以恢复和编辑
+            'schedule_params': {
+                'am': {k: v.get() if isinstance(v, tk.StringVar) else bool(v.get()) for k, v in am_vars.items()},
+                'pm': {k: v.get() if isinstance(v, tk.StringVar) else bool(v.get()) for k, v in pm_vars.items()}
+            },
+            'generated_times': generated_times, # 保存所有计算出的时间点
+            'last_run': {}
+        }
+        
+        self.tasks.append(new_bell_schedule_task)
+        
+        self.update_task_list()
+        self.save_tasks()
+        self.log(f"通过“打铃模式”成功添加了一个包含 {len(generated_times)} 个时间点的铃声计划。")
+        messagebox.showinfo("成功", f"已成功生成并添加了一个包含 {len(generated_times)} 个时间点的铃声计划！", parent=self.root)
+        close_callback()
+
     def open_audio_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
@@ -4734,29 +5008,47 @@ class TimedBroadcastApp:
         selection = self.task_tree.selection()
         self.task_tree.delete(*self.task_tree.get_children())
         for task in self.tasks:
-            content = task.get('content', '')
             task_type = task.get('type')
 
-            if task_type == 'voice':
-                source_text = task.get('source_text', '')
-                clean_content = source_text.replace('\n', ' ').replace('\r', '')
-                content_preview = (clean_content[:30] + '...') if len(clean_content) > 30 else clean_content
-            elif task_type in ['audio', 'video']:
-                content_preview = os.path.basename(content)
-            else:
-                content_preview = os.path.basename(content)
+            # --- ↓↓↓ 新增的逻辑：专门处理 'bell_schedule' 类型 ↓↓↓ ---
+            if task_type == 'bell_schedule':
+                name = "🔔 " + task.get('name', '铃声计划')
+                time_count = len(task.get('generated_times', []))
+                content_preview = f"包含 {time_count} 个时间点"
+                self.task_tree.insert('', END, values=(
+                    name,
+                    task.get('status', ''),
+                    "多个", # 开始时间显示为“多个”
+                    "准时", # 模式固定为准时
+                    content_preview,
+                    task.get('volume', ''),
+                    task.get('weekday', ''),
+                    task.get('date_range', '')
+                ))
+            # --- ↑↑↑ 新增逻辑结束 ↑↑↑ ---
+            else: # 原有的逻辑保持不变
+                content = task.get('content', '')
+                if task_type == 'voice':
+                    source_text = task.get('source_text', '')
+                    clean_content = source_text.replace('\n', ' ').replace('\r', '')
+                    content_preview = (clean_content[:30] + '...') if len(clean_content) > 30 else clean_content
+                elif task_type in ['audio', 'video']:
+                    content_preview = os.path.basename(content)
+                else:
+                    content_preview = os.path.basename(content)
 
-            display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
-            self.task_tree.insert('', END, values=(
-                task.get('name', ''),
-                task.get('status', ''),
-                task.get('time', ''),
-                display_mode,
-                content_preview,
-                task.get('volume', ''),
-                task.get('weekday', ''),
-                task.get('date_range', '')
-            ))
+                display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
+                self.task_tree.insert('', END, values=(
+                    task.get('name', ''),
+                    task.get('status', ''),
+                    task.get('time', ''),
+                    display_mode,
+                    content_preview,
+                    task.get('volume', ''),
+                    task.get('weekday', ''),
+                    task.get('date_range', '')
+                ))
+
         if selection:
             try:
                 valid_selection = [s for s in selection if self.task_tree.exists(s)]
@@ -5016,10 +5308,47 @@ class TimedBroadcastApp:
             return
 
         tasks_to_play = []
+        current_date_str = now.strftime("%Y-%m-%d")
+        current_time_str = now.strftime("%H:%M:%S")
+
         for task in self.tasks:
-            is_due, trigger_time = self._is_task_due(task, now)
-            if is_due:
-                tasks_to_play.append((task, trigger_time))
+            task_type = task.get('type')
+            
+            if task_type == 'bell_schedule':
+                if task.get('status') != '启用': continue
+                
+                try:
+                    start, end = [d.strip() for d in task.get('date_range', '').split('~')]
+                    if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()):
+                        continue
+                except (ValueError, IndexError): pass
+                
+                schedule = task.get('weekday', '每周:1234567')
+                run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or \
+                            (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
+                if not run_today: continue
+
+                for bell_event in task.get('generated_times', []):
+                    if bell_event['time'] == current_time_str and task.get('last_run', {}).get(bell_event['time']) != current_date_str:
+                        # 构造一个临时的、可播放的音频任务
+                        playable_task = {
+                            'name': bell_event['name'],
+                            'type': 'audio',
+                            'audio_type': 'single',
+                            'content': task['up_bell_file'] if bell_event['bell_type'] == 'up' else task['down_bell_file'],
+                            'volume': task['volume'],
+                            'interval_type': 'first',
+                            'interval_first': '1',
+                        }
+                        # 铃声总是高优先级的
+                        self.playback_command_queue.put(('PLAY_INTERRUPT', (playable_task, bell_event['time'])))
+                        task.setdefault('last_run', {})[bell_event['time']] = current_date_str
+                        self.save_tasks()
+
+            else: # 原有逻辑
+                is_due, trigger_time = self._is_task_due(task, now)
+                if is_due:
+                    tasks_to_play.append((task, trigger_time))
 
         if not tasks_to_play:
             return
