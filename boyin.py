@@ -1557,6 +1557,7 @@ class TimedBroadcastApp:
             except Exception as e:
                 # 即使某个位置写入失败（如权限不足），也继续尝试下一个
                 #self.log(f"警告: 创建哨兵失败 - {stype} at {path} - 原因: {e}")
+                pass
 
     def _check_for_sentinels(self):
         """
