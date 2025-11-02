@@ -1485,17 +1485,6 @@ class TimedBroadcastApp:
         signature = hashlib.sha256(data_to_hash.encode('utf-8')).hexdigest()
         return signature
 
-    # --- ↓↓↓ 新增函数：生成授权签名 ↓↓↓ ---
-    def _generate_signature(self, license_type):
-        """根据机器码、授权类型和密钥盐生成SHA-256签名"""
-        machine_code = self.get_machine_code()
-        # 将所有部分组合成一个字符串进行哈希
-        data_to_hash = str(machine_code) + str(license_type) + SECRET_SALT
-        # 使用 SHA-256 算法生成十六进制格式的签名
-        signature = hashlib.sha256(data_to_hash.encode('utf-8')).hexdigest()
-        return signature
-    # --- ↑↑↑ 新增函数结束 ↑↑↑ ---
-
     def _calculate_reg_codes(self, numeric_mac_str):
         try:
             monthly_code = int(int(numeric_mac_str) * 3.14)
