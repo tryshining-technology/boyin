@@ -145,6 +145,16 @@ REGISTRY_PARENT_KEY_PATH = r"Software\创翔科技"
 # !!! 警告：请将这个字符串修改为您自己的、独一无二的复杂字符串 !!!
 SECRET_SALT = "42492f00-d980-40e1-a17e-ba8094727636"
 AMAP_API_KEY = "c62d9b56d92792d1d11c8544f1b547dc"
+SENTINEL_LOCATIONS = [
+    # 文件哨兵1: 程序根目录 (相对路径)
+    ('file', 'dat.sys', None, None), 
+    # 文件哨兵2: 公共文档目录 (高权限，通常可写)
+    ('file', os.path.join(os.environ.get("PUBLIC", r"C:\Users\Public"), 'Documents', 'dat.sys'), None, None),
+    # 文件哨兵3: 系统级程序数据目录 (需要权限，失败也无妨)
+    ('file', os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), 'dat.sys'), None, None),
+    # 注册表哨兵: 一个不显眼的公共位置
+    ('reg', r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.log", 'Signature', None)
+]
 # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
 EDGE_TTS_VOICES = {
     # --- 中国大陆 (8个) ---
@@ -433,7 +443,7 @@ class TimedBroadcastApp:
         self.status_labels = []
         status_texts = ["当前时间", "系统状态", "播放状态", "任务数量", "待办事项"]
 
-        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251031", font=self.font_11,
+        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251024", font=self.font_11,
                                     bootstyle=(SECONDARY, INVERSE), padding=(15, 0))
         copyright_label.pack(side=RIGHT, padx=2)
 
@@ -547,11 +557,11 @@ class TimedBroadcastApp:
         correct_password = datetime.now().strftime('%Y%m%d')
 
         if entered_password == correct_password:
-            self.log("超级管理员密码正确，进入管理模块。")
+            #self.log("超级管理员密码正确，进入管理模块。")
             self.switch_page("超级管理")
         elif entered_password is not None:
             messagebox.showerror("验证失败", "密码错误！", parent=self.root)
-            self.log("尝试进入超级管理模块失败：密码错误。")
+            #self.log("尝试进入超级管理模块失败：密码错误。")
 
     def create_intercut_page(self):
         page_frame = ttk.Frame(self.page_container, padding=20)
@@ -1463,8 +1473,17 @@ class TimedBroadcastApp:
         mac_addresses.sort()
         
         # 返回最优先的那个MAC地址
-        self.log(f"找到的最稳定MAC地址来自网卡: {mac_addresses[0][2]}")
+        #self.log(f"找到的最稳定MAC地址来自网卡: {mac_addresses[0][2]}")
         return mac_addresses[0][1]
+
+    def _generate_signature(self, license_type, date_str):
+        """根据机器码、授权类型、日期和密钥盐生成SHA-256签名"""
+        machine_code = self.get_machine_code()
+        # 将所有部分组合成一个不可变的字符串进行哈希
+        data_to_hash = f"{machine_code}|{license_type}|{date_str}|{SECRET_SALT}"
+        # 使用 SHA-256 算法生成十六进制格式的签名
+        signature = hashlib.sha256(data_to_hash.encode('utf-8')).hexdigest()
+        return signature
 
     # --- ↓↓↓ 新增函数：生成授权签名 ↓↓↓ ---
     def _generate_signature(self, license_type):
@@ -1500,8 +1519,8 @@ class TimedBroadcastApp:
         correct_codes = self._calculate_reg_codes(numeric_machine_code)
 
         today_str = datetime.now().strftime('%Y-%m-%d')
-
         license_type = None
+
         if entered_code == correct_codes['monthly']:
             license_type = 'Monthly'
             messagebox.showinfo("注册成功", "恭喜您，月度授权已成功激活！", parent=self.root)
@@ -1513,85 +1532,142 @@ class TimedBroadcastApp:
             return
 
         if license_type:
-            signature = self._generate_signature(license_type)
+            # --- 核心修改：生成并保存签名 ---
+            signature = self._generate_signature(license_type, today_str)
             self._save_to_registry('RegistrationStatus', license_type)
             self._save_to_registry('RegistrationDate', today_str)
-            self._save_to_registry('LicenseSignature', signature)
+            self._save_to_registry('LicenseSignature', signature) # <-- 新增：保存签名
+            # --- 修改结束 ---
             self.check_authorization()
+
+    def _create_sentinels(self):
+        """
+        在所有预定位置创建哨兵文件和注册表键。
+        """
+        #self.log("首次运行，正在创建防篡改哨兵...")
+        machine_code = self.get_machine_code()
+        
+        for stype, path, name, _ in SENTINEL_LOCATIONS:
+            try:
+                if stype == 'file':
+                    # 写入机器码，防止用户从别的电脑复制哨兵文件
+                    with open(path, 'w') as f:
+                        f.write(machine_code)
+                    # 尝试将文件设置为隐藏
+                    if sys.platform == "win32":
+                        ctypes.windll.kernel32.SetFileAttributesW(path, 2) # 2 = FILE_ATTRIBUTE_HIDDEN
+                    #self.log(f"成功创建文件哨兵: {path}")
+
+                elif stype == 'reg':
+                    key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, path)
+                    winreg.SetValueEx(key, name, 0, winreg.REG_SZ, machine_code)
+                    winreg.CloseKey(key)
+                    #self.log(f"成功创建注册表哨兵: HKEY_CURRENT_USER\\{path}\\{name}")
+
+            except Exception as e:
+                # 即使某个位置写入失败（如权限不足），也继续尝试下一个
+                #self.log(f"警告: 创建哨兵失败 - {stype} at {path} - 原因: {e}")
+
+    def _check_for_sentinels(self):
+        """
+        检查任何一个哨兵位置是否存在。只要找到一个，就返回True。
+        """
+        machine_code = self.get_machine_code()
+
+        for stype, path, name, _ in SENTINEL_LOCATIONS:
+            try:
+                if stype == 'file':
+                    if os.path.exists(path):
+                        # 可选增强：检查文件内容是否匹配当前机器码
+                        try:
+                            with open(path, 'r') as f:
+                                content = f.read()
+                            if content == machine_code:
+                                #self.log(f"检测到有效的文件哨兵: {path}")
+                                return True
+                        except:
+                            # 文件存在但无法读取或内容不匹配，也算作一个标记
+                            #self.log(f"检测到可疑的文件哨兵: {path}")
+                            return True
+                            
+                elif stype == 'reg':
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_READ)
+                    value, _ = winreg.QueryValueEx(key, name)
+                    winreg.CloseKey(key)
+                    # 可选增强：检查注册表值是否匹配
+                    if value == machine_code:
+                        #self.log(f"检测到有效的注册表哨兵: HKEY_CURRENT_USER\\{path}\\{name}")
+                        return True
+
+            except FileNotFoundError:
+                # 这个是正常情况，意味着没找到
+                continue
+            except Exception as e:
+                # 发生其他错误，例如权限问题，我们保守地认为哨兵可能存在
+                #self.log(f"警告: 检查哨兵时发生错误 - {stype} at {path} - 原因: {e}")
+                continue
+        
+        # 遍历完所有位置都没找到
+        return False
 
     def check_authorization(self):
         today = datetime.now().date()
+        today_str = today.strftime('%Y-%m-%d')
         now_dt = datetime.now()
-        status = self._load_from_registry('RegistrationStatus')
-        reg_date_str = self._load_from_registry('RegistrationDate')
 
+        # 1. 检查系统时间回拨
         time_tampered = False
-        if os.path.exists(TIMESTAMP_FILE):
+        last_seen_date_str = self._load_from_registry('LastSeenDate')
+        if last_seen_date_str:
             try:
-                last_mod_time_stamp = os.path.getmtime(TIMESTAMP_FILE)
-                last_mod_dt = datetime.fromtimestamp(last_mod_time_stamp)
-                if now_dt < last_mod_dt - timedelta(seconds=5):
-                    # self.log("检测到时间篡改 (文件时间戳校验)，试用期立即结束。")
+                last_seen_date = datetime.strptime(last_seen_date_str, '%Y-%m-%d').date()
+                if today < last_seen_date:
+                    #self.log("安全警告：检测到系统时间被回调，授权立即失效。")
                     time_tampered = True
-            except Exception:
-                # self.log(f"警告: 读取时间戳文件失败 - {e}")
+            except (ValueError, TypeError):
                 pass
-        
-        if not time_tampered:
-            last_seen_date_str = self._load_from_registry('LastSeenDate')
-            if last_seen_date_str:
-                try:
-                    last_seen_date = datetime.strptime(last_seen_date_str, '%Y-%m-%d').date()
-                    if today < last_seen_date:
-                        # self.log("检测到系统时间被回调 (注册表校验)，试用期立即结束。")
-                        time_tampered = True
-                except (ValueError, TypeError):
-                    pass
+        self._save_to_registry('LastSeenDate', today_str)
 
-        self._save_to_registry('LastSeenDate', today.strftime('%Y-%m-%d'))
-
-        stored_signature = self._load_from_registry('LicenseSignature')
-        if status and (not stored_signature or stored_signature != self._generate_signature(status)):
-            # self.log(f"检测到无效或被篡改的授权信息 (状态: {status})。")
-            self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
+        if time_tampered:
+            self.auth_info = {'status': 'Expired', 'message': '授权已过期，请注册'}
             self.is_app_locked_down = True
             self.update_title_bar()
             return
+            
+        # 2. 读取授权信息和签名
+        status = self._load_from_registry('RegistrationStatus')
+        reg_date_str = self._load_from_registry('RegistrationDate')
+        stored_signature = self._load_from_registry('LicenseSignature')
 
-        if status == 'Permanent':
-            self.auth_info = {'status': 'Permanent', 'message': '永久授权'}
-            self.is_app_locked_down = False
-        elif status == 'Monthly':
-            try:
-                reg_date = datetime.strptime(reg_date_str, '%Y-%m-%d').date()
-                expiry_date = reg_date + timedelta(days=30)
-                if today > expiry_date:
-                    self.auth_info = {'status': 'Expired', 'message': '授权已过期，请注册'}
-                    self.is_app_locked_down = True
-                else:
-                    remaining_days = (expiry_date - today).days
-                    self.auth_info = {'status': 'Monthly', 'message': f'月度授权 - 剩余 {remaining_days} 天'}
-                    self.is_app_locked_down = False
-            except (TypeError, ValueError):
+        # 3. 核心验证逻辑
+        if status and reg_date_str and stored_signature:
+            expected_signature = self._generate_signature(status, reg_date_str)
+            if stored_signature != expected_signature:
+                self.log(f"安全警告：检测到无效或被篡改的授权信息 (状态: {status})。")
                 self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
                 self.is_app_locked_down = True
-        else:
-            if time_tampered:
-                self.auth_info = {'status': 'Expired', 'message': '授权已过期，请注册'}
-                self.is_app_locked_down = True
             else:
-                first_run_date_str = self._load_from_registry('FirstRunDate')
-                if not first_run_date_str:
-                    self._save_to_registry('FirstRunDate', today.strftime('%Y-%m-%d'))
+                # 签名匹配，数据可信，判断有效期
+                if status == 'Permanent':
+                    self.auth_info = {'status': 'Permanent', 'message': '永久授权'}
+                    self.is_app_locked_down = False
+                elif status == 'Monthly':
                     try:
-                        with open(TIMESTAMP_FILE, "w") as f:
-                            f.write(str(time.time()))
-                    except Exception:
-                        # self.log("警告: 无法初始化授权组件 (代码: C2)。")
-                        pass
-                else:
-                    try:
-                        first_run_date = datetime.strptime(first_run_date_str, '%Y-%m-%d').date()
+                        reg_date = datetime.strptime(reg_date_str, '%Y-%m-%d').date()
+                        expiry_date = reg_date + timedelta(days=30)
+                        if today > expiry_date:
+                            self.auth_info = {'status': 'Expired', 'message': '授权已过期，请注册'}
+                            self.is_app_locked_down = True
+                        else:
+                            remaining_days = (expiry_date - today).days
+                            self.auth_info = {'status': 'Monthly', 'message': f'月度授权 - 剩余 {remaining_days} 天'}
+                            self.is_app_locked_down = False
+                    except (TypeError, ValueError):
+                        self.auth_info = {'status': 'Expired', 'message': '授权信息损坏[M]'}
+                        self.is_app_locked_down = True
+                elif status == 'Trial':
+                     try:
+                        first_run_date = datetime.strptime(reg_date_str, '%Y-%m-%d').date()
                         trial_expiry_date = first_run_date + timedelta(days=3)
                         if today > trial_expiry_date:
                             self.auth_info = {'status': 'Expired', 'message': '授权已过期，请注册'}
@@ -1600,9 +1676,37 @@ class TimedBroadcastApp:
                             remaining_days = (trial_expiry_date - today).days
                             self.auth_info = {'status': 'Trial', 'message': f'未注册 - 剩余 {remaining_days} 天'}
                             self.is_app_locked_down = False
-                    except (TypeError, ValueError):
-                        self.auth_info = {'status': 'Expired', 'message': '授权信息损坏，请重新注册'}
+                     except (TypeError, ValueError):
+                        self.auth_info = {'status': 'Expired', 'message': '授权信息损坏[T]'}
                         self.is_app_locked_down = True
+                else:
+                    self.auth_info = {'status': 'Expired', 'message': '授权状态未知'}
+                    self.is_app_locked_down = True
+        else:
+            # --- ↓↓↓ 核心修改：首次运行判断逻辑 ---
+            # 授权信息不完整，先检查是否存在任何哨兵
+            if self._check_for_sentinels():
+                # 找到了哨兵，说明这不是真正的首次运行！
+                #self.log("安全警告：检测到历史运行痕迹，试用期已结束。")
+                self.auth_info = {'status': 'Expired', 'message': '授权已过期 (Tampered)'}
+                self.is_app_locked_down = True
+            else:
+                # 未找到哨兵，这是真正的首次运行
+                #self.log("未找到有效授权和历史痕迹，初始化3天试用期...")
+                trial_start_date = today_str
+                trial_signature = self._generate_signature('Trial', trial_start_date)
+                
+                # 保存带签名的试用期信息
+                self._save_to_registry('RegistrationStatus', 'Trial')
+                self._save_to_registry('RegistrationDate', trial_start_date)
+                self._save_to_registry('LicenseSignature', trial_signature)
+                
+                # 创建所有哨兵
+                self._create_sentinels()
+                
+                self.auth_info = {'status': 'Trial', 'message': '未注册 - 剩余 3 天'}
+                self.is_app_locked_down = False
+            # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
 
         self.update_title_bar()
 
@@ -3401,7 +3505,7 @@ class TimedBroadcastApp:
         local_rb = ttk.Radiobutton(engine_frame, text="本地语音 (SAPI)", variable=voice_engine_var, value="local")
         local_rb.pack(side=LEFT, padx=(0, 15))
         
-        online_rb = ttk.Radiobutton(engine_frame, text="在线语音 (推荐)", variable=voice_engine_var, value="online")
+        online_rb = ttk.Radiobutton(engine_frame, text="在线语音 (Edge)", variable=voice_engine_var, value="online")
         online_rb.pack(side=LEFT)
         
         ttk.Label(content_frame, text="播音员:").grid(row=4, column=0, sticky='w', padx=5, pady=3)
@@ -4862,6 +4966,34 @@ class TimedBroadcastApp:
                 continue
         return False
 
+    def _play_chime_concurrently(self, chime_path):
+        """
+        以“即发即忘”的方式，在独立的音效通道上并发播放报时音，不中断主音频。
+        此方法被设计为在主GUI线程中通过 after() 调用。
+        """
+        if not AUDIO_AVAILABLE:
+            self.log("警告：Pygame未初始化，无法进行整点报时。")
+            return
+
+        try:
+            self.log(f"并发播放整点报时: {os.path.basename(chime_path)}")
+            # 从文件加载报时音
+            chime_sound = pygame.mixer.Sound(chime_path)
+            
+            # 找到一个当前未被使用的音效通道
+            # a reliable way to get a free channel
+            channel = pygame.mixer.find_channel(True) 
+            
+            # 为报时音设置一个固定的、较大的音量（例如100%）
+            channel.set_volume(1.0)
+            
+            # 在这个独立的通道上播放报时音
+            channel.play(chime_sound)
+            
+            # 方法到此结束，不等待播放完成，主节目可以继续播放
+        except Exception as e:
+            self.log(f"并发播放整点报时失败: {e}")
+
     def _check_time_chime(self, now):
         if not self.settings.get("time_chime_enabled", False):
             return
@@ -4871,12 +5003,12 @@ class TimedBroadcastApp:
 
             if self._is_in_holiday(now):
                 self.log("当前处于节假日，跳过整点报时。")
-                return
+                return  
 
             chime_file = os.path.join(CHIME_FOLDER, f"{now.hour:02d}.wav")
             if os.path.exists(chime_file):
-                self.log(f"触发整点报时: {now.hour:02d}点")
-                self.playback_command_queue.put(('PLAY_CHIME', chime_file))
+                # --- 核心修改：调用新的并发播放方法 ---
+                self.root.after(0, self._play_chime_concurrently, chime_file)
             else:
                 self.log(f"警告：找不到整点报时文件 {chime_file}，报时失败。")
 
@@ -4944,28 +5076,6 @@ class TimedBroadcastApp:
                     is_playing = True
                     self._execute_broadcast(data[0], data[1])
                     is_playing = False
-
-            elif command == 'PLAY_CHIME':
-                if not AUDIO_AVAILABLE: continue
-                chime_path = data
-                was_playing = pygame.mixer.music.get_busy()
-                if was_playing:
-                    pygame.mixer.music.pause()
-                    self.log("整点报时，暂停当前播放...")
-
-                try:
-                    chime_sound = pygame.mixer.Sound(chime_path)
-                    chime_sound.set_volume(1.0)
-                    chime_channel = pygame.mixer.find_channel(True)
-                    chime_channel.play(chime_sound)
-                    while chime_channel and chime_channel.get_busy():
-                        time.sleep(0.1)
-                except Exception as e:
-                    self.log(f"播放整点报时失败: {e}")
-
-                if was_playing:
-                    pygame.mixer.music.unpause()
-                    self.log("报时结束，恢复播放。")
 
             elif command == 'STOP':
                 is_playing = False
