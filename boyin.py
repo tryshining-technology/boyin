@@ -443,7 +443,7 @@ class TimedBroadcastApp:
         self.status_labels = []
         status_texts = ["当前时间", "系统状态", "播放状态", "任务数量", "待办事项"]
 
-        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251024", font=self.font_11,
+        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251101", font=self.font_11,
                                     bootstyle=(SECONDARY, INVERSE), padding=(15, 0))
         copyright_label.pack(side=RIGHT, padx=2)
 
@@ -3504,7 +3504,7 @@ class TimedBroadcastApp:
         local_rb = ttk.Radiobutton(engine_frame, text="本地语音 (SAPI)", variable=voice_engine_var, value="local")
         local_rb.pack(side=LEFT, padx=(0, 15))
         
-        online_rb = ttk.Radiobutton(engine_frame, text="在线语音 (Edge)", variable=voice_engine_var, value="online")
+        online_rb = ttk.Radiobutton(engine_frame, text="在线语音 (推荐)", variable=voice_engine_var, value="online")
         online_rb.pack(side=LEFT)
         
         ttk.Label(content_frame, text="播音员:").grid(row=4, column=0, sticky='w', padx=5, pady=3)
