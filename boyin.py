@@ -1408,7 +1408,8 @@ class TimedBroadcastApp:
         self.log("用户请求取消注册...")
         self._save_to_registry('RegistrationStatus', '')
         self._save_to_registry('RegistrationDate', '')
-        self._save_to_registry('LicenseSignature', '') # <--- 新增这一行，清除签名
+        self._save_to_registry('LicenseSignature', '')
+        self._save_to_registry('LastSeenSignature', '')
 
         self.check_authorization()
 
@@ -1602,20 +1603,34 @@ class TimedBroadcastApp:
     def check_authorization(self):
         today = datetime.now().date()
         today_str = today.strftime('%Y-%m-%d')
-        now_dt = datetime.now()
-
-        # 1. 检查系统时间回拨
+        
+        # 1. 终极加固的时间回拨检测
         time_tampered = False
         last_seen_date_str = self._load_from_registry('LastSeenDate')
-        if last_seen_date_str:
-            try:
-                last_seen_date = datetime.strptime(last_seen_date_str, '%Y-%m-%d').date()
-                if today < last_seen_date:
-                    #self.log("安全警告：检测到系统时间被回调，授权立即失效。")
+        last_seen_signature = self._load_from_registry('LastSeenSignature')
+
+        if last_seen_date_str and last_seen_signature:
+            # 如果存在上一次的记录，必须验证其签名
+            expected_signature = self._generate_signature('LastSeen', last_seen_date_str)
+            if last_seen_signature != expected_signature:
+                # 签名不匹配，意味着 LastSeenDate 被篡改！
+                #self.log("安全警告：检测到 LastSeenDate 被篡改，授权立即失效。")
+                time_tampered = True
+            else:
+                # 签名匹配，LastSeenDate 可信，现在才进行时间比较
+                try:
+                    last_seen_date = datetime.strptime(last_seen_date_str, '%Y-%m-%d').date()
+                    if today < last_seen_date:
+                        #self.log("安全警告：检测到系统时间被回调，授权立即失效。")
+                        time_tampered = True
+                except (ValueError, TypeError):
+                    # 日期格式错误，也视为篡改
                     time_tampered = True
-            except (ValueError, TypeError):
-                pass
+        
+        # 在所有检查之后，无论是否被篡改，都用今天的日期和新签名覆盖旧的记录
+        new_signature_for_today = self._generate_signature('LastSeen', today_str)
         self._save_to_registry('LastSeenDate', today_str)
+        self._save_to_registry('LastSeenSignature', new_signature_for_today)
 
         if time_tampered:
             self.auth_info = {'status': 'Expired', 'message': '授权已过期，请注册'}
@@ -1623,12 +1638,12 @@ class TimedBroadcastApp:
             self.update_title_bar()
             return
             
-        # 2. 读取授权信息和签名
+        # 2. 读取主授权信息和签名 (这部分逻辑不变)
         status = self._load_from_registry('RegistrationStatus')
         reg_date_str = self._load_from_registry('RegistrationDate')
         stored_signature = self._load_from_registry('LicenseSignature')
 
-        # 3. 核心验证逻辑
+        # 3. 核心验证逻辑 (这部分逻辑不变)
         if status and reg_date_str and stored_signature:
             expected_signature = self._generate_signature(status, reg_date_str)
             if stored_signature != expected_signature:
@@ -1672,30 +1687,24 @@ class TimedBroadcastApp:
                     self.auth_info = {'status': 'Expired', 'message': '授权状态未知'}
                     self.is_app_locked_down = True
         else:
-            # --- ↓↓↓ 核心修改：首次运行判断逻辑 ---
-            # 授权信息不完整，先检查是否存在任何哨兵
+            # 首次运行判断逻辑 (这部分逻辑不变)
             if self._check_for_sentinels():
-                # 找到了哨兵，说明这不是真正的首次运行！
                 #self.log("安全警告：检测到历史运行痕迹，试用期已结束。")
                 self.auth_info = {'status': 'Expired', 'message': '授权已过期 (Tampered)'}
                 self.is_app_locked_down = True
             else:
-                # 未找到哨兵，这是真正的首次运行
                 #self.log("未找到有效授权和历史痕迹，初始化3天试用期...")
                 trial_start_date = today_str
                 trial_signature = self._generate_signature('Trial', trial_start_date)
                 
-                # 保存带签名的试用期信息
                 self._save_to_registry('RegistrationStatus', 'Trial')
                 self._save_to_registry('RegistrationDate', trial_start_date)
                 self._save_to_registry('LicenseSignature', trial_signature)
                 
-                # 创建所有哨兵
                 self._create_sentinels()
                 
                 self.auth_info = {'status': 'Trial', 'message': '未注册 - 剩余 3 天'}
                 self.is_app_locked_down = False
-            # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
 
         self.update_title_bar()
 
