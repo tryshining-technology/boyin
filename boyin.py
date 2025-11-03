@@ -127,6 +127,7 @@ HOLIDAY_FILE = os.path.join(application_path, "holidays.json")
 TODO_FILE = os.path.join(application_path, "todos.json")
 SCREENSHOT_TASK_FILE = os.path.join(application_path, "screenshot_tasks.json")
 EXECUTE_TASK_FILE = os.path.join(application_path, "execute_tasks.json")
+PRINT_TASK_FILE = os.path.join(application_path, "print_tasks.json")
 TIMESTAMP_FILE = os.path.join(application_path, ".timestamp.dat")
 
 PROMPT_FOLDER = os.path.join(application_path, "提示音")
@@ -196,6 +197,7 @@ class TimedBroadcastApp:
         self.todos = []
         self.screenshot_tasks = []
         self.execute_tasks = []
+        self.print_tasks = []
         
         self.settings = {}
         self.running = True
@@ -265,6 +267,7 @@ class TimedBroadcastApp:
         self.load_todos()
         self.load_screenshot_tasks()
         self.load_execute_tasks()
+        self.load_print_tasks()
 
         self.start_background_threads()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
@@ -640,12 +643,15 @@ class TimedBroadcastApp:
 
         screenshot_tab = ttk.Frame(notebook, padding=10)
         execute_tab = ttk.Frame(notebook, padding=10)
+        print_tab = ttk.Frame(notebook, padding=10)
 
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
+        notebook.add(print_tab, text=' 定时打印 ')
 
         self._build_screenshot_ui(screenshot_tab)
         self._build_execute_ui(execute_tab)
+        self._build_print_ui(print_tab)
 
         return page_frame
 
@@ -1068,6 +1074,65 @@ class TimedBroadcastApp:
             
         self.update_execute_list()
 
+    def _build_print_ui(self, parent_frame):
+        parent_frame.columnconfigure(0, weight=1)
+        parent_frame.rowconfigure(0, weight=1)
+
+        main_content_frame = ttk.Frame(parent_frame)
+        main_content_frame.grid(row=0, column=0, sticky='nsew')
+        main_content_frame.columnconfigure(0, weight=1)
+        main_content_frame.rowconfigure(1, weight=1)
+
+        desc_label = ttk.Label(main_content_frame, 
+                               text="此功能将在指定时间，使用指定打印机自动打印文件。",
+                               font=self.font_10, bootstyle="info", wraplength=600)
+        desc_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
+
+        table_frame = ttk.Frame(main_content_frame)
+        table_frame.grid(row=1, column=0, sticky='nsew')
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.rowconfigure(0, weight=1)
+
+        columns = ('任务名称', '状态', '打印时间', '打印文件', '打印机', '份数', '周/月规则', '日期范围')
+        self.print_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended', bootstyle="info")
+        
+        col_configs = [
+            ('任务名称', 200, 'w'), ('状态', 80, 'center'), ('打印时间', 150, 'center'),
+            ('打印文件', 250, 'w'), ('打印机', 200, 'w'), ('份数', 60, 'center'),
+            ('周/月规则', 150, 'center'), ('日期范围', 200, 'center')
+        ]
+        for name, width, anchor in col_configs:
+            self.print_tree.heading(name, text=name)
+            self.print_tree.column(name, width=width, anchor=anchor)
+
+        self.print_tree.grid(row=0, column=0, sticky='nsew')
+        scrollbar = ttk.Scrollbar(table_frame, orient=VERTICAL, command=self.print_tree.yview, bootstyle="round-info")
+        scrollbar.grid(row=0, column=1, sticky='ns')
+        self.print_tree.configure(yscrollcommand=scrollbar.set)
+
+        self.print_tree.bind("<Double-1>", lambda e: self.edit_print_task())
+        # self.print_tree.bind("<Button-3>", self.show_print_context_menu) # 右键菜单我们稍后可以添加
+
+        action_frame = ttk.Frame(parent_frame, padding=(10, 0))
+        action_frame.grid(row=0, column=1, sticky='ns', padx=(10, 0))
+
+        buttons_config = [
+            ("添加任务", self.add_print_task, "info"),
+            ("修改任务", self.edit_print_task, "success"),
+            ("删除任务", self.delete_print_task, "danger"),
+            (None, None, None),
+            ("全部启用", self.enable_all_print, "outline-success"),
+            ("全部禁用", self.disable_all_print, "outline-warning"),
+            ("清空列表", self.clear_all_print_tasks, "outline-danger")
+        ]
+        for text, cmd, style in buttons_config:
+            if text is None:
+                ttk.Separator(action_frame, orient=HORIZONTAL).pack(fill=X, pady=10)
+                continue
+            ttk.Button(action_frame, text=text, command=cmd, bootstyle=style).pack(pady=5, fill=X)
+            
+        self.update_print_list()
+
     # --- 定时运行功能的全套方法 ---
     
     def load_execute_tasks(self):
@@ -1348,6 +1413,232 @@ class TimedBroadcastApp:
 
             self.update_execute_list()
             self.save_execute_tasks()
+            cleanup_and_destroy()
+
+        button_text = "保存修改" if task_to_edit else "添加"
+        ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
+        ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
+        
+        self.center_window(dialog, parent=self.root)
+
+    def load_print_tasks(self):
+        if not os.path.exists(PRINT_TASK_FILE): return
+        try:
+            with open(PRINT_TASK_FILE, 'r', encoding='utf-8') as f:
+                self.print_tasks = json.load(f)
+            self.log(f"已加载 {len(self.print_tasks)} 个打印任务")
+            if hasattr(self, 'print_tree'):
+                self.update_print_list()
+        except Exception as e:
+            self.log(f"加载打印任务失败: {e}")
+            self.print_tasks = []
+
+    def save_print_tasks(self):
+        try:
+            with open(PRINT_TASK_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.print_tasks, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log(f"保存打印任务失败: {e}")
+
+    def update_print_list(self):
+        if not hasattr(self, 'print_tree') or not self.print_tree.winfo_exists(): return
+        self.print_tree.delete(*self.print_tree.get_children())
+        for task in self.print_tasks:
+            self.print_tree.insert('', END, values=(
+                task.get('name', ''),
+                task.get('status', '启用'),
+                task.get('time', ''),
+                os.path.basename(task.get('file_path', '')),
+                task.get('printer_name', '默认打印机'),
+                task.get('copies', 1),
+                task.get('weekday', ''),
+                task.get('date_range', '')
+            ))
+
+    def add_print_task(self):
+        self.open_print_dialog()
+
+    def edit_print_task(self):
+        selection = self.print_tree.selection()
+        if not selection:
+            messagebox.showwarning("提示", "请先选择要修改的打印任务", parent=self.root)
+            return
+        index = self.print_tree.index(selection[0])
+        task_to_edit = self.print_tasks[index]
+        self.open_print_dialog(task_to_edit=task_to_edit, index=index)
+
+    def delete_print_task(self):
+        selections = self.print_tree.selection()
+        if not selections:
+            messagebox.showwarning("提示", "请先选择要删除的打印任务", parent=self.root)
+            return
+        if messagebox.askyesno("确认删除", f"确定要删除选中的 {len(selections)} 个打印任务吗？", parent=self.root):
+            indices = sorted([self.print_tree.index(s) for s in selections], reverse=True)
+            for index in indices:
+                self.print_tasks.pop(index)
+            self.update_print_list()
+            self.save_print_tasks()
+
+    def clear_all_print_tasks(self):
+        if not self.print_tasks: return
+        if messagebox.askyesno("确认清空", "您确定要清空所有打印任务吗？", parent=self.root):
+            self.print_tasks.clear()
+            self.update_print_list()
+            self.save_print_tasks()
+
+    def enable_all_print(self):
+        if not self.print_tasks: return
+        for task in self.print_tasks: task['status'] = '启用'
+        self.update_print_list(); self.save_print_tasks()
+
+    def disable_all_print(self):
+        if not self.print_tasks: return
+        for task in self.print_tasks: task['status'] = '禁用'
+        self.update_print_list(); self.save_print_tasks()
+
+    def get_printer_list(self):
+        if not WIN32_AVAILABLE:
+            return ["(功能受限，无法获取)"]
+        try:
+            printers = win32print.EnumPrinters(2)
+            return [name for flags, desc, name, comment in printers]
+        except Exception as e:
+            self.log(f"获取打印机列表失败: {e}")
+            return ["(获取失败)"]
+
+    def open_print_dialog(self, task_to_edit=None, index=None):
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("修改打印任务" if task_to_edit else "添加打印任务")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
+            dialog.destroy()
+            self.root.focus_force()
+
+        main_frame = ttk.Frame(dialog, padding=15)
+        main_frame.pack(fill=BOTH, expand=True)
+
+        content_frame = ttk.LabelFrame(main_frame, text="打印内容", padding=10)
+        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
+        content_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(content_frame, text="任务名称:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        name_entry = ttk.Entry(content_frame, font=self.font_11)
+        name_entry.grid(row=0, column=1, columnspan=2, sticky='ew', padx=5, pady=5)
+
+        ttk.Label(content_frame, text="打印文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        file_entry = ttk.Entry(content_frame, font=self.font_11)
+        file_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
+        def select_file():
+            path = filedialog.askopenfilename(title="选择要打印的文件", 
+                                              filetypes=[("所有支持的文件", "*.pdf *.txt *.doc *.docx *.xls *.xlsx *.jpg *.png"), 
+                                                         ("所有文件", "*.*")], 
+                                              parent=dialog)
+            if path:
+                file_entry.delete(0, END)
+                file_entry.insert(0, path)
+        ttk.Button(content_frame, text="浏览...", command=select_file, bootstyle="outline").grid(row=1, column=2, padx=5)
+
+        ttk.Label(content_frame, text="打印机:").grid(row=2, column=0, sticky='e', padx=5, pady=5)
+        printer_var = tk.StringVar()
+        printer_combo = ttk.Combobox(content_frame, textvariable=printer_var, values=self.get_printer_list(), font=self.font_11, state='readonly')
+        printer_combo.grid(row=2, column=1, columnspan=2, sticky='ew', padx=5, pady=5)
+        try:
+            default_printer = win32print.GetDefaultPrinter()
+            printer_var.set(default_printer)
+        except Exception:
+            if printer_combo['values']:
+                printer_combo.current(0)
+        
+        ttk.Label(content_frame, text="打印份数:").grid(row=3, column=0, sticky='e', padx=5, pady=5)
+        copies_entry = ttk.Entry(content_frame, font=self.font_11, width=10)
+        copies_entry.grid(row=3, column=1, sticky='w', padx=5, pady=5)
+        copies_entry.insert(0, "1")
+
+        time_frame = ttk.LabelFrame(main_frame, text="时间规则", padding=15)
+        time_frame.grid(row=1, column=0, sticky='ew', pady=4)
+        time_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(time_frame, text="执行时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        start_time_entry = ttk.Entry(time_frame, font=self.font_11)
+        start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
+        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
+        ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
+        ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
+        
+        ttk.Label(time_frame, text="周几/几号:").grid(row=1, column=0, sticky='e', padx=5, pady=3)
+        weekday_entry = ttk.Entry(time_frame, font=self.font_11)
+        weekday_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=3)
+        ttk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bootstyle="outline").grid(row=1, column=3, padx=5)
+        
+        ttk.Label(time_frame, text="日期范围:").grid(row=2, column=0, sticky='e', padx=5, pady=3)
+        date_range_entry = ttk.Entry(time_frame, font=self.font_11)
+        date_range_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=3)
+        self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
+        ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=2, column=3, padx=5)
+
+        dialog_button_frame = ttk.Frame(dialog)
+        dialog_button_frame.pack(pady=15)
+
+        if task_to_edit:
+            name_entry.insert(0, task_to_edit.get('name', ''))
+            file_entry.insert(0, task_to_edit.get('file_path', ''))
+            printer_var.set(task_to_edit.get('printer_name', ''))
+            copies_entry.delete(0, END)
+            copies_entry.insert(0, task_to_edit.get('copies', 1))
+            start_time_entry.insert(0, task_to_edit.get('time', ''))
+            weekday_entry.insert(0, task_to_edit.get('weekday', '每周:1234567'))
+            date_range_entry.insert(0, task_to_edit.get('date_range', '2025-01-01 ~ 2099-12-31'))
+        else:
+            weekday_entry.insert(0, "每周:1234567")
+            date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
+
+        def save_task():
+            file_path = file_entry.get().strip()
+            if not file_path or not os.path.exists(file_path):
+                messagebox.showerror("输入错误", "请选择一个有效的打印文件。", parent=dialog)
+                return
+            try:
+                copies = int(copies_entry.get().strip())
+                if copies < 1: raise ValueError
+            except ValueError:
+                messagebox.showerror("输入错误", "打印份数必须是大于0的整数。", parent=dialog)
+                return
+
+            is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
+            if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
+            is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
+            if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
+
+            new_task_data = {
+                'name': name_entry.get().strip(),
+                'file_path': file_path,
+                'printer_name': printer_var.get(),
+                'copies': copies,
+                'time': time_msg,
+                'weekday': weekday_entry.get().strip(),
+                'date_range': date_msg,
+                'status': '启用' if not task_to_edit else task_to_edit.get('status', '启用'),
+                'last_run': {} if not task_to_edit else task_to_edit.get('last_run', {}),
+            }
+            if not new_task_data['name'] or not new_task_data['time']: 
+                messagebox.showwarning("警告", "请填写任务名称和执行时间", parent=dialog); return
+
+            if task_to_edit:
+                self.print_tasks[index] = new_task_data
+                self.log(f"已修改打印任务: {new_task_data['name']}")
+            else:
+                self.print_tasks.append(new_task_data)
+                self.log(f"已添加打印任务: {new_task_data['name']}")
+
+            self.update_print_list()
+            self.save_print_tasks()
             cleanup_and_destroy()
 
         button_text = "保存修改" if task_to_edit else "添加"
@@ -5157,39 +5448,41 @@ class TimedBroadcastApp:
         return False, None
 
     def _check_advanced_tasks(self, now):
-        # --- ↓↓↓ 核心修改：删除了函数开头的 if self._is_in_holiday(now): return ---
-
-        # 检查截屏任务
         for task in self.screenshot_tasks:
             is_due, trigger_time = self._is_task_due(task, now)
             if is_due:
-                # --- ↓↓↓ 核心修改：将节假日检查移到这里 ---
                 if self._is_in_holiday(now):
                     self.log(f"跳过截屏任务 '{task['name']}'，原因：当前处于节假日期间。")
-                    # 标记为今天已“处理”，防止节假日结束后重复触发
                     task.setdefault('last_run', {})[trigger_time] = now.strftime("%Y-%m-%d")
                     self.save_screenshot_tasks()
-                    continue # 跳过此任务，继续检查下一个
-                # --- ↑↑↑ 修改结束 ↑↑↑ ---
+                    continue
                 
                 self.log(f"触发截屏任务: {task['name']}")
                 threading.Thread(target=self._execute_screenshot_task, args=(task, trigger_time), daemon=True).start()
         
-        # 检查运行任务
         for task in self.execute_tasks:
             is_due, trigger_time = self._is_task_due(task, now)
             if is_due:
-                # --- ↓↓↓ 核心修改：同样在这里添加节假日检查 ---
                 if self._is_in_holiday(now):
                     self.log(f"跳过运行任务 '{task['name']}'，原因：当前处于节假日期间。")
-                    # 标记为今天已“处理”
                     task.setdefault('last_run', {})[trigger_time] = now.strftime("%Y-%m-%d")
                     self.save_execute_tasks()
-                    continue # 跳过此任务，继续检查下一个
-                # --- ↑↑↑ 修改结束 ↑↑↑ ---
+                    continue
 
                 self.log(f"触发运行任务: {task['name']}")
                 threading.Thread(target=self._execute_program_task, args=(task, trigger_time), daemon=True).start()
+
+        for task in self.print_tasks:
+            is_due, trigger_time = self._is_task_due(task, now)
+            if is_due:
+                if self._is_in_holiday(now):
+                    self.log(f"跳过打印任务 '{task['name']}'，原因：当前处于节假日期间。")
+                    task.setdefault('last_run', {})[trigger_time] = now.strftime("%Y-%m-%d")
+                    self.save_print_tasks()
+                    continue
+                
+                self.log(f"触发打印任务: {task['name']}")
+                threading.Thread(target=self._execute_print_task, args=(task, trigger_time), daemon=True).start()
     
     def _execute_screenshot_task(self, task, trigger_time):
         if not IMAGE_AVAILABLE:
@@ -5248,6 +5541,44 @@ class TimedBroadcastApp:
 
         except Exception as e:
             self.log(f"执行程序任务 '{task['name']}' 失败: {e}")
+
+    def _execute_print_task(self, task, trigger_time):
+        file_path = task.get('file_path')
+        printer_name = task.get('printer_name')
+        copies = task.get('copies', 1)
+
+        if not file_path or not os.path.exists(file_path):
+            self.log(f"错误：无法执行打印任务 '{task['name']}'，因为文件不存在: {file_path}")
+            return
+        
+        # 确保我们有 win32print 模块可用
+        if not WIN32_AVAILABLE:
+            self.log(f"错误：无法执行打印任务 '{task['name']}'，因为 pywin32 模块不可用。")
+            return
+            
+        try:
+            self.log(f"准备打印 '{os.path.basename(file_path)}' {copies} 份到打印机 '{printer_name}'...")
+            
+            for i in range(copies):
+                self.log(f"正在提交第 {i+1}/{copies} 份打印作业...")
+                win32api.ShellExecute(
+                    0,
+                    "printto",
+                    file_path,
+                    f'"{printer_name}"',
+                    ".",
+                    0
+                )
+                if copies > 1:
+                    time.sleep(2) 
+            
+            self.log(f"任务 '{task['name']}' 的所有打印作业已成功提交。")
+            
+            task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
+            self.save_print_tasks()
+
+        except Exception as e:
+            self.log(f"执行打印任务 '{task['name']}' 时发生严重错误: {e}")
 
     def _is_in_holiday(self, check_time):
         for holiday in self.holidays:
@@ -6108,12 +6439,6 @@ class TimedBroadcastApp:
                 self.vlc_list_player = instance.media_list_player_new()
                 self.vlc_player = self.vlc_list_player.get_media_player()
                 
-                event_manager = self.vlc_player.event_manager()
-                event_manager.event_attach(vlc.EventType.MediaPlayerEncounteredError, lambda event: self.log("!!! VLC事件: 播放器遇到错误 !!!"))
-                event_manager.event_attach(vlc.EventType.MediaPlayerBuffering, lambda event, new_cache: self.log(f"--- VLC事件: 正在缓冲 {new_cache:.1f}% ---"))
-                event_manager.event_attach(vlc.EventType.MediaPlayerPlaying, lambda event: self.log("--- VLC事件: 状态变更为 [播放中] ---"))
-                event_manager.event_attach(vlc.EventType.MediaPlayerEndReached, lambda event: self.log("--- VLC事件: 媒体播放结束 ---"))
-                
                 self.vlc_list_player.set_media_list(media_list)
                 
             else:
@@ -6121,16 +6446,20 @@ class TimedBroadcastApp:
                 self.vlc_player = instance.media_player_new()
                 media = instance.media_new(final_content_path, f':http-user-agent={user_agent}')
                 self.vlc_player.set_media(media)
+            
+            event_manager = self.vlc_player.event_manager()
+            event_manager.event_attach(vlc.EventType.MediaPlayerEncounteredError, lambda event: self.log("!!! VLC事件: 播放器遇到错误 !!!"))
+            event_manager.event_attach(vlc.EventType.MediaPlayerBuffering, lambda event, new_cache: self.log(f"--- VLC事件: 正在缓冲 {new_cache:.1f}% ---"))
+            event_manager.event_attach(vlc.EventType.MediaPlayerPlaying, lambda event: self.log("--- VLC事件: 状态变更为 [播放中] ---"))
+            event_manager.event_attach(vlc.EventType.MediaPlayerEndReached, lambda event: self.log("--- VLC事件: 媒体播放结束 ---"))
 
-            # --- 注意这里的 is_m3u8_playlist 参数，它将用于决定是否绑定快捷键 ---
-            self.root.after(0, self._create_video_window, task, is_m3u8_playlist) 
+            self.root.after(0, self._create_video_window, task, is_m3u8_playlist)
             time.sleep(1.0)
 
             if not (self.video_window and self.video_window.winfo_exists()):
                 raise Exception("视频窗口创建失败")
 
             self.vlc_player.set_hwnd(self.video_window.winfo_id())
-
             if self.is_muted: self.vlc_player.audio_set_mute(True)
             else: self.vlc_player.audio_set_mute(False)
             self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
@@ -6140,12 +6469,47 @@ class TimedBroadcastApp:
             
             self.log("已发送播放指令，等待VLC引擎响应...")
             
-            player_to_check = player_to_start
+            # --- ↓↓↓ 核心修复 1：无论何种模式，我们都监控底层的 self.vlc_player ↓↓↓ ---
+            player_to_check = self.vlc_player
+            # --- ↑↑↑ 修复结束 ↑↑↑ ---
+
+            start_time = time.time()
+            last_text_update_time = 0
+            interval_type = task.get('interval_type', 'first')
+            duration_seconds = int(task.get('interval_seconds', 0))
+
             while player_to_check.get_state() not in {vlc.State.Ended, vlc.State.Stopped, vlc.State.Error}:
                 if self._is_interrupted() or stop_event.is_set():
                     self.log("播放被手动中断。")
-                    player_to_check.stop()
+                    player_to_start.stop() # 停止上层播放器
                     break
+
+                # --- ↓↓↓ 核心修复 2：将状态更新逻辑移到统一的循环中 ↓↓↓ ---
+                now = time.time()
+                if now - last_text_update_time >= 1.0:
+                    display_name = final_content_path if final_content_path.lower().startswith(('http', 'rtsp')) else os.path.basename(final_content_path)
+                    
+                    state = player_to_check.get_state()
+                    status_text = "播放中"
+                    if state == vlc.State.Buffering:
+                        status_text = "缓冲中..."
+                    elif state == vlc.State.Paused:
+                        status_text = "已暂停"
+
+                    if interval_type == 'seconds' and duration_seconds > 0:
+                        elapsed = now - start_time
+                        if elapsed >= duration_seconds:
+                            self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
+                            player_to_start.stop() # 停止上层播放器
+                            break
+                        remaining_seconds = int(duration_seconds - elapsed)
+                        self.update_playing_text(f"[{task['name']}] {display_name} ({status_text} - 剩余 {remaining_seconds} 秒)")
+                    else:
+                        self.update_playing_text(f"[{task['name']}] {display_name} ({status_text})")
+                    
+                    last_text_update_time = now
+                # --- ↑↑↑ 修复结束 ↑↑↑ ---
+                
                 time.sleep(0.2)
             
             final_state = player_to_check.get_state()
@@ -6650,6 +7014,7 @@ class TimedBroadcastApp:
         self.save_todos()
         self.save_screenshot_tasks()
         self.save_execute_tasks()
+        self.save_print_tasks()
 
         if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
        
