@@ -2450,7 +2450,7 @@ class TimedBroadcastApp:
         dialog.protocol("WM_DELETE_WINDOW", lambda: None)
         # --- ↑↑↑ 修改结束 ↑↑↑ ---
 
-        countdown_seconds = 10
+        countdown_seconds = 30
 
         main_frame = ttk.Frame(dialog, padding=(40, 20))
         main_frame.pack(fill=BOTH, expand=True)
@@ -2458,11 +2458,11 @@ class TimedBroadcastApp:
         title_label = ttk.Label(main_frame, text="欢迎使用 创翔多功能定时播音", font=self.font_14_bold, bootstyle="primary")
         title_label.pack(pady=(0, 10))
 
-        info_label = ttk.Label(main_frame, text="您当前使用的是功能完整的试用版\n如果觉得本软件对您有帮助，请联系我们购买永久授权！", 
+        info_label = ttk.Label(main_frame, text="您当前使用的是试用版\n如果觉得本软件对您有帮助，请联系我们购买永久授权！", 
                                font=self.font_11, justify='center', anchor='center')
         info_label.pack(pady=10)
         
-        contact_label = ttk.Label(main_frame, text="联系QQ: 315725445  |  微信: 18603970717", font=self.font_10, bootstyle="secondary")
+        contact_label = ttk.Label(main_frame, text="联系QQ: 315725445  |  微信: 18603970717", font=self.font_10)
         contact_label.pack(pady=10)
 
         # --- ↓↓↓ 修改 2：创建一个Label来显示倒计时，而不是按钮 ↓↓↓ ---
@@ -3538,6 +3538,16 @@ class TimedBroadcastApp:
         self.playback_command_queue.put(('STOP', None))
 
     def add_task(self):
+        # --- ↓↓↓ 在这里添加唯一的限制逻辑 ↓↓↓ ---
+        if self.auth_info['status'] == 'Trial' and len(self.tasks) >= 3:
+            messagebox.showerror(
+                "试用版限制", 
+                "试用版最多只能添加3个定时广播节目。\n\n请删除现有节目后再添加，或注册软件以解除全部限制。", 
+                parent=self.root
+            )
+            return # 直接终止，不弹出选择窗口
+        # --- ↑↑↑ 限制逻辑结束 ↑↑↑ ---
+
         choice_dialog = ttk.Toplevel(self.root)
         choice_dialog.title("选择节目类型")
         choice_dialog.resizable(False, False)
@@ -3551,11 +3561,9 @@ class TimedBroadcastApp:
             choice_dialog.destroy()
             self.root.focus_force()
 
-        # 修正了 open_and_cleanup 逻辑，使其更通用
         def open_and_cleanup(dialog_opener_func, *args):
             choice_dialog.destroy()
             self.root.attributes('-disabled', False)
-            # 创建一个临时的父窗口，因为它会被立即销毁
             temp_parent = ttk.Toplevel(self.root)
             temp_parent.withdraw()
             dialog_opener_func(temp_parent, *args)
@@ -3582,11 +3590,9 @@ class TimedBroadcastApp:
         if not VLC_AVAILABLE:
             video_btn.config(state=DISABLED, text="🎬→视频节目 (VLC未安装)")
 
-        # --- ↓↓↓ 位置调整：将“打铃模式”按钮移动到这里 ↓↓↓ ---
         bell_btn = ttk.Button(btn_frame, text="🔔→打铃模式",
                              bootstyle="warning", width=20, command=lambda: open_and_cleanup(self.open_bell_scheduler_dialog))
         bell_btn.pack(pady=8, ipady=8, fill=X)
-        # --- ↑↑↑ 调整结束 ↑↑↑ ---
 
         choice_dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         self.center_window(choice_dialog, parent=self.root)
@@ -5261,11 +5267,28 @@ class TimedBroadcastApp:
 
     def copy_task(self):
         selections = self.task_tree.selection()
-        if not selections: messagebox.showwarning("警告", "请先选择要复制的节目", parent=self.root); return
+        if not selections: 
+            messagebox.showwarning("警告", "请先选择要复制的节目", parent=self.root)
+            return
+
+        # --- ↓↓↓ 在这里添加唯一的限制逻辑 ↓↓↓ ---
+        if self.auth_info['status'] == 'Trial':
+            current_count = len(self.tasks)
+            copy_count = len(selections)
+            if current_count + copy_count > 3:
+                messagebox.showerror(
+                    "试用版限制", 
+                    f"试用版最多只能添加3个节目。\n\n您当前已有 {current_count} 个，无法再复制 {copy_count} 个。", 
+                    parent=self.root
+                )
+                return # 终止复制
+        # --- ↑↑↑ 限制逻辑结束 ↑↑↑ ---
+
         for sel in selections:
             original = self.tasks[self.task_tree.index(sel)]
             copy = json.loads(json.dumps(original))
-            copy['name'] += " (副本)"; copy['last_run'] = {}
+            copy['name'] += " (副本)"
+            copy['last_run'] = {}
 
             if copy.get('type') == 'voice' and 'source_text' in copy:
                 wav_filename = f"{int(time.time())}_{random.randint(1000, 9999)}.wav"
@@ -5282,7 +5305,8 @@ class TimedBroadcastApp:
                     continue
             self.tasks.append(copy)
             self.log(f"已复制节目: {original['name']}")
-        self.update_task_list(); self.save_tasks()
+        self.update_task_list()
+        self.save_tasks()
 
     def move_task(self, direction):
         selections = self.task_tree.selection()
