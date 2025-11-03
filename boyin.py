@@ -130,6 +130,7 @@ TODO_FILE = os.path.join(application_path, "todos.json")
 SCREENSHOT_TASK_FILE = os.path.join(application_path, "screenshot_tasks.json")
 EXECUTE_TASK_FILE = os.path.join(application_path, "execute_tasks.json")
 PRINT_TASK_FILE = os.path.join(application_path, "print_tasks.json")
+BACKUP_TASK_FILE = os.path.join(application_path, "backup_tasks.json")
 TIMESTAMP_FILE = os.path.join(application_path, ".timestamp.dat")
 
 PROMPT_FOLDER = os.path.join(application_path, "提示音")
@@ -200,6 +201,7 @@ class TimedBroadcastApp:
         self.screenshot_tasks = []
         self.execute_tasks = []
         self.print_tasks = []
+        self.backup_tasks = []
         
         self.settings = {}
         self.running = True
@@ -270,6 +272,7 @@ class TimedBroadcastApp:
         self.load_screenshot_tasks()
         self.load_execute_tasks()
         self.load_print_tasks()
+        self.load_backup_tasks()
 
         self.start_background_threads()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
@@ -646,14 +649,17 @@ class TimedBroadcastApp:
         screenshot_tab = ttk.Frame(notebook, padding=10)
         execute_tab = ttk.Frame(notebook, padding=10)
         print_tab = ttk.Frame(notebook, padding=10)
+        backup_tab = ttk.Frame(notebook, padding=10)
 
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
         notebook.add(print_tab, text=' 定时打印 ')
+        notebook.add(backup_tab, text=' 定时备份 ')
 
         self._build_screenshot_ui(screenshot_tab)
         self._build_execute_ui(execute_tab)
         self._build_print_ui(print_tab)
+        self._build_backup_ui(backup_tab)
 
         return page_frame
 
@@ -1134,6 +1140,65 @@ class TimedBroadcastApp:
             ttk.Button(action_frame, text=text, command=cmd, bootstyle=style).pack(pady=5, fill=X)
             
         self.update_print_list()
+
+    def _build_backup_ui(self, parent_frame):
+        parent_frame.columnconfigure(0, weight=1)
+        parent_frame.rowconfigure(0, weight=1)
+
+        main_content_frame = ttk.Frame(parent_frame)
+        main_content_frame.grid(row=0, column=0, sticky='nsew')
+        main_content_frame.columnconfigure(0, weight=1)
+        main_content_frame.rowconfigure(1, weight=1)
+
+        desc_label = ttk.Label(main_content_frame, 
+                               text="此功能使用Windows内置的Robocopy命令，在指定时间将源文件夹备份到目标文件夹。",
+                               font=self.font_10, bootstyle="info", wraplength=600)
+        desc_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
+
+        table_frame = ttk.Frame(main_content_frame)
+        table_frame.grid(row=1, column=0, sticky='nsew')
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.rowconfigure(0, weight=1)
+
+        columns = ('任务名称', '状态', '备份时间', '源文件夹', '目标文件夹', '模式', '周/月规则', '日期范围')
+        self.backup_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, selectmode='extended', bootstyle="success")
+        
+        col_configs = [
+            ('任务名称', 200, 'w'), ('状态', 80, 'center'), ('备份时间', 150, 'center'),
+            ('源文件夹', 250, 'w'), ('目标文件夹', 250, 'w'), ('模式', 80, 'center'),
+            ('周/月规则', 150, 'center'), ('日期范围', 200, 'center')
+        ]
+        for name, width, anchor in col_configs:
+            self.backup_tree.heading(name, text=name)
+            self.backup_tree.column(name, width=width, anchor=anchor)
+
+        self.backup_tree.grid(row=0, column=0, sticky='nsew')
+        scrollbar = ttk.Scrollbar(table_frame, orient=VERTICAL, command=self.backup_tree.yview, bootstyle="round-success")
+        scrollbar.grid(row=0, column=1, sticky='ns')
+        self.backup_tree.configure(yscrollcommand=scrollbar.set)
+
+        self.backup_tree.bind("<Double-1>", lambda e: self.edit_backup_task())
+        self.backup_tree.bind("<Button-3>", self.show_backup_context_menu)
+
+        action_frame = ttk.Frame(parent_frame, padding=(10, 0))
+        action_frame.grid(row=0, column=1, sticky='ns', padx=(10, 0))
+
+        buttons_config = [
+            ("添加任务", self.add_backup_task, "info"),
+            ("修改任务", self.edit_backup_task, "success"),
+            ("删除任务", self.delete_backup_task, "danger"),
+            (None, None, None),
+            ("全部启用", self.enable_all_backup, "outline-success"),
+            ("全部禁用", self.disable_all_backup, "outline-warning"),
+            ("清空列表", self.clear_all_backup_tasks, "outline-danger")
+        ]
+        for text, cmd, style in buttons_config:
+            if text is None:
+                ttk.Separator(action_frame, orient=HORIZONTAL).pack(fill=X, pady=10)
+                continue
+            ttk.Button(action_frame, text=text, command=cmd, bootstyle=style).pack(pady=5, fill=X)
+            
+        self.update_backup_list()
 
     # --- 定时运行功能的全套方法 ---
     
@@ -1722,6 +1787,289 @@ class TimedBroadcastApp:
             self.save_print_tasks()
             items = self.print_tree.get_children()
             if items: self.print_tree.selection_set(items[-1]); self.print_tree.focus(items[-1])
+
+    def load_backup_tasks(self):
+        if not os.path.exists(BACKUP_TASK_FILE): return
+        try:
+            with open(BACKUP_TASK_FILE, 'r', encoding='utf-8') as f:
+                self.backup_tasks = json.load(f)
+            self.log(f"已加载 {len(self.backup_tasks)} 个备份任务")
+            if hasattr(self, 'backup_tree'):
+                self.update_backup_list()
+        except Exception as e:
+            self.log(f"加载备份任务失败: {e}")
+            self.backup_tasks = []
+
+    def save_backup_tasks(self):
+        try:
+            with open(BACKUP_TASK_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.backup_tasks, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log(f"保存备份任务失败: {e}")
+
+    def update_backup_list(self):
+        if not hasattr(self, 'backup_tree') or not self.backup_tree.winfo_exists(): return
+        self.backup_tree.delete(*self.backup_tree.get_children())
+        for task in self.backup_tasks:
+            self.backup_tree.insert('', END, values=(
+                task.get('name', ''),
+                task.get('status', '启用'),
+                task.get('time', ''),
+                task.get('source_folder', ''),
+                task.get('target_folder', ''),
+                task.get('backup_mode', '镜像'),
+                task.get('weekday', ''),
+                task.get('date_range', '')
+            ))
+
+    def add_backup_task(self):
+        self.open_backup_dialog()
+
+    def edit_backup_task(self):
+        selection = self.backup_tree.selection()
+        if not selection:
+            messagebox.showwarning("提示", "请先选择要修改的备份任务", parent=self.root)
+            return
+        index = self.backup_tree.index(selection[0])
+        task_to_edit = self.backup_tasks[index]
+        self.open_backup_dialog(task_to_edit=task_to_edit, index=index)
+
+    def delete_backup_task(self):
+        selections = self.backup_tree.selection()
+        if not selections:
+            messagebox.showwarning("提示", "请先选择要删除的备份任务", parent=self.root)
+            return
+        if messagebox.askyesno("确认删除", f"确定要删除选中的 {len(selections)} 个备份任务吗？", parent=self.root):
+            indices = sorted([self.backup_tree.index(s) for s in selections], reverse=True)
+            for index in indices:
+                self.backup_tasks.pop(index)
+            self.update_backup_list()
+            self.save_backup_tasks()
+
+    def clear_all_backup_tasks(self):
+        if not self.backup_tasks: return
+        if messagebox.askyesno("确认清空", "您确定要清空所有备份任务吗？", parent=self.root):
+            self.backup_tasks.clear()
+            self.update_backup_list()
+            self.save_backup_tasks()
+
+    def enable_all_backup(self):
+        if not self.backup_tasks: return
+        for task in self.backup_tasks: task['status'] = '启用'
+        self.update_backup_list(); self.save_backup_tasks()
+
+    def disable_all_backup(self):
+        if not self.backup_tasks: return
+        for task in self.backup_tasks: task['status'] = '禁用'
+        self.update_backup_list(); self.save_backup_tasks()
+    
+    def open_backup_dialog(self, task_to_edit=None, index=None):
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("修改备份任务" if task_to_edit else "添加备份任务")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        dialog.attributes('-topmost', True)
+        self.root.attributes('-disabled', True)
+        
+        def cleanup_and_destroy():
+            self.root.attributes('-disabled', False)
+            dialog.destroy()
+            self.root.focus_force()
+
+        main_frame = ttk.Frame(dialog, padding=15)
+        main_frame.pack(fill=BOTH, expand=True)
+
+        content_frame = ttk.LabelFrame(main_frame, text="备份设置", padding=10)
+        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
+        content_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(content_frame, text="任务名称:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        name_entry = ttk.Entry(content_frame, font=self.font_11)
+        name_entry.grid(row=0, column=1, columnspan=2, sticky='ew', padx=5, pady=5)
+
+        def select_folder_for_entry(entry_widget):
+            folder = filedialog.askdirectory(title="请选择文件夹", parent=dialog)
+            if folder:
+                entry_widget.delete(0, END)
+                entry_widget.insert(0, folder)
+
+        ttk.Label(content_frame, text="源文件夹:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        source_entry = ttk.Entry(content_frame, font=self.font_11)
+        source_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
+        ttk.Button(content_frame, text="浏览...", command=lambda: select_folder_for_entry(source_entry), bootstyle="outline").grid(row=1, column=2, padx=5)
+
+        ttk.Label(content_frame, text="目标文件夹:").grid(row=2, column=0, sticky='e', padx=5, pady=5)
+        target_entry = ttk.Entry(content_frame, font=self.font_11)
+        target_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=5)
+        ttk.Button(content_frame, text="浏览...", command=lambda: select_folder_for_entry(target_entry), bootstyle="outline").grid(row=2, column=2, padx=5)
+
+        ttk.Label(content_frame, text="备份模式:").grid(row=3, column=0, sticky='e', padx=5, pady=5)
+        mode_var = tk.StringVar(value="mirror")
+        mode_frame = ttk.Frame(content_frame)
+        mode_frame.grid(row=3, column=1, columnspan=2, sticky='w', padx=5)
+        ttk.Radiobutton(mode_frame, text="镜像 (完全同步，会删除多余文件)", variable=mode_var, value="mirror").pack(anchor='w')
+        ttk.Radiobutton(mode_frame, text="增量 (只复制新增/修改，不删除)", variable=mode_var, value="incremental").pack(anchor='w')
+
+        time_frame = ttk.LabelFrame(main_frame, text="时间规则", padding=15)
+        time_frame.grid(row=1, column=0, sticky='ew', pady=4)
+        time_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(time_frame, text="执行时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
+        start_time_entry = ttk.Entry(time_frame, font=self.font_11)
+        start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
+        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
+        ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
+        ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
+        
+        ttk.Label(time_frame, text="周几/几号:").grid(row=1, column=0, sticky='e', padx=5, pady=3)
+        weekday_entry = ttk.Entry(time_frame, font=self.font_11)
+        weekday_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=3)
+        ttk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bootstyle="outline").grid(row=1, column=3, padx=5)
+        
+        ttk.Label(time_frame, text="日期范围:").grid(row=2, column=0, sticky='e', padx=5, pady=3)
+        date_range_entry = ttk.Entry(time_frame, font=self.font_11)
+        date_range_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=3)
+        self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
+        ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=2, column=3, padx=5)
+
+        dialog_button_frame = ttk.Frame(dialog)
+        dialog_button_frame.pack(pady=15)
+
+        if task_to_edit:
+            name_entry.insert(0, task_to_edit.get('name', ''))
+            source_entry.insert(0, task_to_edit.get('source_folder', ''))
+            target_entry.insert(0, task_to_edit.get('target_folder', ''))
+            mode_var.set(task_to_edit.get('backup_mode', 'mirror'))
+            start_time_entry.insert(0, task_to_edit.get('time', ''))
+            weekday_entry.insert(0, task_to_edit.get('weekday', '每周:1234567'))
+            date_range_entry.insert(0, task_to_edit.get('date_range', '2025-01-01 ~ 2099-12-31'))
+        else:
+            weekday_entry.insert(0, "每周:1234567")
+            date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
+
+        def save_task():
+            source_folder = source_entry.get().strip()
+            target_folder = target_entry.get().strip()
+            if not source_folder or not os.path.isdir(source_folder):
+                messagebox.showerror("输入错误", "请选择一个有效的源文件夹。", parent=dialog)
+                return
+            if not target_folder:
+                messagebox.showerror("输入错误", "目标文件夹不能为空。", parent=dialog)
+                return
+            if source_folder == target_folder:
+                messagebox.showerror("输入错误", "源文件夹和目标文件夹不能相同。", parent=dialog)
+                return
+
+            is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
+            if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
+            is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
+            if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
+
+            new_task_data = {
+                'name': name_entry.get().strip(),
+                'source_folder': source_folder,
+                'target_folder': target_folder,
+                'backup_mode': mode_var.get(),
+                'time': time_msg,
+                'weekday': weekday_entry.get().strip(),
+                'date_range': date_msg,
+                'status': '启用' if not task_to_edit else task_to_edit.get('status', '启用'),
+                'last_run': {} if not task_to_edit else task_to_edit.get('last_run', {}),
+            }
+            if not new_task_data['name'] or not new_task_data['time']: 
+                messagebox.showwarning("警告", "请填写任务名称和执行时间", parent=dialog); return
+
+            if task_to_edit:
+                self.backup_tasks[index] = new_task_data
+                self.log(f"已修改备份任务: {new_task_data['name']}")
+            else:
+                self.backup_tasks.append(new_task_data)
+                self.log(f"已添加备份任务: {new_task_data['name']}")
+
+            self.update_backup_list()
+            self.save_backup_tasks()
+            cleanup_and_destroy()
+
+        button_text = "保存修改" if task_to_edit else "添加"
+        ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
+        ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5)
+        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
+        
+        self.center_window(dialog, parent=self.root)
+
+    def show_backup_context_menu(self, event):
+        if self.is_locked: return
+        iid = self.backup_tree.identify_row(event.y)
+        context_menu = tk.Menu(self.root, tearoff=0, font=self.font_11)
+
+        if iid:
+            if iid not in self.backup_tree.selection():
+                self.backup_tree.selection_set(iid)
+
+            context_menu.add_command(label="修改", command=self.edit_backup_task)
+            context_menu.add_command(label="删除", command=self.delete_backup_task)
+            context_menu.add_separator()
+            context_menu.add_command(label="置顶", command=self.move_backup_to_top)
+            context_menu.add_command(label="上移", command=lambda: self.move_backup_task(-1))
+            context_menu.add_command(label="下移", command=lambda: self.move_backup_task(1))
+            context_menu.add_command(label="置末", command=self.move_backup_to_bottom)
+            context_menu.add_separator()
+            context_menu.add_command(label="启用", command=lambda: self._set_backup_status('启用'))
+            context_menu.add_command(label="禁用", command=lambda: self._set_backup_status('禁用'))
+        else:
+            self.backup_tree.selection_set()
+            context_menu.add_command(label="添加任务", command=self.add_backup_task)
+
+        context_menu.post(event.x_root, event.y_root)
+
+    def _set_backup_status(self, status):
+        selection = self.backup_tree.selection()
+        if not selection:
+            messagebox.showwarning("提示", f"请先选择要 {status} 的任务", parent=self.root)
+            return
+        for item_id in selection:
+            index = self.backup_tree.index(item_id)
+            self.backup_tasks[index]['status'] = status
+        self.update_backup_list()
+        self.save_backup_tasks()
+
+    def move_backup_task(self, direction):
+        selection = self.backup_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.backup_tree.index(selection[0])
+        new_index = index + direction
+        if 0 <= new_index < len(self.backup_tasks):
+            task_to_move = self.backup_tasks.pop(index)
+            self.backup_tasks.insert(new_index, task_to_move)
+            self.update_backup_list()
+            self.save_backup_tasks()
+            items = self.backup_tree.get_children()
+            if items: self.backup_tree.selection_set(items[new_index]); self.backup_tree.focus(items[new_index])
+
+    def move_backup_to_top(self):
+        selection = self.backup_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.backup_tree.index(selection[0])
+        if index > 0:
+            task_to_move = self.backup_tasks.pop(index)
+            self.backup_tasks.insert(0, task_to_move)
+            self.update_backup_list()
+            self.save_backup_tasks()
+            items = self.backup_tree.get_children()
+            if items: self.backup_tree.selection_set(items[0]); self.backup_tree.focus(items[0])
+
+    def move_backup_to_bottom(self):
+        selection = self.backup_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.backup_tree.index(selection[0])
+        if index < len(self.backup_tasks) - 1:
+            task_to_move = self.backup_tasks.pop(index)
+            self.backup_tasks.append(task_to_move)
+            self.update_backup_list()
+            self.save_backup_tasks()
+            items = self.backup_tree.get_children()
+            if items: self.backup_tree.selection_set(items[-1]); self.backup_tree.focus(items[-1])
 
     def create_registration_page(self):
         page_frame = ttk.Frame(self.page_container, padding=20)
@@ -2338,6 +2686,8 @@ class TimedBroadcastApp:
             self.clear_all_execute_tasks()
             self.clear_all_holidays()
             self.clear_all_todos()
+            self.clear_all_print_tasks()
+            self.clear_all_backup_tasks()
             messagebox.askyesno = original_askyesno
 
             self._save_to_registry("LockPasswordB64", "")
@@ -5558,6 +5908,18 @@ class TimedBroadcastApp:
                 
                 self.log(f"触发打印任务: {task['name']}")
                 threading.Thread(target=self._execute_print_task, args=(task, trigger_time), daemon=True).start()
+
+        for task in self.backup_tasks:
+            is_due, trigger_time = self._is_task_due(task, now)
+            if is_due:
+                if self._is_in_holiday(now):
+                    self.log(f"跳过备份任务 '{task['name']}'，原因：当前处于节假日期间。")
+                    task.setdefault('last_run', {})[trigger_time] = now.strftime("%Y-%m-%d")
+                    self.save_backup_tasks()
+                    continue
+                
+                self.log(f"触发备份任务: {task['name']}")
+                threading.Thread(target=self._execute_backup_task, args=(task, trigger_time), daemon=True).start()
     
     def _execute_screenshot_task(self, task, trigger_time):
         if not IMAGE_AVAILABLE:
@@ -5654,6 +6016,60 @@ class TimedBroadcastApp:
 
         except Exception as e:
             self.log(f"执行打印任务 '{task['name']}' 时发生严重错误: {e}")
+
+    def _execute_backup_task(self, task, trigger_time):
+        source = task.get('source_folder')
+        target = task.get('target_folder')
+        mode = task.get('backup_mode', 'mirror')
+
+        if not source or not os.path.isdir(source):
+            self.log(f"错误：无法执行备份任务 '{task['name']}'，源文件夹不存在: {source}")
+            return
+        if not target:
+            self.log(f"错误：无法执行备份任务 '{task['name']}'，目标文件夹未指定。")
+            return
+        
+        if not os.path.exists(target):
+            try:
+                os.makedirs(target)
+                self.log(f"目标文件夹不存在，已自动创建: {target}")
+            except Exception as e:
+                self.log(f"!!! 自动创建目标文件夹失败: {e}")
+                return
+
+        try:
+            self.log(f"开始执行备份任务 '{task['name']}' (模式: {mode})...")
+            self.log(f"源: {source}")
+            self.log(f"目标: {target}")
+
+            command = [
+                "robocopy",
+                source,
+                target,
+                "/E",
+                "/R:2",
+                "/W:5",
+                "/NP",
+                "/TEE"
+            ]
+
+            if mode == 'mirror':
+                command.append("/MIR")
+
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
+            stdout, stderr = process.communicate()
+
+            if process.returncode >= 8:
+                self.log(f"!!! 备份任务 '{task['name']}' 执行失败，Robocopy 返回码: {process.returncode}")
+                if stdout: self.log(f"Robocopy 输出:\n{stdout}")
+                if stderr: self.log(f"Robocopy 错误:\n{stderr}")
+            else:
+                self.log(f"备份任务 '{task['name']}' 成功完成。")
+                task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
+                self.save_backup_tasks()
+
+        except Exception as e:
+            self.log(f"执行备份任务 '{task['name']}' 时发生严重异常: {e}")
 
     def _is_in_holiday(self, check_time):
         for holiday in self.holidays:
@@ -7090,6 +7506,7 @@ class TimedBroadcastApp:
         self.save_screenshot_tasks()
         self.save_execute_tasks()
         self.save_print_tasks()
+        self.save_backup_tasks()
 
         if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
        
