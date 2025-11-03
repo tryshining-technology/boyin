@@ -6068,7 +6068,6 @@ class TimedBroadcastApp:
 
         playlist = []
         if task.get('video_type') == 'single':
-            # <--- 新增/修改 1：检查URL或本地文件 ---
             video_path = task['content']
             is_url = video_path.lower().startswith(('http://', 'https://', 'rtsp://', 'rtmp://', 'mms://'))
             if is_url or os.path.exists(video_path):
@@ -6109,7 +6108,7 @@ class TimedBroadcastApp:
                     self.log(f"任务 '{task['name']}' 在播放列表循环中被中断。")
                     break
 
-                media = instance.media_new(video_path) # <--- VLC可以直接处理URL
+                media = instance.media_new(video_path)
                 self.vlc_player.set_media(media)
                 self.vlc_player.play()
 
@@ -6125,16 +6124,20 @@ class TimedBroadcastApp:
                 else:
                     self.vlc_player.audio_set_mute(False)
 
-                time.sleep(0.5)
+                # <--- 核心修改 1：给网络流更多时间初始化 ---
+                # 增加等待时间，从0.5秒增加到1.5秒，给网络连接和缓冲留出时间。
+                time.sleep(5)
 
                 last_text_update_time = 0
-                while self.vlc_player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
+                
+                # <--- 核心修改 2：使用更健壮的循环条件 ---
+                # 旧的循环条件在缓冲时会退出，新的条件会一直等待直到视频结束、停止或出错。
+                while self.vlc_player.get_state() not in {vlc.State.Ended, vlc.State.Stopped, vlc.State.Error}:
                     if self._is_interrupted() or stop_event.is_set():
                         self.log(f"视频任务 '{task['name']}' 在播放期间被中断。")
                         self.vlc_player.stop()
                         break
                     
-                    # <--- 新增/修改 2：优化播放状态的显示内容 ---
                     display_name = video_path if video_path.lower().startswith(('http', 'rtsp')) else os.path.basename(video_path)
                     
                     now = time.time()
@@ -6147,16 +6150,27 @@ class TimedBroadcastApp:
 
                         if now - last_text_update_time >= 1.0:
                             remaining_seconds = int(duration_seconds - elapsed)
-                            status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
+                            # <--- 核心修改 3：增加对缓冲状态的显示 ---
+                            state = self.vlc_player.get_state()
+                            if state == vlc.State.Buffering:
+                                status_text = f"缓冲中 {int(self.vlc_player.get_media().get_stats()['demux_read_bytes']/1024)} KB"
+                            else:
+                                status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
+                            
                             self.update_playing_text(f"[{task['name']}] {display_name} ({status_text} - 剩余 {remaining_seconds} 秒)")
                             last_text_update_time = now
                     else:
                          if now - last_text_update_time >= 1.0:
-                            status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
+                            state = self.vlc_player.get_state()
+                            if state == vlc.State.Buffering:
+                                status_text = f"缓冲中 {int(self.vlc_player.get_media().get_stats()['demux_read_bytes']/1024)} KB"
+                            else:
+                                status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
                             self.update_playing_text(f"[{task['name']}] {display_name} ({i+1}/{len(playlist)} - {status_text})")
                             last_text_update_time = now
 
                     time.sleep(0.2)
+                # --- 循环修改结束 ---
 
                 if (interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds) or stop_event.is_set():
                     break
@@ -6170,6 +6184,7 @@ class TimedBroadcastApp:
 
             self.root.after(0, self._destroy_video_window)
             self.log(f"视频任务 '{task['name']}' 的播放逻辑结束。")
+
     def _create_video_window(self, task):
         if self.video_window and self.video_window.winfo_exists():
             self.video_window.destroy()
