@@ -76,6 +76,8 @@ try:
     import winreg
     import win32gui
     import win32con
+    import win32print
+    import win32api
     WIN32_AVAILABLE = True
 except ImportError:
     print("警告: pywin32 未安装，语音、开机启动、任务栏闪烁和密码持久化/注册功能将受限。")
@@ -1111,7 +1113,7 @@ class TimedBroadcastApp:
         self.print_tree.configure(yscrollcommand=scrollbar.set)
 
         self.print_tree.bind("<Double-1>", lambda e: self.edit_print_task())
-        # self.print_tree.bind("<Button-3>", self.show_print_context_menu) # 右键菜单我们稍后可以添加
+        self.print_tree.bind("<Button-3>", self.show_print_context_menu)
 
         action_frame = ttk.Frame(parent_frame, padding=(10, 0))
         action_frame.grid(row=0, column=1, sticky='ns', padx=(10, 0))
@@ -1647,6 +1649,79 @@ class TimedBroadcastApp:
         dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         
         self.center_window(dialog, parent=self.root)
+
+    def show_print_context_menu(self, event):
+        if self.is_locked: return
+        iid = self.print_tree.identify_row(event.y)
+        context_menu = tk.Menu(self.root, tearoff=0, font=self.font_11)
+
+        if iid:
+            if iid not in self.print_tree.selection():
+                self.print_tree.selection_set(iid)
+
+            context_menu.add_command(label="修改", command=self.edit_print_task)
+            context_menu.add_command(label="删除", command=self.delete_print_task)
+            context_menu.add_separator()
+            context_menu.add_command(label="置顶", command=self.move_print_to_top)
+            context_menu.add_command(label="上移", command=lambda: self.move_print_task(-1))
+            context_menu.add_command(label="下移", command=lambda: self.move_print_task(1))
+            context_menu.add_command(label="置末", command=self.move_print_to_bottom)
+            context_menu.add_separator()
+            context_menu.add_command(label="启用", command=lambda: self._set_print_status('启用'))
+            context_menu.add_command(label="禁用", command=lambda: self._set_print_status('禁用'))
+        else:
+            self.print_tree.selection_set()
+            context_menu.add_command(label="添加任务", command=self.add_print_task)
+
+        context_menu.post(event.x_root, event.y_root)
+
+    def _set_print_status(self, status):
+        selection = self.print_tree.selection()
+        if not selection:
+            messagebox.showwarning("提示", f"请先选择要 {status} 的任务", parent=self.root)
+            return
+        for item_id in selection:
+            index = self.print_tree.index(item_id)
+            self.print_tasks[index]['status'] = status
+        self.update_print_list()
+        self.save_print_tasks()
+
+    def move_print_task(self, direction):
+        selection = self.print_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.print_tree.index(selection[0])
+        new_index = index + direction
+        if 0 <= new_index < len(self.print_tasks):
+            task_to_move = self.print_tasks.pop(index)
+            self.print_tasks.insert(new_index, task_to_move)
+            self.update_print_list()
+            self.save_print_tasks()
+            items = self.print_tree.get_children()
+            if items: self.print_tree.selection_set(items[new_index]); self.print_tree.focus(items[new_index])
+
+    def move_print_to_top(self):
+        selection = self.print_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.print_tree.index(selection[0])
+        if index > 0:
+            task_to_move = self.print_tasks.pop(index)
+            self.print_tasks.insert(0, task_to_move)
+            self.update_print_list()
+            self.save_print_tasks()
+            items = self.print_tree.get_children()
+            if items: self.print_tree.selection_set(items[0]); self.print_tree.focus(items[0])
+
+    def move_print_to_bottom(self):
+        selection = self.print_tree.selection()
+        if not selection or len(selection) > 1: return
+        index = self.print_tree.index(selection[0])
+        if index < len(self.print_tasks) - 1:
+            task_to_move = self.print_tasks.pop(index)
+            self.print_tasks.append(task_to_move)
+            self.update_print_list()
+            self.save_print_tasks()
+            items = self.print_tree.get_children()
+            if items: self.print_tree.selection_set(items[-1]); self.print_tree.focus(items[-1])
 
     def create_registration_page(self):
         page_frame = ttk.Frame(self.page_container, padding=20)
