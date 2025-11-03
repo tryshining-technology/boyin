@@ -1813,13 +1813,15 @@ class TimedBroadcastApp:
         if not hasattr(self, 'backup_tree') or not self.backup_tree.winfo_exists(): return
         self.backup_tree.delete(*self.backup_tree.get_children())
         for task in self.backup_tasks:
+            mode_value = task.get('backup_mode', 'mirror')
+            mode_display_text = "镜像" if mode_value == 'mirror' else "增量"
             self.backup_tree.insert('', END, values=(
                 task.get('name', ''),
                 task.get('status', '启用'),
                 task.get('time', ''),
                 task.get('source_folder', ''),
                 task.get('target_folder', ''),
-                task.get('backup_mode', '镜像'),
+                mode_display_text,
                 task.get('weekday', ''),
                 task.get('date_range', '')
             ))
