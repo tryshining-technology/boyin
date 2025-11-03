@@ -1004,7 +1004,6 @@ class TimedBroadcastApp:
         self.update_screenshot_list()
         
 #第1部分
-#第1部分
     def _build_execute_ui(self, parent_frame):
         if not PSUTIL_AVAILABLE:
             ttk.Label(parent_frame, text="错误：psutil 库未安装，无法使用此功能。", font=self.font_12_bold, bootstyle="danger").pack(pady=50)
@@ -1399,7 +1398,6 @@ class TimedBroadcastApp:
 
         return page_frame
         
-#第2部分
 #第2部分
     def cancel_registration(self):
         if not messagebox.askyesno("确认操作", "您确定要取消当前注册吗？\n取消后，软件将恢复到试用或过期状态。", parent=self.root):
@@ -2111,7 +2109,6 @@ class TimedBroadcastApp:
         self.log_text.pack(fill=BOTH, expand=True)
 
 #第3部分
-#第3部分
     def create_settings_page(self):
         settings_frame = ttk.Frame(self.page_container, padding=20)
 
@@ -2668,7 +2665,6 @@ class TimedBroadcastApp:
             messagebox.showinfo("成功", "锁定密码已成功清除。", parent=self.root)
 
 #第4部分
-#第4部分
     def _handle_lock_on_start_toggle(self):
         if not self.lock_password_b64:
             if self.lock_on_start_var.get():
@@ -2820,7 +2816,6 @@ class TimedBroadcastApp:
 
         choice_dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         self.center_window(choice_dialog, parent=self.root)
-#第5部分
 #第5部分
     def open_bell_scheduler_dialog(self, parent_dialog):
         """打开校铃/厂铃计划生成器对话框"""
@@ -3435,9 +3430,13 @@ class TimedBroadcastApp:
                 video_single_entry.insert(0, filename)
         ttk.Button(video_single_frame, text="选取...", command=select_single_video, bootstyle="outline").grid(row=0, column=2, padx=5)
 
-        ttk.Label(content_frame, text="视频文件夹:").grid(row=2, column=0, sticky='e', padx=5, pady=2)
+        # <--- 修改1：添加一个提示标签，告知用户支持URL ---
+        ttk.Label(content_frame, text="(支持网络URL地址)", font=self.font_9, bootstyle="info").grid(row=2, column=1, sticky='w', padx=5)
+
+        # <--- 修改2：调整后续控件的行号 ---
+        ttk.Label(content_frame, text="视频文件夹:").grid(row=3, column=0, sticky='e', padx=5, pady=2)
         video_folder_frame = ttk.Frame(content_frame)
-        video_folder_frame.grid(row=2, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
+        video_folder_frame.grid(row=3, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         video_folder_frame.columnconfigure(1, weight=1)
         ttk.Radiobutton(video_folder_frame, text="", variable=video_type_var, value="folder").grid(row=0, column=0, sticky='w')
         video_folder_entry = ttk.Entry(video_folder_frame, font=self.font_11)
@@ -3451,7 +3450,7 @@ class TimedBroadcastApp:
         ttk.Button(video_folder_frame, text="选取...", command=lambda: select_folder(video_folder_entry), bootstyle="outline").grid(row=0, column=2, padx=5)
 
         play_order_frame = ttk.Frame(content_frame)
-        play_order_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=2)
+        play_order_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=2)
         play_order_var = tk.StringVar(value="sequential")
         ttk.Radiobutton(play_order_frame, text="顺序播", variable=play_order_var, value="sequential").pack(side=LEFT, padx=10)
         ttk.Radiobutton(play_order_frame, text="随机播", variable=play_order_var, value="random").pack(side=LEFT, padx=10)
@@ -3501,11 +3500,9 @@ class TimedBroadcastApp:
         ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
         
-# --- ▼▼▼ 批量添加功能的容器 ▼▼▼ ---
         batch_add_container = ttk.Frame(time_frame)
-        batch_add_container.grid(row=0, column=4, rowspan=3, sticky='n', padx=5) # 放在第0行第4列，向下跨越，靠上对齐
+        batch_add_container.grid(row=0, column=4, rowspan=3, sticky='n', padx=5)
 
-        # 批量添加的输入框
         batch_interval_frame = ttk.Frame(batch_add_container)
         batch_interval_frame.pack(pady=(0, 2))
         ttk.Label(batch_interval_frame, text="每").pack(side=LEFT)
@@ -3520,11 +3517,9 @@ class TimedBroadcastApp:
         batch_count_entry.pack(side=LEFT, padx=(2,2))
         ttk.Label(batch_count_frame, text="次   ").pack(side=LEFT)
 
-        # 批量添加的触发按钮
         ttk.Button(batch_add_container, text="批量添加", 
                    command=lambda: self._apply_batch_time_addition(start_time_entry, batch_interval_entry, batch_count_entry, dialog), 
                    bootstyle="outline-info").pack(fill=X)
-        # --- ▲▲▲ 批量添加功能结束 ▲▲▲ ---
 
         interval_var = tk.StringVar(value="first")
         ttk.Label(time_frame, text="间隔播报:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
@@ -3597,7 +3592,6 @@ class TimedBroadcastApp:
             date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
 
         def save_task():
-            # --- ↓↓↓ 新增的输入验证模块 ↓↓↓ ---
             try:
                 volume = int(volume_entry.get().strip() or 80)
                 if not (0 <= volume <= 100):
@@ -3616,7 +3610,7 @@ class TimedBroadcastApp:
                 except ValueError:
                     messagebox.showerror("输入错误", "“播 n 首”的次数必须是一个有效的整数。", parent=dialog)
                     return
-            else: # 'seconds'
+            else: 
                 try:
                     interval_seconds = int(interval_seconds_entry.get().strip() or 1)
                     if interval_seconds < 1:
@@ -3633,13 +3627,19 @@ class TimedBroadcastApp:
             if not date_range_entry.get().strip():
                 messagebox.showerror("输入错误", "“日期范围”不能为空，请点击“设置...”进行配置。", parent=dialog)
                 return
-            # --- ↑↑↑ 验证模块结束 ↑↑↑ ---
             
             video_path = video_single_entry.get().strip() if video_type_var.get() == "single" else video_folder_entry.get().strip()
+            
+            # <--- 修改3：核心验证逻辑 ---
+            is_url = video_path.lower().startswith(('http://', 'https://', 'rtsp://', 'rtmp://', 'mms://'))
+            
             if not video_path:
-                messagebox.showwarning("警告", "请选择一个视频文件或文件夹", parent=dialog)
+                messagebox.showwarning("警告", "请选择一个视频文件/文件夹，或输入一个网络地址", parent=dialog)
                 return
-
+            if not is_url and not os.path.exists(video_path):
+                 messagebox.showwarning("警告", "本地文件或文件夹路径不存在，请重新选择。", parent=dialog)
+                 return
+            
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
             if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
             is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
@@ -3665,14 +3665,18 @@ class TimedBroadcastApp:
             play_this_task_now = (play_mode == 'immediate')
             saved_delay_type = 'ontime' if play_mode == 'immediate' else play_mode
 
+            task_name = name_entry.get().strip()
+            if not task_name and not is_url:
+                task_name = os.path.basename(video_path)
+
             new_task_data = {
-                'name': name_entry.get().strip() or os.path.basename(video_path),
+                'name': task_name,
                 'time': time_msg,
                 'content': video_path,
                 'type': 'video',
                 'video_type': video_type_var.get(),
                 'play_order': play_order_var.get(),
-                'volume': str(volume), # 使用验证过的 volume
+                'volume': str(volume),
                 'interval_type': interval_var.get(),
                 'interval_first': interval_first_entry.get().strip() or "1",
                 'interval_seconds': interval_seconds_entry.get().strip() or "600",
@@ -3707,11 +3711,9 @@ class TimedBroadcastApp:
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
         ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5)
         dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
-        self.center_window(dialog, parent=self.root) # <--- 新增此行 修复居中,如有问题,后期删除
+        self.center_window(dialog, parent=self.root)
 
 #第6部分
-#第6部分
-# 第6部分 (替换整个函数)
     def open_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
@@ -4299,7 +4301,6 @@ class TimedBroadcastApp:
         threading.Thread(target=worker, daemon=True).start()
         
 #第7部分
-#第7部分
     def _import_voice_script(self, text_widget, parent_dialog):
         filename = filedialog.askopenfilename(
             title="选择要导入的文稿",
@@ -4578,7 +4579,6 @@ class TimedBroadcastApp:
         for i in selection: self.tasks[self.task_tree.index(i)]['status'] = status
         if count > 0: self.update_task_list(); self.save_tasks(); self.log(f"已{status} {count} 个节目")
 
-#第8部分
 #第8部分
     def _set_tasks_status_by_type(self, task_type, status):
         if not self.tasks: return
@@ -4869,7 +4869,6 @@ class TimedBroadcastApp:
         self.center_window(dialog, parent=self.root)
 
 #第9部分
-#第9部分
     def show_daterange_settings_dialog(self, date_range_entry):
         dialog = ttk.Toplevel(self.root)
         dialog.title("日期范围")
@@ -5010,7 +5009,6 @@ class TimedBroadcastApp:
         for task in self.tasks:
             task_type = task.get('type')
 
-            # --- ↓↓↓ 新增的逻辑：专门处理 'bell_schedule' 类型 ↓↓↓ ---
             if task_type == 'bell_schedule':
                 name = "🔔 " + task.get('name', '铃声计划')
                 time_count = len(task.get('generated_times', []))
@@ -5018,24 +5016,31 @@ class TimedBroadcastApp:
                 self.task_tree.insert('', END, values=(
                     name,
                     task.get('status', ''),
-                    "多个", # 开始时间显示为“多个”
-                    "准时", # 模式固定为准时
+                    "多个",
+                    "准时",
                     content_preview,
                     task.get('volume', ''),
                     task.get('weekday', ''),
                     task.get('date_range', '')
                 ))
-            # --- ↑↑↑ 新增逻辑结束 ↑↑↑ ---
-            else: # 原有的逻辑保持不变
+            else:
                 content = task.get('content', '')
+                content_preview = "" # <--- 初始化
+                
+                # <--- 新增/修改：在这里统一处理显示内容 ---
                 if task_type == 'voice':
                     source_text = task.get('source_text', '')
                     clean_content = source_text.replace('\n', ' ').replace('\r', '')
                     content_preview = (clean_content[:30] + '...') if len(clean_content) > 30 else clean_content
-                elif task_type in ['audio', 'video']:
-                    content_preview = os.path.basename(content)
-                else:
-                    content_preview = os.path.basename(content)
+                elif content: # 对 audio 和 video 类型生效
+                    is_url = content.lower().startswith(('http://', 'https://', 'rtsp://', 'rtmp://', 'mms://'))
+                    if is_url:
+                        # 如果是URL，直接显示URL（可以考虑截断过长的URL）
+                        content_preview = (content[:40] + '...') if len(content) > 40 else content
+                    else:
+                        # 如果是本地路径，显示文件名
+                        content_preview = os.path.basename(content)
+                # --- 修改结束 ---
 
                 display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
                 self.task_tree.insert('', END, values=(
@@ -5043,7 +5048,7 @@ class TimedBroadcastApp:
                     task.get('status', ''),
                     task.get('time', ''),
                     display_mode,
-                    content_preview,
+                    content_preview, # <--- 使用新生成的 content_preview
                     task.get('volume', ''),
                     task.get('weekday', ''),
                     task.get('date_range', '')
@@ -5728,7 +5733,6 @@ class TimedBroadcastApp:
     # --- ↑↑↑ 粘贴到这里结束 ↑↑↑ ---
 
 #第10部分
-#第10部分
     def _execute_broadcast(self, task, trigger_time):
         self.update_playing_text(f"[{task['name']}] 正在准备播放...")
         self.status_labels[2].config(text="播放状态: 播放中")
@@ -6064,8 +6068,11 @@ class TimedBroadcastApp:
 
         playlist = []
         if task.get('video_type') == 'single':
-            if os.path.exists(task['content']):
-                playlist = [task['content']] * repeat_count
+            # <--- 新增/修改 1：检查URL或本地文件 ---
+            video_path = task['content']
+            is_url = video_path.lower().startswith(('http://', 'https://', 'rtsp://', 'rtmp://', 'mms://'))
+            if is_url or os.path.exists(video_path):
+                playlist = [video_path] * repeat_count
         else:
             folder_path = task['content']
             if os.path.isdir(folder_path):
@@ -6102,7 +6109,7 @@ class TimedBroadcastApp:
                     self.log(f"任务 '{task['name']}' 在播放列表循环中被中断。")
                     break
 
-                media = instance.media_new(video_path)
+                media = instance.media_new(video_path) # <--- VLC可以直接处理URL
                 self.vlc_player.set_media(media)
                 self.vlc_player.play()
 
@@ -6113,12 +6120,10 @@ class TimedBroadcastApp:
                 self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
                 self.log(f"设置播放速率为: {rate_val}")
                 
-                # <--- 核心修复：明确设置静音或非静音状态 ---
                 if self.is_muted:
                     self.vlc_player.audio_set_mute(True)
                 else:
-                    self.vlc_player.audio_set_mute(False) # 明确取消静音
-                # --- 修复结束 ---
+                    self.vlc_player.audio_set_mute(False)
 
                 time.sleep(0.5)
 
@@ -6128,7 +6133,10 @@ class TimedBroadcastApp:
                         self.log(f"视频任务 '{task['name']}' 在播放期间被中断。")
                         self.vlc_player.stop()
                         break
-
+                    
+                    # <--- 新增/修改 2：优化播放状态的显示内容 ---
+                    display_name = video_path if video_path.lower().startswith(('http', 'rtsp')) else os.path.basename(video_path)
+                    
                     now = time.time()
                     if interval_type == 'seconds':
                         elapsed = now - start_time
@@ -6140,12 +6148,12 @@ class TimedBroadcastApp:
                         if now - last_text_update_time >= 1.0:
                             remaining_seconds = int(duration_seconds - elapsed)
                             status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
-                            self.update_playing_text(f"[{task['name']}] {os.path.basename(video_path)} ({status_text} - 剩余 {remaining_seconds} 秒)")
+                            self.update_playing_text(f"[{task['name']}] {display_name} ({status_text} - 剩余 {remaining_seconds} 秒)")
                             last_text_update_time = now
                     else:
                          if now - last_text_update_time >= 1.0:
                             status_text = "播放中" if self.vlc_player.is_playing() else "已暂停"
-                            self.update_playing_text(f"[{task['name']}] {os.path.basename(video_path)} ({i+1}/{len(playlist)} - {status_text})")
+                            self.update_playing_text(f"[{task['name']}] {display_name} ({i+1}/{len(playlist)} - {status_text})")
                             last_text_update_time = now
 
                     time.sleep(0.2)
@@ -6162,7 +6170,6 @@ class TimedBroadcastApp:
 
             self.root.after(0, self._destroy_video_window)
             self.log(f"视频任务 '{task['name']}' 的播放逻辑结束。")
-
     def _create_video_window(self, task):
         if self.video_window and self.video_window.winfo_exists():
             self.video_window.destroy()
@@ -6800,7 +6807,6 @@ class TimedBroadcastApp:
             self.holidays = []
 
 #第11部分
-#第11部分
     def update_holiday_list(self):
         if not hasattr(self, 'holiday_tree') or not self.holiday_tree.winfo_exists(): return
         selection = self.holiday_tree.selection()
@@ -7215,7 +7221,6 @@ class TimedBroadcastApp:
 #增加部分结束
             
 #第12部分
-#第12部分
     def update_todo_list(self):
         if not hasattr(self, 'todo_tree') or not self.todo_tree.winfo_exists(): return
         selection = self.todo_tree.selection()
@@ -7483,7 +7488,6 @@ class TimedBroadcastApp:
         dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         
         dialog.after(10, lambda: self.center_window(dialog, parent=self.root))
-#第13部分
 #第13部分
     def show_todo_context_menu(self, event):
         if self.is_locked: return
