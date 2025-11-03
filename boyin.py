@@ -7379,6 +7379,14 @@ class TimedBroadcastApp:
 
             if migrated: self.log("旧版任务数据已迁移，部分语音节目首次播放前可能需要重新编辑保存。"); self.save_tasks()
             self.update_task_list(); self.log(f"已加载 {len(self.tasks)} 个节目")
+
+            if self.auth_info['status'] == 'Trial' and len(self.tasks) > 3:
+                messagebox.showwarning("试用版限制", "检测到节目数量超过3个限制，多余的节目将自动被移除。")
+                self.tasks = self.tasks[:3] # 只保留前3个
+                self.update_task_list()
+                self.save_tasks() # 将截断后的列表写回文件，实现“永久”移除
+                self.log("试用版限制：已将超出的节目任务移除。")
+
         except Exception as e: self.log(f"加载任务失败: {e}")
 
     def load_settings(self):
