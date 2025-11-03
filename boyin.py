@@ -6058,167 +6058,105 @@ class TimedBroadcastApp:
             self.log(f"播放语音内容失败: {e}")
 
     def _play_video_task_internal(self, task, stop_event):
-        # --- ↓↓↓ 核心修改 1：分离 Instance 选项和 Media 选项 ↓↓↓ ---
-        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        
-        # 这些是给VLC实例的全局参数，特别是网络缓存
-        vlc_instance_options = [
-            '--no-xlib',
-            '--network-caching=5000'  # 5秒网络缓存
-        ]
-        # 这些是给每个媒体（URL）的参数，比如User-Agent
-        vlc_media_options = [
-            f':http-user-agent={user_agent}'
-        ]
-        # --- ↑↑↑ 修改结束 ↑↑↑ ---
-
         if not VLC_AVAILABLE:
             self.log("错误: python-vlc 库未安装或VLC播放器未找到，无法播放视频。")
             return
 
-        interval_type = task.get('interval_type', 'first')
-        duration_seconds = int(task.get('interval_seconds', 0))
-        repeat_count = int(task.get('interval_first', 1))
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        vlc_instance_options = ['--no-xlib', '--network-caching=5000']
+        
+        # 对于MediaListPlayer，选项需要在创建Media时通过add_option添加
+        # 这是一个稍微不同的方式
+        
+        content_path = task.get('content', '')
+        # 我们只对M3U8使用MediaListPlayer，其他URL和本地文件继续用简单模式
+        is_m3u8_playlist = content_path.lower().startswith(('http', 'rtsp')) and content_path.lower().endswith(('.m3u', '.m3u8'))
 
-        playlist = []
-        if task.get('video_type') == 'single':
-            video_path = task['content']
-            is_url = video_path.lower().startswith(('http://', 'https://', 'rtsp://', 'rtmp://', 'mms://'))
-            if is_url or os.path.exists(video_path):
-                playlist = [video_path] * repeat_count
-        else:
-            folder_path = task['content']
-            if os.path.isdir(folder_path):
-                video_extensions = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv')
-                all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(video_extensions)]
-                if task.get('play_order') == 'random':
-                    random.shuffle(all_files)
-                playlist = all_files[:repeat_count]
-
-        if not playlist:
-            self.log(f"错误: 视频列表为空，任务 '{task['name']}' 无法播放。")
-            return
-
+        # 清理工作
+        self.vlc_player = None
+        self.vlc_list_player = None
+        
         try:
             if AUDIO_AVAILABLE:
-                pygame.mixer.music.stop()
-                pygame.mixer.stop()
+                pygame.mixer.music.stop(); pygame.mixer.stop()
 
-            # --- ↓↓↓ 核心修改 2：使用带选项的 Instance 创建 ↓↓↓ ---
             instance = vlc.Instance(vlc_instance_options)
-            # --- ↑↑↑ 修改结束 ↑↑↑ ---
-            self.vlc_player = instance.media_player_new()
-            
-            # --- ↓↓↓ 核心修改 3：在此处绑定事件监听器 ↓↓↓ ---
-            event_manager = self.vlc_player.event_manager()
-            event_manager.event_attach(vlc.EventType.MediaPlayerEncounteredError, lambda event: self.log("!!! VLC事件: 播放器遇到错误 !!!"))
-            event_manager.event_attach(vlc.EventType.MediaPlayerBuffering, lambda event, new_cache: self.log(f"--- VLC事件: 正在缓冲 {new_cache:.1f}% ---"))
-            event_manager.event_attach(vlc.EventType.MediaPlayerPlaying, lambda event: self.log("--- VLC事件: 状态变更为 [播放中] ---"))
-            event_manager.event_attach(vlc.EventType.MediaPlayerEndReached, lambda event: self.log("--- VLC事件: 媒体播放结束 ---"))
-            # --- ↑↑↑ 修改结束 ↑↑↑ ---
 
-            self.root.after(0, self._create_video_window, task)
-            time.sleep(0.5)
+            # --- ↓↓↓ 核心逻辑分支：根据是否是M3U8选择不同播放器 ↓↓↓ ---
+            if is_m3u8_playlist:
+                # --- A. 专业M3U8处理模式 ---
+                self.log(f"检测到M3U8直播流，启用MediaListPlayer专业模式。")
+                
+                media_list = instance.media_list_new()
+                # 为媒体添加选项
+                media = instance.media_new(content_path)
+                media.add_option(f':http-user-agent={user_agent}')
+                media_list.add_media(media)
+                
+                self.vlc_list_player = instance.media_list_player_new()
+                self.vlc_player = self.vlc_list_player.get_media_player() # 获取底层播放器
+                
+                # 绑定事件监听器
+                event_manager = self.vlc_player.event_manager()
+                event_manager.event_attach(vlc.EventType.MediaPlayerEncounteredError, lambda event: self.log("!!! VLC事件: 播放器遇到错误 !!!"))
+                event_manager.event_attach(vlc.EventType.MediaPlayerBuffering, lambda event, new_cache: self.log(f"--- VLC事件: 正在缓冲 {new_cache:.1f}% ---"))
+                event_manager.event_attach(vlc.EventType.MediaPlayerPlaying, lambda event: self.log("--- VLC事件: 状态变更为 [播放中] ---"))
+                
+                self.vlc_list_player.set_media_list(media_list)
+                
+            else:
+                # --- B. 普通文件/URL处理模式 ---
+                self.log(f"播放单个媒体文件/流: {content_path}")
+                self.vlc_player = instance.media_player_new()
+                media = instance.media_new(content_path, f':http-user-agent={user_agent}')
+                self.vlc_player.set_media(media)
+
+            # --- 公共的窗口创建和设置部分 ---
+            self.root.after(0, self._create_video_window, task) # 不再需要is_playlist参数
+            time.sleep(1.0)
 
             if not (self.video_window and self.video_window.winfo_exists()):
-                self.log("错误: 视频窗口创建失败，无法播放。")
-                return
+                raise Exception("视频窗口创建失败")
 
             self.vlc_player.set_hwnd(self.video_window.winfo_id())
 
-            start_time = time.time()
-            for i, video_path in enumerate(playlist):
-                if self._is_interrupted() or stop_event.is_set():
-                    self.log(f"任务 '{task['name']}' 在播放列表循环中被中断。")
-                    break
-                
-                # --- ↓↓↓ 核心修改 4：这里只使用 Media 相关的选项 ↓↓↓ ---
-                media = instance.media_new(video_path, *vlc_media_options)
-                # --- ↑↑↑ 修改结束 ↑↑↑ ---
-                self.vlc_player.set_media(media)
+            if self.is_muted: self.vlc_player.audio_set_mute(True)
+            else: self.vlc_player.audio_set_mute(False)
+            self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
+            
+            # 启动对应的播放器
+            if is_m3u8_playlist:
+                self.vlc_list_player.play()
+            else:
                 self.vlc_player.play()
-
-                rate_input = task.get('playback_rate', '1.0').strip()
-                rate_match = re.match(r"(\d+(\.\d+)?)", rate_input)
-                rate_val = float(rate_match.group(1)) if rate_match else 1.0
-                self.vlc_player.set_rate(rate_val)
-                self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
-                self.log(f"设置播放速率为: {rate_val}")
-                
-                if self.is_muted:
-                    self.vlc_player.audio_set_mute(True)
-                else:
-                    self.vlc_player.audio_set_mute(False)
-
-                # 增加等待时间是好的，但我们现在依赖健壮的循环，可以稍微缩短
-                time.sleep(1.5)
-
-                last_text_update_time = 0
-                
-                while self.vlc_player.get_state() not in {vlc.State.Ended, vlc.State.Stopped, vlc.State.Error}:
-                    if self._is_interrupted() or stop_event.is_set():
-                        self.log(f"视频任务 '{task['name']}' 在播放期间被中断。")
-                        self.vlc_player.stop()
-                        break
-                    
-                    display_name = video_path if video_path.lower().startswith(('http', 'rtsp')) else os.path.basename(video_path)
-                    
-                    now = time.time()
-                    if interval_type == 'seconds':
-                        elapsed = now - start_time
-                        if elapsed >= duration_seconds:
-                            self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
-                            self.vlc_player.stop()
-                            break
-
-                        if now - last_text_update_time >= 1.0:
-                            remaining_seconds = int(duration_seconds - elapsed)
-                            state = self.vlc_player.get_state()
-                            status_text = "播放中"
-                            if state == vlc.State.Buffering:
-                                # 在非列表模式下，直接获取缓冲百分比更简单
-                                media_stats = self.vlc_player.get_media().get_stats()
-                                if media_stats and media_stats['demux_read_bytes'] > 0:
-                                     status_text = f"缓冲中 {int(media_stats['demux_read_bytes']/1024)} KB"
-                                else:
-                                     status_text = "缓冲中..."
-                            elif state == vlc.State.Paused:
-                                status_text = "已暂停"
-                            
-                            self.update_playing_text(f"[{task['name']}] {display_name} ({status_text} - 剩余 {remaining_seconds} 秒)")
-                            last_text_update_time = now
-                    else:
-                         if now - last_text_update_time >= 1.0:
-                            state = self.vlc_player.get_state()
-                            status_text = "播放中"
-                            if state == vlc.State.Buffering:
-                                media_stats = self.vlc_player.get_media().get_stats()
-                                if media_stats and media_stats['demux_read_bytes'] > 0:
-                                     status_text = f"缓冲中 {int(media_stats['demux_read_bytes']/1024)} KB"
-                                else:
-                                     status_text = "缓冲中..."
-                            elif state == vlc.State.Paused:
-                                status_text = "已暂停"
-                            self.update_playing_text(f"[{task['name']}] {display_name} ({i+1}/{len(playlist)} - {status_text})")
-                            last_text_update_time = now
-
-                    time.sleep(0.2)
-                
-                final_state = self.vlc_player.get_state()
-                self.log(f"单个媒体播放循环结束，最终状态为: {final_state}")
-
-                if (interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds) or stop_event.is_set():
+            
+            self.log("已发送播放指令，等待VLC引擎响应...")
+            
+            # 使用对应的播放器进行循环检查
+            player_to_check = self.vlc_list_player if is_m3u8_playlist else self.vlc_player
+            while player_to_check.get_state() not in {vlc.State.Ended, vlc.State.Stopped, vlc.State.Error}:
+                if self._is_interrupted() or stop_event.is_set():
+                    self.log("播放被手动中断。")
+                    player_to_check.stop()
                     break
+                time.sleep(0.2)
+            
+            final_state = player_to_check.get_state()
+            self.log(f"播放循环结束，最终状态为: {final_state}")
 
         except Exception as e:
-            self.log(f"播放视频任务 '{task['name']}' 时发生错误: {e}")
+            self.log(f"播放视频任务 '{task['name']}' 时发生严重错误: {e}")
         finally:
+            if self.vlc_list_player:
+                self.vlc_list_player.stop()
+                self.vlc_list_player = None
             if self.vlc_player:
                 self.vlc_player.stop()
                 self.vlc_player = None
 
             self.root.after(0, self._destroy_video_window)
-            self.log(f"视频任务 '{task['name']}' 的播放逻辑结束。")
+            self.log(f"视频任务 '{task['name']}' 的播放逻辑清理完毕。")
+
     def _create_video_window(self, task):
         if self.video_window and self.video_window.winfo_exists():
             self.video_window.destroy()
