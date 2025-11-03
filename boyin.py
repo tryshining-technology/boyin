@@ -284,6 +284,8 @@ class TimedBroadcastApp:
             self.root.after(100, self.hide_to_tray)
         if self.is_app_locked_down:
             self.root.after(100, self.perform_lockdown)
+        if self.auth_info['status'] == 'Trial':
+            self.root.after(500, self.show_trial_nag_screen)
 
     def _apply_global_font(self):
         font_name = self.settings.get("app_font", "Microsoft YaHei")
@@ -2432,6 +2434,59 @@ class TimedBroadcastApp:
         self.save_tasks()
 
         self.switch_page("注册软件")
+
+    def show_trial_nag_screen(self):
+        self.root.attributes('-disabled', True)
+
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("试用版提示")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.attributes('-topmost', True)
+        
+        # --- ↓↓↓ 修改 1：禁用窗口的关闭按钮(X) ↓↓↓ ---
+        dialog.protocol("WM_DELETE_WINDOW", lambda: None)
+        # --- ↑↑↑ 修改结束 ↑↑↑ ---
+
+        countdown_seconds = 10
+
+        main_frame = ttk.Frame(dialog, padding=(40, 20))
+        main_frame.pack(fill=BOTH, expand=True)
+
+        title_label = ttk.Label(main_frame, text="欢迎使用 创翔多功能定时播音", font=self.font_14_bold, bootstyle="primary")
+        title_label.pack(pady=(0, 10))
+
+        info_label = ttk.Label(main_frame, text="您当前使用的是功能完整的试用版\n如果觉得本软件对您有帮助，请联系我们购买永久授权！", 
+                               font=self.font_11, justify='center', anchor='center')
+        info_label.pack(pady=10)
+        
+        contact_label = ttk.Label(main_frame, text="联系QQ: 315725445  |  微信: 18603970717", font=self.font_10, bootstyle="secondary")
+        contact_label.pack(pady=10)
+
+        # --- ↓↓↓ 修改 2：创建一个Label来显示倒计时，而不是按钮 ↓↓↓ ---
+        countdown_label = ttk.Label(main_frame, text=f"请稍候... ({countdown_seconds})", font=self.font_12_bold, bootstyle="success")
+        countdown_label.pack(pady=20, fill=X)
+        # --- ↑↑↑ 修改结束 ↑↑↑ ---
+
+        def cleanup_and_close():
+            if hasattr(dialog, '_countdown_job'):
+                dialog.after_cancel(dialog._countdown_job)
+            self.root.attributes('-disabled', False)
+            dialog.destroy()
+            self.root.focus_force()
+
+        def update_countdown(sec_left):
+            if sec_left > 0:
+                # --- ↓↓↓ 修改 3：更新Label的文本 ↓↓↓ ---
+                countdown_label.config(text=f"请稍候... ({sec_left})")
+                # --- ↑↑↑ 修改结束 ↑↑↑ ---
+                dialog._countdown_job = dialog.after(1000, lambda: update_countdown(sec_left - 1))
+            else:
+                cleanup_and_close()
+
+        update_countdown(countdown_seconds)
+        
+        self.center_window(dialog, parent=self.root)
 
     def update_title_bar(self):
         self.root.title(f" 创翔多功能定时播音旗舰版 ({self.auth_info['message']})")
