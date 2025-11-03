@@ -6058,6 +6058,9 @@ class TimedBroadcastApp:
             self.log(f"播放语音内容失败: {e}")
 
     def _play_video_task_internal(self, task, stop_event):
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        vlc_options = [f":http-user-agent={user_agent}"]
+
         if not VLC_AVAILABLE:
             self.log("错误: python-vlc 库未安装或VLC播放器未找到，无法播放视频。")
             return
@@ -6108,7 +6111,7 @@ class TimedBroadcastApp:
                     self.log(f"任务 '{task['name']}' 在播放列表循环中被中断。")
                     break
 
-                media = instance.media_new(video_path)
+                media = instance.media_new(video_path, *vlc_options)
                 self.vlc_player.set_media(media)
                 self.vlc_player.play()
 
@@ -6125,7 +6128,7 @@ class TimedBroadcastApp:
                     self.vlc_player.audio_set_mute(False)
 
                 # <--- 核心修改 1：给网络流更多时间初始化 ---
-                # 增加等待时间，从0.5秒增加到1.5秒，给网络连接和缓冲留出时间。
+                # 增加等待时间，从0.5秒增加到5秒，给网络连接和缓冲留出时间。
                 time.sleep(5)
 
                 last_text_update_time = 0
