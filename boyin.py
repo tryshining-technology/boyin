@@ -3519,7 +3519,22 @@ class TimedBroadcastApp:
             if iid not in self.task_tree.selection():
                 self.task_tree.selection_set(iid)
 
-            context_menu.add_command(label="立即播放", command=self.play_now)
+            # --- ↓↓↓ 核心修改：在这里获取任务类型并决定状态 ↓↓↓ ---
+            # 只有当选中单个任务时，我们才进行判断
+            if len(self.task_tree.selection()) == 1:
+                index = self.task_tree.index(iid)
+                task = self.tasks[index]
+                task_type = task.get('type')
+                
+                # 如果任务类型是 'bell_schedule'，则禁用“立即播放”
+                play_now_state = 'disabled' if task_type == 'bell_schedule' else 'normal'
+            else:
+                # 如果选中了多个任务，为简单起见，也禁用“立即播放”
+                play_now_state = 'disabled'
+            
+            context_menu.add_command(label="立即播放", command=self.play_now, state=play_now_state)
+            # --- ↑↑↑ 修改结束 ↑↑↑ ---
+
             context_menu.add_separator()
             context_menu.add_command(label="修改", command=self.edit_task)
             context_menu.add_command(label="删除", command=self.delete_task)
