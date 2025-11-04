@@ -3614,14 +3614,14 @@ class TimedBroadcastApp:
         choice_dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         self.center_window(choice_dialog, parent=self.root)
 #第5部分
-    def open_bell_scheduler_dialog(self, parent_dialog):
-        """打开校铃/厂铃计划生成器对话框"""
-        # 这个 parent_dialog 是我们传递过来的临时占位符，先销毁它
+    def open_bell_scheduler_dialog(self, parent_dialog, task_to_edit=None, index=None):
         if parent_dialog and parent_dialog.winfo_exists():
             parent_dialog.destroy()
         
+        is_edit_mode = task_to_edit is not None
+        
         dialog = ttk.Toplevel(self.root)
-        dialog.title("校铃/厂铃时间表助手")
+        dialog.title("修改打铃计划" if is_edit_mode else "校铃/厂铃时间表助手")
         dialog.resizable(False, False)
         dialog.transient(self.root)
 
@@ -3635,14 +3635,19 @@ class TimedBroadcastApp:
 
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
-        main_frame.columnconfigure(0, weight=3) # 左侧区域
-        main_frame.columnconfigure(1, weight=2) # 右侧预览区域
+        main_frame.columnconfigure(0, weight=3)
+        main_frame.columnconfigure(1, weight=2)
 
-        # --- 左侧：设置区域 ---
         left_frame = ttk.Frame(main_frame)
         left_frame.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
 
-        # 铃声文件设置
+        # --- ↓↓↓ 新增：节目名称输入框 ↓↓↓ ---
+        name_lf = ttk.LabelFrame(left_frame, text="节目名称", padding=10)
+        name_lf.pack(fill=X, pady=(0, 5))
+        name_entry = ttk.Entry(name_lf, font=self.font_11)
+        name_entry.pack(fill=X)
+        # --- ↑↑↑ 新增结束 ↑↑↑ ---
+
         bell_files_lf = ttk.LabelFrame(left_frame, text="1. 铃声文件设置", padding=10)
         bell_files_lf.pack(fill=X, pady=5)
         bell_files_lf.columnconfigure(1, weight=1)
@@ -3661,7 +3666,6 @@ class TimedBroadcastApp:
         ttk.Entry(bell_files_lf, textvariable=bell_volume_var, width=8, font=self.font_11).grid(row=2, column=1, sticky='w')
         ttk.Label(bell_files_lf, text="(0-100)", font=self.font_9, bootstyle="secondary").grid(row=2, column=1, sticky='w', padx=70)
 
-        # 时间规则设置
         schedule_lf = ttk.LabelFrame(left_frame, text="2. 通用规则设置", padding=10)
         schedule_lf.pack(fill=X, pady=5)
         schedule_lf.columnconfigure(1, weight=1)
@@ -3679,7 +3683,6 @@ class TimedBroadcastApp:
         daterange_entry_schedule.grid(row=1, column=1, sticky='ew')
         ttk.Button(schedule_lf, text="设置", bootstyle="outline", width=5, command=lambda: self.show_daterange_settings_dialog(daterange_entry_schedule)).grid(row=1, column=2, padx=5)
 
-        # 课程时间设置
         class_time_lf = ttk.LabelFrame(left_frame, text="3. 时间点设置", padding=10)
         class_time_lf.pack(fill=X, pady=5)
         
@@ -3733,7 +3736,6 @@ class TimedBroadcastApp:
         am_vars = create_session_ui(am_tab, "上午")
         pm_vars = create_session_ui(pm_tab, "下午")
 
-        # --- 右侧：预览区域 ---
         right_frame = ttk.Frame(main_frame)
         right_frame.grid(row=0, column=1, sticky='nsew')
         right_frame.rowconfigure(0, weight=1)
@@ -3748,15 +3750,16 @@ class TimedBroadcastApp:
         preview_text.grid(row=0, column=0, sticky='nsew')
         preview_text.text.config(state=DISABLED)
         
-        # --- 底部按钮 ---
         bottom_frame = ttk.Frame(dialog)
         bottom_frame.pack(fill=X, padx=15, pady=(5, 10))
         
-        # 将 commit_btn 提前定义，以便在预览函数中控制其状态
-        commit_btn = ttk.Button(bottom_frame, text="添加至节目单", bootstyle="success", state=DISABLED, command=lambda: self._commit_bells_to_schedule(
-            preview_text, up_bell_var, down_bell_var, bell_volume_var, weekday_var, daterange_var,
-            am_vars, pm_vars, dialog, cleanup_and_destroy
-        ))
+        commit_btn_text = "保存修改" if is_edit_mode else "添加至节目单"
+        commit_btn = ttk.Button(bottom_frame, text=commit_btn_text, bootstyle="success", state=DISABLED, 
+                                command=lambda: self._commit_bells_to_schedule(
+                                    preview_text, name_entry, up_bell_var, down_bell_var, bell_volume_var, 
+                                    weekday_var, daterange_var, am_vars, pm_vars, 
+                                    dialog, cleanup_and_destroy, task_to_edit, index
+                                ))
 
         preview_btn = ttk.Button(bottom_frame, text="生成预览", bootstyle="info", command=lambda: self._generate_and_preview_bells(
             preview_text, up_bell_var, down_bell_var, bell_volume_var, am_vars, pm_vars, commit_btn, dialog
@@ -3765,6 +3768,37 @@ class TimedBroadcastApp:
         commit_btn.pack(side=LEFT, padx=10, ipady=4)
 
         ttk.Button(bottom_frame, text="取消", bootstyle="secondary", command=cleanup_and_destroy).pack(side=RIGHT, padx=10, ipady=4)
+
+        # --- ↓↓↓ 新增：如果是编辑模式，用任务数据填充UI ↓↓↓ ---
+        if is_edit_mode:
+            name_entry.insert(0, task_to_edit.get('name', ''))
+            up_bell_var.set(task_to_edit.get('up_bell_file', ''))
+            down_bell_var.set(task_to_edit.get('down_bell_file', ''))
+            bell_volume_var.set(task_to_edit.get('volume', '80'))
+            weekday_var.set(task_to_edit.get('weekday', '每周:12345'))
+            daterange_var.set(task_to_edit.get('date_range', '2025-01-01 ~ 2099-12-31'))
+            
+            params = task_to_edit.get('schedule_params', {})
+            am_params = params.get('am', {})
+            pm_params = params.get('pm', {})
+            
+            for key, var in am_vars.items():
+                if isinstance(var, tk.BooleanVar):
+                    var.set(am_params.get(key, False))
+                else:
+                    var.set(am_params.get(key, ''))
+            
+            for key, var in pm_vars.items():
+                if isinstance(var, tk.BooleanVar):
+                    var.set(pm_params.get(key, False))
+                else:
+                    var.set(pm_params.get(key, ''))
+            
+            # 自动触发一次预览，方便用户查看
+            dialog.after(100, preview_btn.invoke)
+        else:
+            name_entry.insert(0, "校园/工厂作息铃声")
+        # --- ↑↑↑ 新增结束 ↑↑↑ ---
 
         dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
         dialog.after(100, lambda: self.center_window(dialog, parent=self.root))
@@ -3825,8 +3859,7 @@ class TimedBroadcastApp:
             commit_btn.config(state=DISABLED)
             return
 
-    def _commit_bells_to_schedule(self, preview_text_widget, up_bell_var, down_bell_var, bell_volume_var, weekday_var, daterange_var, am_vars, pm_vars, parent_dialog, close_callback):
-        """将预览中的铃声任务打包成一个任务组，并添加到主节目列表"""
+    def _commit_bells_to_schedule(self, preview_text_widget, name_entry, up_bell_var, down_bell_var, bell_volume_var, weekday_var, daterange_var, am_vars, pm_vars, parent_dialog, close_callback, task_to_edit=None, index=None):
         preview_content = preview_text_widget.text.get('1.0', END).strip()
         if not preview_content:
             messagebox.showwarning("无内容", "预览为空，无法添加。", parent=parent_dialog)
@@ -3851,31 +3884,38 @@ class TimedBroadcastApp:
             messagebox.showwarning("无内容", "未能从预览中解析出有效的时间点。", parent=parent_dialog)
             return
 
-        # 创建一个单一的“铃声计划”任务对象
+        # --- ↓↓↓ 核心修改：构建新的任务数据字典 ↓↓↓ ---
         new_bell_schedule_task = {
-            'name': "校园/工厂作息铃声", # 将来可以增加一个输入框让用户自定义
-            'type': 'bell_schedule', # 这是一个新的、特殊的任务类型
-            'status': '启用',
+            'name': name_entry.get().strip() or "未命名打铃计划",
+            'type': 'bell_schedule',
+            'status': '启用' if task_to_edit is None else task_to_edit.get('status', '启用'),
             'weekday': weekday_var.get(),
             'date_range': daterange_var.get(),
             'up_bell_file': up_bell_var.get(),
             'down_bell_file': down_bell_var.get(),
             'volume': bell_volume_var.get(),
-            # 保存所有UI上的参数，以便将来可以恢复和编辑
             'schedule_params': {
-                'am': {k: v.get() if isinstance(v, tk.StringVar) else bool(v.get()) for k, v in am_vars.items()},
-                'pm': {k: v.get() if isinstance(v, tk.StringVar) else bool(v.get()) for k, v in pm_vars.items()}
+                'am': {k: v.get() if not isinstance(v, tk.BooleanVar) else bool(v.get()) for k, v in am_vars.items()},
+                'pm': {k: v.get() if not isinstance(v, tk.BooleanVar) else bool(v.get()) for k, v in pm_vars.items()}
             },
-            'generated_times': generated_times, # 保存所有计算出的时间点
-            'last_run': {}
+            'generated_times': generated_times,
+            'last_run': {} if task_to_edit is None else task_to_edit.get('last_run', {})
         }
+        # --- ↑↑↑ 修改结束 ↑↑↑ ---
         
-        self.tasks.append(new_bell_schedule_task)
+        # --- ↓↓↓ 核心修改：判断是新增还是修改 ↓↓↓ ---
+        if task_to_edit is None:
+            self.tasks.append(new_bell_schedule_task)
+            self.log(f"通过“打铃模式”成功添加了一个名为 '{new_bell_schedule_task['name']}' 的铃声计划。")
+            messagebox.showinfo("成功", f"已成功生成并添加了一个包含 {len(generated_times)} 个时间点的铃声计划！", parent=self.root)
+        else:
+            self.tasks[index] = new_bell_schedule_task
+            self.log(f"已成功修改打铃计划 '{new_bell_schedule_task['name']}'。")
+            messagebox.showinfo("成功", "打铃计划已成功修改！", parent=self.root)
+        # --- ↑↑↑ 修改结束 ↑↑↑ ---
         
         self.update_task_list()
         self.save_tasks()
-        self.log(f"通过“打铃模式”成功添加了一个包含 {len(generated_times)} 个时间点的铃声计划。")
-        messagebox.showinfo("成功", f"已成功生成并添加了一个包含 {len(generated_times)} 个时间点的铃声计划！", parent=self.root)
         close_callback()
 
     def open_audio_dialog(self, parent_dialog, task_to_edit=None, index=None):
@@ -4176,7 +4216,6 @@ class TimedBroadcastApp:
         dialog.minsize(800, 580)
         dialog.transient(self.root)
 
-        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
         dialog.attributes('-topmost', True)
         self.root.attributes('-disabled', True)
         
@@ -4184,7 +4223,6 @@ class TimedBroadcastApp:
             self.root.attributes('-disabled', False)
             dialog.destroy()
             self.root.focus_force()
-        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
@@ -4227,10 +4265,8 @@ class TimedBroadcastApp:
                 video_single_entry.insert(0, filename)
         ttk.Button(video_single_frame, text="选取...", command=select_single_video, bootstyle="outline").grid(row=0, column=2, padx=5)
 
-        # <--- 修改1：添加一个提示标签，告知用户支持URL ---
-        ttk.Label(content_frame, text="(支持网络URL地址)", font=self.font_9, bootstyle="info").grid(row=2, column=1, sticky='w', padx=5)
+        ttk.Label(content_frame, text="(支持本地文件路径或网络URL地址)", font=self.font_9, bootstyle="info").grid(row=2, column=1, sticky='w', padx=5)
 
-        # <--- 修改2：调整后续控件的行号 ---
         ttk.Label(content_frame, text="视频文件夹:").grid(row=3, column=0, sticky='e', padx=5, pady=2)
         video_folder_frame = ttk.Frame(content_frame)
         video_folder_frame.grid(row=3, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -4247,7 +4283,7 @@ class TimedBroadcastApp:
         ttk.Button(video_folder_frame, text="选取...", command=lambda: select_folder(video_folder_entry), bootstyle="outline").grid(row=0, column=2, padx=5)
 
         play_order_frame = ttk.Frame(content_frame)
-        play_order_frame.grid(row=4, column=1, columnspan=3, sticky='w', padx=5, pady=2)
+        play_order_frame.grid(row=4, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         play_order_var = tk.StringVar(value="sequential")
         ttk.Radiobutton(play_order_frame, text="顺序播", variable=play_order_var, value="sequential").pack(side=LEFT, padx=10)
         ttk.Radiobutton(play_order_frame, text="随机播", variable=play_order_var, value="random").pack(side=LEFT, padx=10)
@@ -4256,6 +4292,13 @@ class TimedBroadcastApp:
         volume_entry = ttk.Entry(play_order_frame, font=self.font_11, width=5)
         volume_entry.pack(side=LEFT)
         ttk.Label(play_order_frame, text="(0-100)").pack(side=LEFT, padx=2)
+
+        # --- ↓↓↓ 新增UI：自定义User-Agent输入框 ↓↓↓ ---
+        custom_ua_var = tk.StringVar()
+        ttk.Label(play_order_frame, text="自定义UA:").pack(side=LEFT, padx=(20, 2))
+        ua_entry = ttk.Entry(play_order_frame, textvariable=custom_ua_var, font=self.font_11, width=25)
+        ua_entry.pack(side=LEFT, fill=X, expand=True)
+        # --- ↑↑↑ 新增结束 ↑↑↑ ---
 
         playback_mode_var = tk.StringVar(value="fullscreen")
         resolutions = ["640x480", "800x600", "1024x768", "1280x720", "1366x768", "1600x900", "1920x1080"]
@@ -4370,6 +4413,9 @@ class TimedBroadcastApp:
                 video_folder_entry.insert(0, task.get('content', ''))
             play_order_var.set(task.get('play_order', 'sequential'))
             volume_entry.insert(0, task.get('volume', '80'))
+            # --- ↓↓↓ 新增：加载自定义UA ↓↓↓ ---
+            custom_ua_var.set(task.get('custom_user_agent', ''))
+            # --- ↑↑↑ 新增结束 ↑↑↑ ---
             playback_mode_var.set(task.get('playback_mode', 'fullscreen'))
             resolution_var.set(task.get('resolution', '1024x768'))
             playback_rate_var.set(task.get('playback_rate', '1.0x (正常)'))
@@ -4427,7 +4473,6 @@ class TimedBroadcastApp:
             
             video_path = video_single_entry.get().strip() if video_type_var.get() == "single" else video_folder_entry.get().strip()
             
-            # <--- 修改3：核心验证逻辑 ---
             is_url = video_path.lower().startswith(('http://', 'https://', 'rtsp://', 'rtmp://', 'mms://'))
             
             if not video_path:
@@ -4480,6 +4525,9 @@ class TimedBroadcastApp:
                 'playback_mode': playback_mode_var.get(),
                 'resolution': resolution_var.get(),
                 'playback_rate': rate_input,
+                # --- ↓↓↓ 新增：保存自定义UA ↓↓↓ ---
+                'custom_user_agent': custom_ua_var.get().strip(),
+                # --- ↑↑↑ 新增结束 ↑↑↑ ---
                 'weekday': weekday_entry.get().strip(),
                 'date_range': date_msg,
                 'delay': saved_delay_type,
@@ -5259,18 +5307,20 @@ class TimedBroadcastApp:
 
     def edit_task(self):
         selection = self.task_tree.selection()
-        if not selection: messagebox.showwarning("警告", "请先选择要修改的节目", parent=self.root); return
-        if len(selection) > 1: messagebox.showwarning("警告", "一次只能修改一个节目", parent=self.root); return
+        if not selection: 
+            messagebox.showwarning("警告", "请先选择要修改的节目", parent=self.root)
+            return
+        if len(selection) > 1: 
+            messagebox.showwarning("警告", "一次只能修改一个节目", parent=self.root)
+            return
+        
         index = self.task_tree.index(selection[0])
         task = self.tasks[index]
         
+        # 创建一个临时的、不可见的父窗口，用于传递给对话框函数
+        # 这样可以统一所有对话框的调用方式
         dummy_parent = ttk.Toplevel(self.root)
         dummy_parent.withdraw()
-
-        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
-        # 不再追踪 dummy_parent，因为新的对话框会自己处理
-        # self.active_modal_dialog = dummy_parent 
-        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         task_type = task.get('type')
         if task_type == 'audio':
@@ -5279,8 +5329,14 @@ class TimedBroadcastApp:
             self.open_voice_dialog(dummy_parent, task_to_edit=task, index=index)
         elif task_type == 'video':
             self.open_video_dialog(dummy_parent, task_to_edit=task, index=index)
+        # --- ↓↓↓ 新增的逻辑分支 ↓↓↓ ---
+        elif task_type == 'bell_schedule':
+            self.open_bell_scheduler_dialog(dummy_parent, task_to_edit=task, index=index)
+        # --- ↑↑↑ 新增逻辑结束 ↑↑↑ ---
         else:
-             self.open_audio_dialog(dummy_parent, task_to_edit=task, index=index)
+            # 为未知或旧类型的任务提供一个默认的编辑方式
+            self.log(f"警告：任务 '{task.get('name')}' 类型未知，尝试使用音频编辑器打开。")
+            self.open_audio_dialog(dummy_parent, task_to_edit=task, index=index)
 
     def copy_task(self):
         selections = self.task_tree.selection()
@@ -7005,7 +7061,15 @@ class TimedBroadcastApp:
             self.log("错误: python-vlc 库未安装或VLC播放器未找到，无法播放视频。")
             return
 
-        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        # --- ↓↓↓ 核心修改 1：动态选择User-Agent ↓↓↓ ---
+        custom_ua = task.get('custom_user_agent', '').strip()
+        if custom_ua:
+            user_agent = custom_ua
+            self.log(f"检测到自定义User-Agent，将使用: {user_agent}")
+        else:
+            user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        # --- ↑↑↑ 修改结束 ↑↑↑ ---
+        
         vlc_instance_options = ['--no-xlib', '--network-caching=5000']
         
         content_path = task.get('content', '')
@@ -7080,9 +7144,7 @@ class TimedBroadcastApp:
             
             self.log("已发送播放指令，等待VLC引擎响应...")
             
-            # --- ↓↓↓ 核心修复 1：无论何种模式，我们都监控底层的 self.vlc_player ↓↓↓ ---
             player_to_check = self.vlc_player
-            # --- ↑↑↑ 修复结束 ↑↑↑ ---
 
             start_time = time.time()
             last_text_update_time = 0
@@ -7092,10 +7154,9 @@ class TimedBroadcastApp:
             while player_to_check.get_state() not in {vlc.State.Ended, vlc.State.Stopped, vlc.State.Error}:
                 if self._is_interrupted() or stop_event.is_set():
                     self.log("播放被手动中断。")
-                    player_to_start.stop() # 停止上层播放器
+                    player_to_start.stop()
                     break
 
-                # --- ↓↓↓ 核心修复 2：将状态更新逻辑移到统一的循环中 ↓↓↓ ---
                 now = time.time()
                 if now - last_text_update_time >= 1.0:
                     display_name = final_content_path if final_content_path.lower().startswith(('http', 'rtsp')) else os.path.basename(final_content_path)
@@ -7111,7 +7172,7 @@ class TimedBroadcastApp:
                         elapsed = now - start_time
                         if elapsed >= duration_seconds:
                             self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
-                            player_to_start.stop() # 停止上层播放器
+                            player_to_start.stop()
                             break
                         remaining_seconds = int(duration_seconds - elapsed)
                         self.update_playing_text(f"[{task['name']}] {display_name} ({status_text} - 剩余 {remaining_seconds} 秒)")
@@ -7119,7 +7180,6 @@ class TimedBroadcastApp:
                         self.update_playing_text(f"[{task['name']}] {display_name} ({status_text})")
                     
                     last_text_update_time = now
-                # --- ↑↑↑ 修复结束 ↑↑↑ ---
                 
                 time.sleep(0.2)
             
