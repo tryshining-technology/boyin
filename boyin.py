@@ -2624,6 +2624,10 @@ class TimedBroadcastApp:
                 'todos': self.todos, 
                 'screenshot_tasks': self.screenshot_tasks,
                 'execute_tasks': self.execute_tasks,
+                # --- ↓↓↓ 新增代码 ↓↓↓ ---
+                'print_tasks': self.print_tasks,
+                'backup_tasks': self.backup_tasks,
+                # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
                 'settings': self.settings,
                 'lock_password_b64': self._load_from_registry("LockPasswordB64")
             }
@@ -2665,6 +2669,11 @@ class TimedBroadcastApp:
             self.todos = backup_data.get('todos', [])
             self.screenshot_tasks = backup_data.get('screenshot_tasks', [])
             self.execute_tasks = backup_data.get('execute_tasks', [])
+            # --- ↓↓↓ 新增代码 ↓↓↓ ---
+            # 使用 .get() 来安全地加载，以兼容没有这些任务的旧备份文件
+            self.print_tasks = backup_data.get('print_tasks', [])
+            self.backup_tasks = backup_data.get('backup_tasks', [])
+            # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
             self.settings = backup_data['settings']
             self.lock_password_b64 = backup_data['lock_password_b64']
 
@@ -2673,6 +2682,10 @@ class TimedBroadcastApp:
             self.save_todos()
             self.save_screenshot_tasks()
             self.save_execute_tasks()
+            # --- ↓↓↓ 新增代码 ↓↓↓ ---
+            self.save_print_tasks()
+            self.save_backup_tasks()
+            # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, ensure_ascii=False, indent=2)
 
@@ -2686,6 +2699,10 @@ class TimedBroadcastApp:
             self.update_todo_list()
             self.update_screenshot_list()
             self.update_execute_list()
+            # --- ↓↓↓ 新增代码 ↓↓↓ ---
+            self.update_print_list()
+            self.update_backup_list()
+            # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
             self._refresh_settings_ui()
             
             self._apply_global_font()
@@ -5354,7 +5371,29 @@ class TimedBroadcastApp:
                     self.log(f"尝试导入格式错误的节目单文件: {os.path.basename(filename)}")
                     return
 
-                self.tasks.extend(imported); self.update_task_list(); self.save_tasks()
+                # --- ↓↓↓ 在这里添加您的防御代码 ↓↓↓ ---
+                if self.auth_info['status'] == 'Trial':
+                    current_count = len(self.tasks)
+                    import_count = len(imported)
+                    allowed_to_add = 3 - current_count
+
+                    if allowed_to_add <= 0:
+                        messagebox.showerror("试用版限制", "试用版最多只能有3个节目，您已达到上限，无法导入。", parent=self.root)
+                        return
+                    
+                    if import_count > allowed_to_add:
+                        messagebox.showwarning(
+                            "试用版限制",
+                            f"试用版最多只能有3个节目。\n\n您当前已有 {current_count} 个，只能再导入 {allowed_to_add} 个。\n\n将只导入节目单中的前 {allowed_to_add} 个节目。",
+                            parent=self.root
+                        )
+                        # 只截取允许导入的部分
+                        imported = imported[:allowed_to_add]
+                # --- ↑↑↑ 防御代码结束 ↑↑↑ ---
+
+                self.tasks.extend(imported)
+                self.update_task_list()
+                self.save_tasks()
                 self.log(f"已从 {os.path.basename(filename)} 导入 {len(imported)} 个节目")
             except Exception as e: messagebox.showerror("错误", f"导入失败: {e}", parent=self.root)
 
