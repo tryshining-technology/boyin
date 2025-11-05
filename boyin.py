@@ -2149,12 +2149,13 @@ class TimedBroadcastApp:
 
         params_frame = ttk.LabelFrame(main_frame, text="通用参数", padding=10)
         params_frame.grid(row=1, column=0, sticky='ew', pady=4)
-        # --- ↓↓↓ 核心修改：为 params_frame 设置列权重，这是对齐的关键 ---
-        params_frame.columnconfigure(1, weight=1)
-        # --- ↑↑↑ 修改结束 ---
+        # 该Frame内部将使用pack，不再需要columnconfigure
 
+        # --- ↓↓↓ 全新、正确的布局代码 ---
+        
+        # 第一行：语速、音调、音量
         speech_params_container = ttk.Frame(params_frame)
-        speech_params_container.grid(row=0, column=0, columnspan=4, sticky='w', pady=5, padx=5)
+        speech_params_container.pack(fill=X, pady=3, padx=5)
 
         ttk.Label(speech_params_container, text="整体语速(-10~10):").pack(side=LEFT, padx=(0, 2))
         speed_entry = ttk.Entry(speech_params_container, font=self.font_11, width=5)
@@ -2168,44 +2169,46 @@ class TimedBroadcastApp:
         volume_entry = ttk.Entry(speech_params_container, font=self.font_11, width=5)
         volume_entry.pack(side=LEFT)
 
-        # --- ↓↓↓ 全新的、移植自 voice_dialog 的提示音和背景音布局 ---
+        # 第二行：提示音
+        prompt_container = ttk.Frame(params_frame)
+        prompt_container.pack(fill=X, pady=3, padx=5)
+        prompt_container.columnconfigure(1, weight=1) # 让文件路径输入框可伸缩
+
         prompt_var = tk.IntVar()
-        prompt_frame = ttk.Frame(params_frame)
-        prompt_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        prompt_frame.columnconfigure(1, weight=1)
-        ttk.Checkbutton(params_frame, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=1, column=0, sticky='w', padx=5)
+        ttk.Checkbutton(prompt_container, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
         
         prompt_file_var, prompt_volume_var = tk.StringVar(), tk.StringVar()
-        prompt_file_entry = ttk.Entry(prompt_frame, textvariable=prompt_file_var, font=self.font_11)
+        prompt_file_entry = ttk.Entry(prompt_container, textvariable=prompt_file_var, font=self.font_11)
         prompt_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        ttk.Button(prompt_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var, dialog), bootstyle="outline", width=2).grid(row=0, column=2)
         
-        prompt_vol_frame = ttk.Frame(prompt_frame)
-        prompt_vol_frame.grid(row=0, column=3, sticky='e')
-        ttk.Label(prompt_vol_frame, text="音量(0-100):").pack(side=LEFT, padx=(10,5))
-        ttk.Entry(prompt_vol_frame, textvariable=prompt_volume_var, font=self.font_11, width=8).pack(side=LEFT, padx=5)
+        ttk.Button(prompt_container, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var, dialog), bootstyle="outline", width=2).grid(row=0, column=2, padx=(0, 10))
         
+        ttk.Label(prompt_container, text="音量:").grid(row=0, column=3, sticky='e')
+        ttk.Entry(prompt_container, textvariable=prompt_volume_var, font=self.font_11, width=8).grid(row=0, column=4, sticky='w', padx=5)
+
+        # 第三行：背景音乐
+        bgm_container = ttk.Frame(params_frame)
+        bgm_container.pack(fill=X, pady=3, padx=5)
+        bgm_container.columnconfigure(1, weight=1) # 让文件路径输入框可伸缩
+
         bgm_var = tk.IntVar()
-        bgm_frame = ttk.Frame(params_frame)
-        bgm_frame.grid(row=2, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        bgm_frame.columnconfigure(1, weight=1)
-        ttk.Checkbutton(params_frame, text="背景音乐:", variable=bgm_var, bootstyle="round-toggle").grid(row=2, column=0, sticky='w', padx=5)
+        ttk.Checkbutton(bgm_container, text="背景音乐:", variable=bgm_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
         
         bgm_file_var, bgm_volume_var = tk.StringVar(), tk.StringVar()
-        bgm_file_entry = ttk.Entry(bgm_frame, textvariable=bgm_file_var, font=self.font_11)
+        bgm_file_entry = ttk.Entry(bgm_container, textvariable=bgm_file_var, font=self.font_11)
         bgm_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        ttk.Button(bgm_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var, dialog), bootstyle="outline", width=2).grid(row=0, column=2)
         
-        bgm_vol_frame = ttk.Frame(bgm_frame)
-        bgm_vol_frame.grid(row=0, column=3, sticky='e')
-        ttk.Label(bgm_vol_frame, text="音量(0-100):").pack(side=LEFT, padx=(10,5))
-        ttk.Entry(bgm_frame, textvariable=bgm_volume_var, font=self.font_11, width=8).pack(side=LEFT, padx=5)
-        # --- ↑↑↑ 布局移植结束 ---
+        ttk.Button(bgm_container, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var, dialog), bootstyle="outline", width=2).grid(row=0, column=2, padx=(0, 10))
+        
+        ttk.Label(bgm_container, text="音量:").grid(row=0, column=3, sticky='e')
+        ttk.Entry(bgm_container, textvariable=bgm_volume_var, font=self.font_11, width=8).grid(row=0, column=4, sticky='w', padx=5)
+        # --- ↑↑↑ 布局代码结束 ---
 
         time_frame = ttk.LabelFrame(main_frame, text="时间规则", padding=15)
         time_frame.grid(row=2, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
         
+        # ... (time_frame 及其内部的代码保持不变) ...
         ttk.Label(time_frame, text="执行时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         start_time_entry = ttk.Entry(time_frame, font=self.font_11)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
@@ -2227,6 +2230,7 @@ class TimedBroadcastApp:
         dialog_button_frame = ttk.Frame(dialog)
         dialog_button_frame.pack(pady=15)
 
+        # ... (数据加载和保存逻辑保持不变) ...
         if is_edit_mode:
             name_entry.insert(0, task_to_edit.get('name', ''))
             content_text.text.insert('1.0', task_to_edit.get('source_text', ''))
