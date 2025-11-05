@@ -7458,15 +7458,11 @@ class TimedBroadcastApp:
             self.log("错误: python-vlc 库未安装或VLC播放器未找到，无法播放视频。")
             return
 
-        # --- ↓↓↓ 核心修改 1：动态选择User-Agent ↓↓↓ ---
         custom_ua = task.get('custom_user_agent', '').strip()
+        user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         if custom_ua:
-            user_agent = custom_ua
             self.log(f"检测到自定义User-Agent，将使用: {user_agent}")
-        else:
-            user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        # --- ↑↑↑ 修改结束 ↑↑↑ ---
-        
+
         vlc_instance_options = ['--no-xlib', '--network-caching=5000']
         
         content_path = task.get('content', '')
@@ -7491,6 +7487,8 @@ class TimedBroadcastApp:
         
         main_url_part = final_content_path.split('?')[0]
         is_m3u8_playlist = main_url_part.lower().endswith(('.m3u', '.m3u8'))
+        is_folder_mode = task.get('video_type') == 'folder' and os.path.isdir(content_path)
+        is_playlist_mode = is_folder_mode or is_m3u8_playlist
 
         self.vlc_player = None
         self.vlc_list_player = None
@@ -7501,7 +7499,32 @@ class TimedBroadcastApp:
 
             instance = vlc.Instance(vlc_instance_options)
 
-            if is_m3u8_playlist:
+            # --- ↓↓↓ 核心修复逻辑：重构播放器初始化分支 ↓↓↓ ---
+            
+            if is_folder_mode:
+                self.log(f"检测到视频文件夹模式，正在扫描: {content_path}")
+                self.vlc_list_player = instance.media_list_player_new()
+                self.vlc_player = self.vlc_list_player.get_media_player()
+
+                media_list = instance.media_list_new()
+                VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.mpg', '.mpeg', '.rmvb', '.rm', '.webm', '.vob', '.ts', '.3gp')
+                video_files = [os.path.join(content_path, f) for f in os.listdir(content_path) if f.lower().endswith(VIDEO_EXTENSIONS)]
+
+                if task.get('play_order') == 'random':
+                    random.shuffle(video_files)
+                else:
+                    video_files.sort()
+
+                if not video_files:
+                    raise ValueError("视频文件夹为空或不包含支持的视频文件。")
+
+                self.log(f"找到 {len(video_files)} 个视频文件，正在添加到播放列表...")
+                for video_file in video_files:
+                    media_list.add_media(instance.media_new(video_file))
+                
+                self.vlc_list_player.set_media_list(media_list)
+
+            elif is_m3u8_playlist:
                 self.log(f"检测到M3U8播放列表，启用MediaListPlayer专业模式。")
                 media_list = instance.media_list_new()
                 media = instance.media_new(final_content_path)
@@ -7512,12 +7535,14 @@ class TimedBroadcastApp:
                 self.vlc_player = self.vlc_list_player.get_media_player()
                 
                 self.vlc_list_player.set_media_list(media_list)
-                
-            else:
+            
+            else: # 单个文件或普通网络流
                 self.log(f"播放单个媒体文件/流: {final_content_path}")
                 self.vlc_player = instance.media_player_new()
                 media = instance.media_new(final_content_path, f':http-user-agent={user_agent}')
                 self.vlc_player.set_media(media)
+
+            # --- ↑↑↑ 核心修复逻辑结束 ↑↑↑ ---
             
             event_manager = self.vlc_player.event_manager()
             event_manager.event_attach(vlc.EventType.MediaPlayerEncounteredError, lambda event: self.log("!!! VLC事件: 播放器遇到错误 !!!"))
@@ -7525,7 +7550,7 @@ class TimedBroadcastApp:
             event_manager.event_attach(vlc.EventType.MediaPlayerPlaying, lambda event: self.log("--- VLC事件: 状态变更为 [播放中] ---"))
             event_manager.event_attach(vlc.EventType.MediaPlayerEndReached, lambda event: self.log("--- VLC事件: 媒体播放结束 ---"))
 
-            self.root.after(0, self._create_video_window, task, is_m3u8_playlist)
+            self.root.after(0, self._create_video_window, task, is_playlist_mode)
             time.sleep(1.0)
 
             if not (self.video_window and self.video_window.winfo_exists()):
@@ -7536,7 +7561,7 @@ class TimedBroadcastApp:
             else: self.vlc_player.audio_set_mute(False)
             self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
             
-            player_to_start = self.vlc_list_player if is_m3u8_playlist else self.vlc_player
+            player_to_start = self.vlc_list_player if is_playlist_mode else self.vlc_player
             player_to_start.play()
             
             self.log("已发送播放指令，等待VLC引擎响应...")
@@ -7556,7 +7581,7 @@ class TimedBroadcastApp:
 
                 now = time.time()
                 if now - last_text_update_time >= 1.0:
-                    display_name = final_content_path if final_content_path.lower().startswith(('http', 'rtsp')) else os.path.basename(final_content_path)
+                    display_name = content_path if content_path.lower().startswith(('http', 'rtsp')) else os.path.basename(content_path)
                     
                     state = player_to_check.get_state()
                     status_text = "播放中"
