@@ -7457,6 +7457,8 @@ class TimedBroadcastApp:
 
     # 请用下面的整个函数替换您代码中原来的 _play_video_task_internal 函数
 
+    # 请用下面的整个函数替换您代码中原来的 _play_video_task_internal 函数
+
     def _play_video_task_internal(self, task, stop_event):
         if not VLC_AVAILABLE:
             self.log("错误: python-vlc 库未安装或VLC播放器未找到，无法播放视频。")
@@ -7470,7 +7472,7 @@ class TimedBroadcastApp:
         vlc_instance_options = [
             '--no-xlib', 
             '--network-caching=5000',
-            f'--http-user-agent={user_agent}'
+            f'--http-user-agent={user_agent}' # 全局设置，作为第一层保险
         ]
         
         content_path = task.get('content', '')
@@ -7530,16 +7532,19 @@ class TimedBroadcastApp:
                 
                 self.vlc_list_player.set_media_list(media_list)
 
-            else:
-                media = instance.media_new(final_content_path)
+            else: # 单个文件或网络流 (包括M3U8)
+                # --- ↓↓↓ 双保险策略：在media_new中也明确指定UA，作为第二层保险 ↓↓↓ ---
+                # 即使Instance已设置，这里再次添加可以增强对某些特殊流的兼容性
+                media = instance.media_new(final_content_path, f':http-user-agent={user_agent}')
+                # --- ↑↑↑ 修复结束 ↑↑↑ ---
                 
-                if is_playlist_mode:
+                if is_playlist_mode: # M3U8
                     self.log(f"检测到播放列表，启用MediaListPlayer模式。")
                     media_list = instance.media_list_new([media])
                     self.vlc_list_player = instance.media_list_player_new()
                     self.vlc_player = self.vlc_list_player.get_media_player()
                     self.vlc_list_player.set_media_list(media_list)
-                else:
+                else: # 普通单个文件/流
                     self.log(f"播放单个媒体文件/流: {final_content_path}")
                     self.vlc_player = instance.media_player_new()
                     self.vlc_player.set_media(media)
@@ -7588,10 +7593,11 @@ class TimedBroadcastApp:
                         mrl = current_media.get_mrl()
                         if mrl:
                             try:
-                                # --- ↓↓↓ 核心修复：解码后，使用 os.path.basename() 获取文件名 ↓↓↓ ---
-                                decoded_path = vlc.uri_to_path(mrl)
-                                display_name = os.path.basename(decoded_path)
-                                # --- ↑↑↑ 修复结束 ↑↑↑ ---
+                                if mrl.startswith('file:///'):
+                                    path = vlc.uri_to_path(mrl)
+                                    display_name = os.path.basename(path)
+                                else:
+                                    display_name = os.path.basename(mrl)
                             except Exception:
                                 display_name = mrl
                     
