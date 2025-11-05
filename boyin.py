@@ -7459,20 +7459,26 @@ class TimedBroadcastApp:
 
     # 请用下面的整个函数替换您代码中原来的 _play_video_task_internal 函数
 
+    # 请用下面的整个函数替换您代码中原来的 _play_video_task_internal 函数
+
     def _play_video_task_internal(self, task, stop_event):
         if not VLC_AVAILABLE:
             self.log("错误: python-vlc 库未安装或VLC播放器未找到，无法播放视频。")
             return
+
+        # 导入标准库用于URL解码
+        import urllib.parse
 
         custom_ua = task.get('custom_user_agent', '').strip()
         user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         if custom_ua:
             self.log(f"检测到自定义User-Agent，将使用: {user_agent}")
 
+        # 修复1：只保留在Instance层面的全局User-Agent设置，这是最标准、最可靠的方式
         vlc_instance_options = [
             '--no-xlib', 
             '--network-caching=5000',
-            f'--http-user-agent={user_agent}' # 全局设置，作为第一层保险
+            f'--http-user-agent={user_agent}' 
         ]
         
         content_path = task.get('content', '')
@@ -7533,10 +7539,8 @@ class TimedBroadcastApp:
                 self.vlc_list_player.set_media_list(media_list)
 
             else: # 单个文件或网络流 (包括M3U8)
-                # --- ↓↓↓ 双保险策略：在media_new中也明确指定UA，作为第二层保险 ↓↓↓ ---
-                # 即使Instance已设置，这里再次添加可以增强对某些特殊流的兼容性
-                media = instance.media_new(final_content_path, f':http-user-agent={user_agent}')
-                # --- ↑↑↑ 修复结束 ↑↑↑ ---
+                # 修复1：移除这里的重复UA设置，避免冲突
+                media = instance.media_new(final_content_path)
                 
                 if is_playlist_mode: # M3U8
                     self.log(f"检测到播放列表，启用MediaListPlayer模式。")
@@ -7593,11 +7597,12 @@ class TimedBroadcastApp:
                         mrl = current_media.get_mrl()
                         if mrl:
                             try:
-                                if mrl.startswith('file:///'):
-                                    path = vlc.uri_to_path(mrl)
-                                    display_name = os.path.basename(path)
-                                else:
-                                    display_name = os.path.basename(mrl)
+                                # --- ↓↓↓ 修复2：使用标准库urllib.parse.unquote进行健壮的解码 ↓↓↓ ---
+                                # 这一步会将所有 %xx 编码转换为原始字符
+                                decoded_mrl = urllib.parse.unquote(mrl)
+                                # 无论解码后是 file:/// 路径还是普通路径，os.path.basename都能正确处理
+                                display_name = os.path.basename(decoded_mrl)
+                                # --- ↑↑↑ 修复结束 ↑↑↑ ---
                             except Exception:
                                 display_name = mrl
                     
@@ -7638,7 +7643,6 @@ class TimedBroadcastApp:
 
             self.root.after(0, self._destroy_video_window)
             self.log(f"视频任务 '{task['name']}' 的播放逻辑清理完毕。")
-
     def _create_video_window(self, task, is_playlist=False):
         if self.video_window and self.video_window.winfo_exists():
             self.video_window.destroy()
