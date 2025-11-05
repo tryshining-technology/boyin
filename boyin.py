@@ -7455,6 +7455,8 @@ class TimedBroadcastApp:
 
     # 请用下面的整个函数替换您代码中原来的 _play_video_task_internal 函数
 
+    # 请用下面的整个函数替换您代码中原来的 _play_video_task_internal 函数
+
     def _play_video_task_internal(self, task, stop_event):
         if not VLC_AVAILABLE:
             self.log("错误: python-vlc 库未安装或VLC播放器未找到，无法播放视频。")
@@ -7465,13 +7467,11 @@ class TimedBroadcastApp:
         if custom_ua:
             self.log(f"检测到自定义User-Agent，将使用: {user_agent}")
 
-        # --- ↓↓↓ 核心修复：在这里将 User-Agent 添加到 VLC 实例的启动选项中 ↓↓↓ ---
         vlc_instance_options = [
             '--no-xlib', 
             '--network-caching=5000',
-            f'--http-user-agent={user_agent}' # 将UA作为实例的全局参数
+            f'--http-user-agent={user_agent}'
         ]
-        # --- ↑↑↑ 修复结束 ↑↑↑ ---
         
         content_path = task.get('content', '')
         final_content_path = content_path
@@ -7505,7 +7505,6 @@ class TimedBroadcastApp:
             if AUDIO_AVAILABLE:
                 pygame.mixer.music.stop(); pygame.mixer.stop()
 
-            # 使用包含 User-Agent 的选项来创建实例
             instance = vlc.Instance(vlc_instance_options)
 
             if is_folder_mode:
@@ -7531,17 +7530,16 @@ class TimedBroadcastApp:
                 
                 self.vlc_list_player.set_media_list(media_list)
 
-            else: # 单个文件或网络流 (包括M3U8)
-                # 注意：由于实例已包含UA，media_new这里不再需要重复添加UA参数
+            else:
                 media = instance.media_new(final_content_path)
                 
-                if is_playlist_mode: # M3U8
+                if is_playlist_mode:
                     self.log(f"检测到播放列表，启用MediaListPlayer模式。")
                     media_list = instance.media_list_new([media])
                     self.vlc_list_player = instance.media_list_player_new()
                     self.vlc_player = self.vlc_list_player.get_media_player()
                     self.vlc_list_player.set_media_list(media_list)
-                else: # 普通单个文件/流
+                else:
                     self.log(f"播放单个媒体文件/流: {final_content_path}")
                     self.vlc_player = instance.media_player_new()
                     self.vlc_player.set_media(media)
@@ -7583,8 +7581,19 @@ class TimedBroadcastApp:
 
                 now = time.time()
                 if now - last_text_update_time >= 1.0:
+                    
                     current_media = player_to_check.get_media()
-                    display_name = os.path.basename(current_media.get_mrl()) if current_media else "加载中..."
+                    display_name = "加载中..."
+                    if current_media:
+                        mrl = current_media.get_mrl()
+                        if mrl:
+                            try:
+                                # --- ↓↓↓ 核心修复：解码后，使用 os.path.basename() 获取文件名 ↓↓↓ ---
+                                decoded_path = vlc.uri_to_path(mrl)
+                                display_name = os.path.basename(decoded_path)
+                                # --- ↑↑↑ 修复结束 ↑↑↑ ---
+                            except Exception:
+                                display_name = mrl
                     
                     state = player_to_check.get_state()
                     status_text = "播放中"
