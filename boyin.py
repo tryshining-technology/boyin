@@ -2101,7 +2101,7 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改动态语音" if is_edit_mode else "添加动态语音")
         dialog.resizable(True, True)
-        dialog.minsize(800, 580)
+        dialog.minsize(800, 600) # 稍微增加最小高度以容纳新布局
         dialog.transient(self.root)
 
         dialog.attributes('-topmost', True)
@@ -2149,27 +2149,40 @@ class TimedBroadcastApp:
 
         params_frame = ttk.LabelFrame(main_frame, text="通用参数", padding=10)
         params_frame.grid(row=1, column=0, sticky='ew', pady=4)
-        params_frame.columnconfigure(1, weight=1)
+        params_frame.columnconfigure(0, weight=1) # 让第一列占据所有额外空间
 
-        ttk.Label(params_frame, text="整体语速:").grid(row=0, column=0, sticky='e', padx=5, pady=3)
-        speed_entry = ttk.Entry(params_frame, font=self.font_11, width=8)
-        speed_entry.grid(row=0, column=1, sticky='w', padx=5, pady=3)
-        ttk.Label(params_frame, text="(-10~10)").grid(row=0, column=2, sticky='w')
+        # --- ↓↓↓ 全新的横向参数布局 ---
+        speech_params_container = ttk.Frame(params_frame)
+        speech_params_container.grid(row=0, column=0, columnspan=6, sticky='w', pady=5)
 
-        ttk.Label(params_frame, text="整体音调:").grid(row=1, column=0, sticky='e', padx=5, pady=3)
-        pitch_entry = ttk.Entry(params_frame, font=self.font_11, width=8)
-        pitch_entry.grid(row=1, column=1, sticky='w', padx=5, pady=3)
-        ttk.Label(params_frame, text="(-10~10)").grid(row=1, column=2, sticky='w')
+        # 整体语速
+        ttk.Label(speech_params_container, text="整体语速(-10~10):").pack(side=LEFT, padx=(0, 2))
+        speed_entry = ttk.Entry(speech_params_container, font=self.font_11, width=5)
+        speed_entry.pack(side=LEFT, padx=(0, 15))
+
+        # 整体音调
+        ttk.Label(speech_params_container, text="整体音调(-10~10):").pack(side=LEFT, padx=(0, 2))
+        pitch_entry = ttk.Entry(speech_params_container, font=self.font_11, width=5)
+        pitch_entry.pack(side=LEFT, padx=(0, 15))
+        
+        # 整体音量 (新增)
+        ttk.Label(speech_params_container, text="整体音量(0-100):").pack(side=LEFT, padx=(0, 2))
+        volume_entry = ttk.Entry(speech_params_container, font=self.font_11, width=5)
+        volume_entry.pack(side=LEFT)
+        # --- ↑↑↑ 布局修改结束 ---
 
         prompt_var = tk.IntVar()
-        ttk.Checkbutton(params_frame, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=2, column=0, sticky='e', padx=5, pady=3)
-        prompt_file_var = tk.StringVar()
+        ttk.Checkbutton(params_frame, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=2, column=0, sticky='w', padx=5, pady=3)
+        
+        prompt_file_var, prompt_volume_var = tk.StringVar(), tk.StringVar()
         prompt_file_entry = ttk.Entry(params_frame, textvariable=prompt_file_var, font=self.font_11)
         prompt_file_entry.grid(row=2, column=1, columnspan=2, sticky='ew', padx=5, pady=3)
         ttk.Button(params_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var, dialog), bootstyle="outline", width=2).grid(row=2, column=3, padx=5)
+        ttk.Label(params_frame, text="音量:").grid(row=2, column=4, sticky='e', padx=(10, 2))
+        ttk.Entry(params_frame, textvariable=prompt_volume_var, font=self.font_11, width=5).grid(row=2, column=5, sticky='w')
         
         bgm_var = tk.IntVar()
-        ttk.Checkbutton(params_frame, text="背景音乐:", variable=bgm_var, bootstyle="round-toggle").grid(row=3, column=0, sticky='e', padx=5, pady=3)
+        ttk.Checkbutton(params_frame, text="背景音乐:", variable=bgm_var, bootstyle="round-toggle").grid(row=3, column=0, sticky='w', padx=5, pady=3)
         bgm_file_var, bgm_volume_var = tk.StringVar(), tk.StringVar()
         bgm_file_entry = ttk.Entry(params_frame, textvariable=bgm_file_var, font=self.font_11)
         bgm_file_entry.grid(row=3, column=1, columnspan=2, sticky='ew', padx=5, pady=3)
@@ -2207,8 +2220,10 @@ class TimedBroadcastApp:
             content_text.text.insert('1.0', task_to_edit.get('source_text', ''))
             speed_entry.insert(0, task_to_edit.get('speed', '0'))
             pitch_entry.insert(0, task_to_edit.get('pitch', '0'))
+            volume_entry.insert(0, task_to_edit.get('volume', '100')) # 加载整体音量
             prompt_var.set(task_to_edit.get('prompt', 0))
             prompt_file_var.set(task_to_edit.get('prompt_file', ''))
+            prompt_volume_var.set(task_to_edit.get('prompt_volume', '80'))
             bgm_var.set(task_to_edit.get('bgm', 0))
             bgm_file_var.set(task_to_edit.get('bgm_file', ''))
             bgm_volume_var.set(task_to_edit.get('bgm_volume', '20'))
@@ -2218,6 +2233,8 @@ class TimedBroadcastApp:
         else:
             speed_entry.insert(0, "0")
             pitch_entry.insert(0, "0")
+            volume_entry.insert(0, "100") # 设置整体音量默认值
+            prompt_volume_var.set("80")
             bgm_volume_var.set("20")
             weekday_entry.insert(0, "每周:1234567")
             date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
@@ -2239,14 +2256,17 @@ class TimedBroadcastApp:
                 'source_text': text_content,
                 'speed': speed_entry.get().strip() or "0",
                 'pitch': pitch_entry.get().strip() or "0",
+                'volume': volume_entry.get().strip() or "100",
                 'prompt': prompt_var.get(),
                 'prompt_file': prompt_file_var.get(),
+                'prompt_volume': prompt_volume_var.get(),
                 'bgm': bgm_var.get(),
                 'bgm_file': bgm_file_var.get(),
                 'bgm_volume': bgm_volume_var.get(),
                 'time': time_msg,
                 'weekday': weekday_entry.get().strip(),
                 'date_range': date_msg,
+                'delay': 'ontime', 
                 'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'),
                 'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {}),
             }
@@ -2354,15 +2374,16 @@ class TimedBroadcastApp:
                 processed_text = self._replace_dynamic_tags(segment['text'], datetime.now())
                 
                 actor = segment['actor']
-                # --- 核心修改：从 EDGE_TTS_VOICES 字典中获取 voice_id ---
+                
+                # --- ↓↓↓ 核心修正：直接使用用户友好的语音名称 ---
                 voice_name = '在线-云扬 (男)' if actor == '男' else '在线-晓晓 (女)'
-                voice_id = EDGE_TTS_VOICES.get(voice_name)
                 
                 voice_params = {
-                    'voice': voice_id, # 直接使用 voice_id
+                    'voice': voice_name,  # <--- 传递 '在线-云扬 (男)' 而不是 voice_id
                     'speed': task.get('speed', '0'),
                     'pitch': task.get('pitch', '0')
                 }
+                # --- ↑↑↑ 修正结束 ---
                 
                 temp_filename = f"temp_{int(time.time())}_{i}.mp3"
                 output_path = os.path.join(AUDIO_FOLDER, temp_filename)
@@ -2376,8 +2397,6 @@ class TimedBroadcastApp:
                         error_message = result.get('error', '未知在线合成错误')
                     synthesis_success.set()
                 
-                # --- 核心修改：传递 voice_id 给合成函数 ---
-                # 注意：这里的 voice_params 字典里 'voice' 键对应的值已经是 voice_id 了
                 s_thread = threading.Thread(target=self._synthesis_worker_edge, args=(processed_text, voice_params, output_path, online_callback))
                 s_thread.start()
                 s_thread.join()
@@ -8060,8 +8079,10 @@ class TimedBroadcastApp:
         self.save_dynamic_voice_tasks()
 
         if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
+
+        self.root.destroy()
        
-        os._exit(0)
+        #os._exit(0)
 
     def toggle_mute_all(self):
         # 1. 切换静音状态
