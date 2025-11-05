@@ -2101,7 +2101,7 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改动态语音" if is_edit_mode else "添加动态语音")
         dialog.resizable(True, True)
-        dialog.minsize(800, 600) # 稍微增加最小高度以容纳新布局
+        dialog.minsize(800, 600)
         dialog.transient(self.root)
 
         dialog.attributes('-topmost', True)
@@ -2149,46 +2149,58 @@ class TimedBroadcastApp:
 
         params_frame = ttk.LabelFrame(main_frame, text="通用参数", padding=10)
         params_frame.grid(row=1, column=0, sticky='ew', pady=4)
-        params_frame.columnconfigure(0, weight=1) # 让第一列占据所有额外空间
+        # --- ↓↓↓ 核心修改：为 params_frame 设置列权重，这是对齐的关键 ---
+        params_frame.columnconfigure(1, weight=1)
+        # --- ↑↑↑ 修改结束 ---
 
-        # --- ↓↓↓ 全新的横向参数布局 ---
         speech_params_container = ttk.Frame(params_frame)
-        speech_params_container.grid(row=0, column=0, columnspan=6, sticky='w', pady=5)
+        speech_params_container.grid(row=0, column=0, columnspan=4, sticky='w', pady=5, padx=5)
 
-        # 整体语速
         ttk.Label(speech_params_container, text="整体语速(-10~10):").pack(side=LEFT, padx=(0, 2))
         speed_entry = ttk.Entry(speech_params_container, font=self.font_11, width=5)
         speed_entry.pack(side=LEFT, padx=(0, 15))
 
-        # 整体音调
         ttk.Label(speech_params_container, text="整体音调(-10~10):").pack(side=LEFT, padx=(0, 2))
         pitch_entry = ttk.Entry(speech_params_container, font=self.font_11, width=5)
         pitch_entry.pack(side=LEFT, padx=(0, 15))
         
-        # 整体音量 (新增)
         ttk.Label(speech_params_container, text="整体音量(0-100):").pack(side=LEFT, padx=(0, 2))
         volume_entry = ttk.Entry(speech_params_container, font=self.font_11, width=5)
         volume_entry.pack(side=LEFT)
-        # --- ↑↑↑ 布局修改结束 ---
 
+        # --- ↓↓↓ 全新的、移植自 voice_dialog 的提示音和背景音布局 ---
         prompt_var = tk.IntVar()
-        ttk.Checkbutton(params_frame, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=2, column=0, sticky='w', padx=5, pady=3)
+        prompt_frame = ttk.Frame(params_frame)
+        prompt_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
+        prompt_frame.columnconfigure(1, weight=1)
+        ttk.Checkbutton(params_frame, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=1, column=0, sticky='w', padx=5)
         
         prompt_file_var, prompt_volume_var = tk.StringVar(), tk.StringVar()
-        prompt_file_entry = ttk.Entry(params_frame, textvariable=prompt_file_var, font=self.font_11)
-        prompt_file_entry.grid(row=2, column=1, columnspan=2, sticky='ew', padx=5, pady=3)
-        ttk.Button(params_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var, dialog), bootstyle="outline", width=2).grid(row=2, column=3, padx=5)
-        ttk.Label(params_frame, text="音量:").grid(row=2, column=4, sticky='e', padx=(10, 2))
-        ttk.Entry(params_frame, textvariable=prompt_volume_var, font=self.font_11, width=5).grid(row=2, column=5, sticky='w')
+        prompt_file_entry = ttk.Entry(prompt_frame, textvariable=prompt_file_var, font=self.font_11)
+        prompt_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        ttk.Button(prompt_frame, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var, dialog), bootstyle="outline", width=2).grid(row=0, column=2)
+        
+        prompt_vol_frame = ttk.Frame(prompt_frame)
+        prompt_vol_frame.grid(row=0, column=3, sticky='e')
+        ttk.Label(prompt_vol_frame, text="音量(0-100):").pack(side=LEFT, padx=(10,5))
+        ttk.Entry(prompt_vol_frame, textvariable=prompt_volume_var, font=self.font_11, width=8).pack(side=LEFT, padx=5)
         
         bgm_var = tk.IntVar()
-        ttk.Checkbutton(params_frame, text="背景音乐:", variable=bgm_var, bootstyle="round-toggle").grid(row=3, column=0, sticky='w', padx=5, pady=3)
+        bgm_frame = ttk.Frame(params_frame)
+        bgm_frame.grid(row=2, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
+        bgm_frame.columnconfigure(1, weight=1)
+        ttk.Checkbutton(params_frame, text="背景音乐:", variable=bgm_var, bootstyle="round-toggle").grid(row=2, column=0, sticky='w', padx=5)
+        
         bgm_file_var, bgm_volume_var = tk.StringVar(), tk.StringVar()
-        bgm_file_entry = ttk.Entry(params_frame, textvariable=bgm_file_var, font=self.font_11)
-        bgm_file_entry.grid(row=3, column=1, columnspan=2, sticky='ew', padx=5, pady=3)
-        ttk.Button(params_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var, dialog), bootstyle="outline", width=2).grid(row=3, column=3, padx=5)
-        ttk.Label(params_frame, text="音量:").grid(row=3, column=4, sticky='e', padx=(10, 2))
-        ttk.Entry(params_frame, textvariable=bgm_volume_var, font=self.font_11, width=5).grid(row=3, column=5, sticky='w')
+        bgm_file_entry = ttk.Entry(bgm_frame, textvariable=bgm_file_var, font=self.font_11)
+        bgm_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        ttk.Button(bgm_frame, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var, dialog), bootstyle="outline", width=2).grid(row=0, column=2)
+        
+        bgm_vol_frame = ttk.Frame(bgm_frame)
+        bgm_vol_frame.grid(row=0, column=3, sticky='e')
+        ttk.Label(bgm_vol_frame, text="音量(0-100):").pack(side=LEFT, padx=(10,5))
+        ttk.Entry(bgm_frame, textvariable=bgm_volume_var, font=self.font_11, width=8).pack(side=LEFT, padx=5)
+        # --- ↑↑↑ 布局移植结束 ---
 
         time_frame = ttk.LabelFrame(main_frame, text="时间规则", padding=15)
         time_frame.grid(row=2, column=0, sticky='ew', pady=4)
@@ -2220,7 +2232,7 @@ class TimedBroadcastApp:
             content_text.text.insert('1.0', task_to_edit.get('source_text', ''))
             speed_entry.insert(0, task_to_edit.get('speed', '0'))
             pitch_entry.insert(0, task_to_edit.get('pitch', '0'))
-            volume_entry.insert(0, task_to_edit.get('volume', '100')) # 加载整体音量
+            volume_entry.insert(0, task_to_edit.get('volume', '100'))
             prompt_var.set(task_to_edit.get('prompt', 0))
             prompt_file_var.set(task_to_edit.get('prompt_file', ''))
             prompt_volume_var.set(task_to_edit.get('prompt_volume', '80'))
@@ -2233,7 +2245,7 @@ class TimedBroadcastApp:
         else:
             speed_entry.insert(0, "0")
             pitch_entry.insert(0, "0")
-            volume_entry.insert(0, "100") # 设置整体音量默认值
+            volume_entry.insert(0, "100")
             prompt_volume_var.set("80")
             bgm_volume_var.set("20")
             weekday_entry.insert(0, "每周:1234567")
