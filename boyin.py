@@ -7465,43 +7465,36 @@ class TimedBroadcastApp:
         if custom_ua:
             self.log(f"检测到自定义User-Agent，将使用: {user_agent}")
 
-        content_path = task.get('content', '')
-        is_http_url = content_path.lower().startswith(('http://', 'https://'))
-        
-        # --- ↓↓↓ 最终修复：根据播放类型，动态构建VLC实例参数 ↓↓↓ ---
-        # 1. 基础配置，对所有播放类型都安全
+        # --- ↓↓↓ 最终修复：只保留最核心、最安全的启动参数 ↓↓↓ ---
         vlc_instance_options = [
             '--no-xlib', 
-            '--network-caching=15000', # 保留大缓存
+            # 只保留大缓存这一个最关键的网络参数，移除所有其他可能有冲突的参数
+            '--network-caching=15000', 
         ]
-
-        # 2. 如果是网络流，才追加专用的优化参数
-        if is_http_url:
-            self.log("检测到网络流，正在为VLC实例追加流媒体优化参数...")
-            stream_options = [
-                '--hls-live-edge=6',
-                '--sout-mux-caching=2000',
-            ]
-            vlc_instance_options.extend(stream_options)
         # --- ↑↑↑ 修复结束 ↑↑↑ ---
         
-        # 恢复 requests 预处理
+        # 保留 requests 预处理
+        content_path = task.get('content', '')
         final_content_path = content_path
+        is_http_url = content_path.lower().startswith(('http://', 'https://', 'rtsp://', 'rtmp://', 'mms://'))
+        
         if is_http_url:
-            self.log("正在使用 requests 预处理URL以获取最终地址...")
-            try:
-                headers = {'User-Agent': user_agent}
-                response = requests.get(content_path, headers=headers, stream=True, timeout=15, allow_redirects=True)
-                response.raise_for_status()
-                final_content_path = response.url
-                if final_content_path != content_path:
-                    self.log(f"URL重定向成功！最终播放地址为: {final_content_path}")
-                else:
-                    self.log("URL无需重定向，使用原始地址。")
-                response.close()
-            except requests.exceptions.RequestException as e:
-                self.log(f"!!! 预处理URL时发生网络错误: {e}。将尝试使用原始地址播放。")
-                final_content_path = content_path
+            # 对于非HTTP/HTTPS的流（如RTSP），requests无法处理，直接跳过
+            if content_path.lower().startswith(('http://', 'https://')):
+                self.log("正在使用 requests 预处理HTTP/HTTPS URL以获取最终地址...")
+                try:
+                    headers = {'User-Agent': user_agent}
+                    response = requests.get(content_path, headers=headers, stream=True, timeout=15, allow_redirects=True)
+                    response.raise_for_status()
+                    final_content_path = response.url
+                    if final_content_path != content_path:
+                        self.log(f"URL重定向成功！最终播放地址为: {final_content_path}")
+                    else:
+                        self.log("URL无需重定向，使用原始地址。")
+                    response.close()
+                except requests.exceptions.RequestException as e:
+                    self.log(f"!!! 预处理URL时发生网络错误: {e}。将尝试使用原始地址播放。")
+                    final_content_path = content_path
         
         main_url_part = final_content_path.split('?')[0]
         is_m3u8_playlist = main_url_part.lower().endswith(('.m3u', '.m3u8'))
@@ -7549,7 +7542,7 @@ class TimedBroadcastApp:
             else: # 单个文件或网络流 (包括M3U8)
                 media = instance.media_new(final_content_path)
                 
-                # 只使用 media.add_option() 来处理网络流的User-Agent
+                # 保留最强力的 media.add_option() 来处理User-Agent
                 if is_http_url:
                     media.add_option(f':http-user-agent={user_agent}')
 
