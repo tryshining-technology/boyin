@@ -7507,45 +7507,56 @@ class TimedBroadcastApp:
         custom_ua = task.get('custom_user_agent', '').strip()
         user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         
-        # --- ▼▼▼ 核心修改 1：如果需要自定义UA，则启动代理并改写URL ▼▼▼ ---
         content_path = task.get('content', '')
-        final_content_path = content_path
+        final_content_path = content_path # 初始化最终播放地址
 
+        # --- ▼▼▼ 核心逻辑修改：探测与代理分离 ▼▼▼ ---
+
+        is_http_url = content_path.lower().startswith(('http://', 'https://'))
+
+        # 步骤 1: 探测阶段 - 如果是网络链接，先获取最终的URL
+        if is_http_url:
+            self.log("探测网络链接以获取最终播放地址...")
+            try:
+                headers = {'User-Agent': user_agent}
+                # 使用 requests 探测，并允许它自动处理重定向
+                response = requests.get(content_path, headers=headers, stream=True, timeout=15, allow_redirects=True)
+                response.raise_for_status()
+                
+                # response.url 会是重定向链条走完后的最终地址
+                redirected_url = response.url
+                
+                if redirected_url != content_path:
+                    self.log(f"链接已重定向！最终地址为: {redirected_url}")
+                else:
+                    self.log("链接无需重定向，使用原始地址。")
+                
+                final_content_path = redirected_url # 将探测到的最终地址作为我们接下来要处理的地址
+                response.close() # 关闭连接，我们只是探测，不在这里下载内容
+            except requests.exceptions.RequestException as e:
+                self.log(f"!!! 探测URL时发生网络错误: {e}。将尝试使用原始地址播放。")
+                # 如果探测失败，我们仍然使用原始地址，让代理去尝试
+                final_content_path = content_path
+
+        # 步骤 2: 代理阶段 - 如果需要自定义UA，则启动代理并改写【最终地址】
         if custom_ua:
             self.log(f"检测到自定义User-Agent，将启用本地代理。")
             proxy_port = self._start_ua_proxy(user_agent)
             if proxy_port:
-                # 将原始URL改写为通过本地代理访问的格式
-                final_content_path = f"http://127.0.0.1:{proxy_port}/{content_path}"
+                # 将【最终的】URL改写为通过本地代理访问的格式
+                final_content_path = f"http://127.0.0.1:{proxy_port}/{final_content_path}"
                 self.log(f"URL已改写，将通过代理播放: {final_content_path}")
             else:
-                self.log("!!! 代理启动失败，将尝试直接播放原始URL。")
-        # --- ▲▲▲ 修改结束 ▲▲▲ ---
+                self.log("!!! 代理启动失败，VLC将尝试直接播放，可能会失败。")
         
+        # --- ▲▲▲ 核心逻辑修改结束 ▲▲▲ ---
+
         # 即使有代理，也保留VLC实例的UA设置，作为一种备用/双重保障
         vlc_instance_options = [
             '--no-xlib', 
-            '--network-caching=5000',
+            '--network-caching=15000',
             f'--http-user-agent={user_agent}' 
         ]
-        
-        # 如果不使用代理，才进行预处理
-        is_http_url = content_path.lower().startswith(('http://', 'https://'))
-        if is_http_url and not custom_ua: 
-            self.log("检测到HTTP/HTTPS链接，正在进行预处理以获取最终地址...")
-            try:
-                headers = {'User-Agent': user_agent}
-                response = requests.get(content_path, headers=headers, stream=True, timeout=10, allow_redirects=True)
-                response.raise_for_status()
-                redirected_url = response.url
-                if redirected_url != content_path:
-                    self.log(f"URL重定向成功！最终播放地址为: {redirected_url}")
-                    final_content_path = redirected_url # 更新播放地址
-                else:
-                    self.log("URL无需重定向，使用原始地址。")
-                response.close()
-            except requests.exceptions.RequestException as e:
-                self.log(f"!!! 预处理URL时发生网络错误: {e}")
         
         main_url_part = final_content_path.split('?')[0]
         is_m3u8_playlist = main_url_part.lower().endswith(('.m3u', '.m3u8'))
@@ -7575,9 +7586,7 @@ class TimedBroadcastApp:
                 for video_file in video_files: media_list.add_media(instance.media_new(video_file))
                 self.vlc_list_player.set_media_list(media_list)
             else: 
-                # --- ▼▼▼ 核心修改 2：确保VLC打开的是改写后的URL ▼▼▼ ---
                 media = instance.media_new(final_content_path)
-                # --- ▲▲▲ 修改结束 ▲▲▲ ---
                 
                 if is_playlist_mode: 
                     self.log(f"检测到播放列表，启用MediaListPlayer模式。")
