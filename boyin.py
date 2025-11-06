@@ -7465,19 +7465,28 @@ class TimedBroadcastApp:
         if custom_ua:
             self.log(f"检测到自定义User-Agent，将使用: {user_agent}")
 
-        # 最终修复：移除导致VLC引擎损坏的--http-user-agent，只保留正确的性能参数
-        vlc_instance_options = [
-            '--no-xlib', 
-            '--network-caching=15000', 
-            '--hls-live-edge=6',
-            '--sout-mux-caching=2000',
-        ]
-        
-        # 最终修复：恢复 requests 预处理，确保能找到正确的直播地址
         content_path = task.get('content', '')
-        final_content_path = content_path
         is_http_url = content_path.lower().startswith(('http://', 'https://'))
         
+        # --- ↓↓↓ 最终修复：根据播放类型，动态构建VLC实例参数 ↓↓↓ ---
+        # 1. 基础配置，对所有播放类型都安全
+        vlc_instance_options = [
+            '--no-xlib', 
+            '--network-caching=15000', # 保留大缓存
+        ]
+
+        # 2. 如果是网络流，才追加专用的优化参数
+        if is_http_url:
+            self.log("检测到网络流，正在为VLC实例追加流媒体优化参数...")
+            stream_options = [
+                '--hls-live-edge=6',
+                '--sout-mux-caching=2000',
+            ]
+            vlc_instance_options.extend(stream_options)
+        # --- ↑↑↑ 修复结束 ↑↑↑ ---
+        
+        # 恢复 requests 预处理
+        final_content_path = content_path
         if is_http_url:
             self.log("正在使用 requests 预处理URL以获取最终地址...")
             try:
@@ -7510,7 +7519,7 @@ class TimedBroadcastApp:
 
             if not instance:
                 self.log("!!! 严重错误: VLC核心引擎初始化失败(vlc.Instance()返回None) !!!")
-                self.log("!!! 请检查: 1. Python和VLC播放器的架构是否一致(同为64位或32位)。 2. VLC播放器是否已完整安装。")
+                self.log("!!! 请检查您的VLC安装和Python架构是否匹配。")
                 self._play_reminder_sound() 
                 return
 
@@ -7540,7 +7549,7 @@ class TimedBroadcastApp:
             else: # 单个文件或网络流 (包括M3U8)
                 media = instance.media_new(final_content_path)
                 
-                # 最终修复：只使用 media.add_option() 来处理网络流的User-Agent
+                # 只使用 media.add_option() 来处理网络流的User-Agent
                 if is_http_url:
                     media.add_option(f':http-user-agent={user_agent}')
 
@@ -7599,7 +7608,6 @@ class TimedBroadcastApp:
                         mrl = current_media.get_mrl()
                         if mrl:
                             try:
-                                # 最终修复：使用标准库urllib.parse.unquote进行健壮的解码
                                 decoded_mrl = urllib.parse.unquote(mrl)
                                 display_name = os.path.basename(decoded_mrl)
                             except Exception:
