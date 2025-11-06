@@ -131,7 +131,6 @@ SCREENSHOT_TASK_FILE = os.path.join(application_path, "screenshot_tasks.json")
 EXECUTE_TASK_FILE = os.path.join(application_path, "execute_tasks.json")
 PRINT_TASK_FILE = os.path.join(application_path, "print_tasks.json")
 BACKUP_TASK_FILE = os.path.join(application_path, "backup_tasks.json")
-DYNAMIC_VOICE_TASK_FILE = os.path.join(application_path, "dynamic_voice_tasks.json")
 TIMESTAMP_FILE = os.path.join(application_path, ".timestamp.dat")
 
 PROMPT_FOLDER = os.path.join(application_path, "提示音")
@@ -203,7 +202,6 @@ class TimedBroadcastApp:
         self.execute_tasks = []
         self.print_tasks = []
         self.backup_tasks = []
-        self.dynamic_voice_tasks = []
         
         self.settings = {}
         self.running = True
@@ -275,7 +273,6 @@ class TimedBroadcastApp:
         self.load_execute_tasks()
         self.load_print_tasks()
         self.load_backup_tasks()
-        self.load_dynamic_voice_tasks()
 
         self.start_background_threads()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
@@ -457,7 +454,7 @@ class TimedBroadcastApp:
         self.status_labels = []
         status_texts = ["当前时间", "系统状态", "播放状态", "任务数量", "待办事项"]
 
-        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251105", font=self.font_11,
+        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251101", font=self.font_11,
                                     bootstyle=(SECONDARY, INVERSE), padding=(15, 0))
         copyright_label.pack(side=RIGHT, padx=2)
 
@@ -2078,382 +2075,6 @@ class TimedBroadcastApp:
             items = self.backup_tree.get_children()
             if items: self.backup_tree.selection_set(items[-1]); self.backup_tree.focus(items[-1])
 
-# --- 动态语音功能的全套方法 ---
-
-    def load_dynamic_voice_tasks(self):
-        # 注意：动态语音任务是实验性功能，暂存在主任务文件里
-        # 未来可以分离到 DYNAMIC_VOICE_TASK_FILE
-        pass
-
-    def save_dynamic_voice_tasks(self):
-        # 数据随 self.tasks 一起保存，此函数暂时留空
-        pass
-
-    def clear_all_dynamic_voice_tasks(self):
-        # 这是一个辅助函数，用于在重置软件时调用
-        self.tasks = [t for t in self.tasks if t.get('type') != 'dynamic_voice']
-        self.update_task_list()
-        self.save_tasks()
-
-    def open_dynamic_voice_dialog(self, parent_dialog, task_to_edit=None, index=None):
-        parent_dialog.destroy()
-        is_edit_mode = task_to_edit is not None
-        dialog = ttk.Toplevel(self.root)
-        dialog.title("修改动态语音" if is_edit_mode else "添加动态语音")
-        dialog.resizable(True, True)
-        dialog.minsize(800, 600)
-        dialog.transient(self.root)
-
-        dialog.attributes('-topmost', True)
-        self.root.attributes('-disabled', True)
-        
-        def cleanup_and_destroy():
-            self.root.attributes('-disabled', False)
-            dialog.destroy()
-            self.root.focus_force()
-
-        main_frame = ttk.Frame(dialog, padding=15)
-        main_frame.pack(fill=BOTH, expand=True)
-        main_frame.columnconfigure(0, weight=1)
-
-        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
-        content_frame.grid(row=0, column=0, sticky='ew', pady=2)
-        content_frame.columnconfigure(1, weight=1)
-
-        ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
-        name_entry = ttk.Entry(content_frame, font=self.font_11)
-        name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-        
-        ttk.Label(content_frame, text="播音文稿:").grid(row=1, column=0, sticky='nw', padx=5, pady=2)
-        text_frame = ttk.Frame(content_frame)
-        text_frame.grid(row=1, column=1, columnspan=3, sticky='nsew', padx=5, pady=2)
-        content_frame.rowconfigure(1, weight=1)
-        text_frame.columnconfigure(0, weight=1)
-        text_frame.rowconfigure(0, weight=1)
-        content_text = ScrolledText(text_frame, height=5, font=self.font_11, wrap=WORD)
-        content_text.grid(row=0, column=0, sticky='nsew')
-        
-        script_btn_frame = ttk.Frame(content_frame)
-        script_btn_frame.grid(row=2, column=1, columnspan=3, sticky='w', padx=5, pady=(5, 2))
-        
-        def insert_tag(tag):
-            try:
-                content_text.text.insert(tk.INSERT, tag)
-                content_text.text.focus_set()
-            except Exception as e:
-                self.log(f"插入标记失败: {e}")
-
-        tags = ["[年月日]", "[星期]", "[时间]", "[天气]", "[男]", "[女]"]
-        for tag in tags:
-            ttk.Button(script_btn_frame, text=tag, bootstyle="outline", command=lambda t=tag: insert_tag(t)).pack(side=LEFT, padx=2)
-
-        params_frame = ttk.LabelFrame(main_frame, text="通用参数", padding=10)
-        params_frame.grid(row=1, column=0, sticky='ew', pady=4)
-        # 该Frame内部将使用pack，不再需要columnconfigure
-
-        # --- ↓↓↓ 全新、正确的布局代码 ---
-        
-        # 第一行：语速、音调、音量
-        speech_params_container = ttk.Frame(params_frame)
-        speech_params_container.pack(fill=X, pady=3, padx=5)
-
-        ttk.Label(speech_params_container, text="整体语速(-10~10):").pack(side=LEFT, padx=(0, 2))
-        speed_entry = ttk.Entry(speech_params_container, font=self.font_11, width=5)
-        speed_entry.pack(side=LEFT, padx=(0, 15))
-
-        ttk.Label(speech_params_container, text="整体音调(-10~10):").pack(side=LEFT, padx=(0, 2))
-        pitch_entry = ttk.Entry(speech_params_container, font=self.font_11, width=5)
-        pitch_entry.pack(side=LEFT, padx=(0, 15))
-        
-        ttk.Label(speech_params_container, text="整体音量(0-100):").pack(side=LEFT, padx=(0, 2))
-        volume_entry = ttk.Entry(speech_params_container, font=self.font_11, width=5)
-        volume_entry.pack(side=LEFT)
-
-        # 第二行：提示音
-        prompt_container = ttk.Frame(params_frame)
-        prompt_container.pack(fill=X, pady=3, padx=5)
-        prompt_container.columnconfigure(1, weight=1) # 让文件路径输入框可伸缩
-
-        prompt_var = tk.IntVar()
-        ttk.Checkbutton(prompt_container, text="提示音:", variable=prompt_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
-        
-        prompt_file_var, prompt_volume_var = tk.StringVar(), tk.StringVar()
-        prompt_file_entry = ttk.Entry(prompt_container, textvariable=prompt_file_var, font=self.font_11)
-        prompt_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        
-        ttk.Button(prompt_container, text="...", command=lambda: self.select_file_for_entry(PROMPT_FOLDER, prompt_file_var, dialog), bootstyle="outline", width=2).grid(row=0, column=2, padx=(0, 10))
-        
-        ttk.Label(prompt_container, text="音量:").grid(row=0, column=3, sticky='e')
-        ttk.Entry(prompt_container, textvariable=prompt_volume_var, font=self.font_11, width=8).grid(row=0, column=4, sticky='w', padx=5)
-
-        # 第三行：背景音乐
-        bgm_container = ttk.Frame(params_frame)
-        bgm_container.pack(fill=X, pady=3, padx=5)
-        bgm_container.columnconfigure(1, weight=1) # 让文件路径输入框可伸缩
-
-        bgm_var = tk.IntVar()
-        ttk.Checkbutton(bgm_container, text="背景音乐:", variable=bgm_var, bootstyle="round-toggle").grid(row=0, column=0, sticky='w')
-        
-        bgm_file_var, bgm_volume_var = tk.StringVar(), tk.StringVar()
-        bgm_file_entry = ttk.Entry(bgm_container, textvariable=bgm_file_var, font=self.font_11)
-        bgm_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        
-        ttk.Button(bgm_container, text="...", command=lambda: self.select_file_for_entry(BGM_FOLDER, bgm_file_var, dialog), bootstyle="outline", width=2).grid(row=0, column=2, padx=(0, 10))
-        
-        ttk.Label(bgm_container, text="音量:").grid(row=0, column=3, sticky='e')
-        ttk.Entry(bgm_container, textvariable=bgm_volume_var, font=self.font_11, width=8).grid(row=0, column=4, sticky='w', padx=5)
-        # --- ↑↑↑ 布局代码结束 ---
-
-        time_frame = ttk.LabelFrame(main_frame, text="时间规则", padding=15)
-        time_frame.grid(row=2, column=0, sticky='ew', pady=4)
-        time_frame.columnconfigure(1, weight=1)
-        
-        # ... (time_frame 及其内部的代码保持不变) ...
-        ttk.Label(time_frame, text="执行时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
-        start_time_entry = ttk.Entry(time_frame, font=self.font_11)
-        start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
-        self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
-        ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
-        ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
-        
-        ttk.Label(time_frame, text="周几/几号:").grid(row=1, column=0, sticky='e', padx=5, pady=3)
-        weekday_entry = ttk.Entry(time_frame, font=self.font_11)
-        weekday_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=3)
-        ttk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bootstyle="outline").grid(row=1, column=3, padx=5)
-        
-        ttk.Label(time_frame, text="日期范围:").grid(row=2, column=0, sticky='e', padx=5, pady=3)
-        date_range_entry = ttk.Entry(time_frame, font=self.font_11)
-        date_range_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=3)
-        self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
-        ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=2, column=3, padx=5)
-
-        dialog_button_frame = ttk.Frame(dialog)
-        dialog_button_frame.pack(pady=15)
-
-        # ... (数据加载和保存逻辑保持不变) ...
-        if is_edit_mode:
-            name_entry.insert(0, task_to_edit.get('name', ''))
-            content_text.text.insert('1.0', task_to_edit.get('source_text', ''))
-            speed_entry.insert(0, task_to_edit.get('speed', '0'))
-            pitch_entry.insert(0, task_to_edit.get('pitch', '0'))
-            volume_entry.insert(0, task_to_edit.get('volume', '100'))
-            prompt_var.set(task_to_edit.get('prompt', 0))
-            prompt_file_var.set(task_to_edit.get('prompt_file', ''))
-            prompt_volume_var.set(task_to_edit.get('prompt_volume', '80'))
-            bgm_var.set(task_to_edit.get('bgm', 0))
-            bgm_file_var.set(task_to_edit.get('bgm_file', ''))
-            bgm_volume_var.set(task_to_edit.get('bgm_volume', '20'))
-            start_time_entry.insert(0, task_to_edit.get('time', ''))
-            weekday_entry.insert(0, task_to_edit.get('weekday', '每周:1234567'))
-            date_range_entry.insert(0, task_to_edit.get('date_range', '2025-01-01 ~ 2099-12-31'))
-        else:
-            speed_entry.insert(0, "0")
-            pitch_entry.insert(0, "0")
-            volume_entry.insert(0, "100")
-            prompt_volume_var.set("80")
-            bgm_volume_var.set("20")
-            weekday_entry.insert(0, "每周:1234567")
-            date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
-
-        def save_task():
-            text_content = content_text.text.get('1.0', END).strip()
-            if not text_content:
-                messagebox.showwarning("警告", "请输入播音文稿内容", parent=dialog)
-                return
-
-            is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
-            if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
-            is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
-            if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
-
-            new_task_data = {
-                'name': name_entry.get().strip(),
-                'type': 'dynamic_voice',
-                'source_text': text_content,
-                'speed': speed_entry.get().strip() or "0",
-                'pitch': pitch_entry.get().strip() or "0",
-                'volume': volume_entry.get().strip() or "100",
-                'prompt': prompt_var.get(),
-                'prompt_file': prompt_file_var.get(),
-                'prompt_volume': prompt_volume_var.get(),
-                'bgm': bgm_var.get(),
-                'bgm_file': bgm_file_var.get(),
-                'bgm_volume': bgm_volume_var.get(),
-                'time': time_msg,
-                'weekday': weekday_entry.get().strip(),
-                'date_range': date_msg,
-                'delay': 'ontime', 
-                'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'),
-                'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {}),
-            }
-            if not new_task_data['name'] or not new_task_data['time']: 
-                messagebox.showwarning("警告", "请填写任务名称和执行时间", parent=dialog); return
-
-            if is_edit_mode:
-                self.tasks[index] = new_task_data
-                self.log(f"已修改动态语音任务: {new_task_data['name']}")
-            else:
-                self.tasks.append(new_task_data)
-                self.log(f"已添加动态语音任务: {new_task_data['name']}")
-
-            self.update_task_list()
-            self.save_tasks()
-            cleanup_and_destroy()
-
-        button_text = "保存修改" if is_edit_mode else "添加"
-        ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
-        ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5)
-        dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
-        
-        self.center_window(dialog, parent=self.root)
-#代码结束
-
-    def _parse_dynamic_script(self, script_text):
-        segments = []
-        # 使用正则表达式分割脚本，同时保留分割标记
-        parts = re.split(r'(\[男\]|\[女\])', script_text)
-        
-        # 默认第一个片段是男声，除非脚本以[女]开头
-        current_actor = '男'
-        if script_text.strip().startswith('[女]'):
-            current_actor = '女'
-
-        for part in parts:
-            if not part.strip():
-                continue
-            if part == '[男]':
-                current_actor = '男'
-            elif part == '[女]':
-                current_actor = '女'
-            else:
-                segments.append({'actor': current_actor, 'text': part.strip()})
-        return segments
-
-    def _replace_dynamic_tags(self, text, trigger_time_obj):
-        now = trigger_time_obj
-        
-        weather_info = self.main_weather_label.cget("text")
-        weather_text = "未知"
-        if "天气:" in weather_info and "正在" not in weather_info and "失败" not in weather_info:
-            try:
-                weather_text = weather_info.split(' ')[2]
-            except IndexError:
-                weather_text = "信息不全"
-
-        week_map = {"1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "日"}
-        day_of_week = week_map.get(str(now.isoweekday()), '')
-
-        replacements = {
-            "[年月日]": now.strftime('%Y年%m月%d日'),
-            "[星期]": f"星期{day_of_week}",
-            "[时间]": now.strftime('%H点%M分'),
-            "[天气]": weather_text
-        }
-        
-        for tag, value in replacements.items():
-            text = text.replace(tag, value)
-        return text
-
-    def _execute_dynamic_voice_task(self, task):
-        source_text = task.get('source_text', '')
-        if not source_text:
-            self.log(f"动态语音任务 '{task['name']}' 文稿为空，已跳过。")
-            return
-
-        segments = self._parse_dynamic_script(source_text)
-        if not segments:
-            self.log(f"动态语音任务 '{task['name']}' 未能解析出有效片段。")
-            return
-
-        temp_files = []
-        final_audio = None
-        
-        try:
-            from pydub import AudioSegment
-            ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
-            if os.path.exists(ffmpeg_path):
-                AudioSegment.converter = ffmpeg_path
-            else:
-                self.log("警告：未找到ffmpeg.exe，音频拼接功能可能受限。")
-        except ImportError:
-            self.log("警告：pydub库未安装，无法拼接动态语音。")
-            return
-
-        try:
-            for i, segment in enumerate(segments):
-                if self._is_interrupted():
-                    self.log("动态语音生成被中断。")
-                    return
-
-                self.update_playing_text(f"[{task['name']}] 正在生成第 {i+1}/{len(segments)} 段语音...")
-                
-                processed_text = self._replace_dynamic_tags(segment['text'], datetime.now())
-                
-                actor = segment['actor']
-                
-                # --- ↓↓↓ 核心修正：直接使用用户友好的语音名称 ---
-                voice_name = '在线-云扬 (男)' if actor == '男' else '在线-晓晓 (女)'
-                
-                voice_params = {
-                    'voice': voice_name,  # <--- 传递 '在线-云扬 (男)' 而不是 voice_id
-                    'speed': task.get('speed', '0'),
-                    'pitch': task.get('pitch', '0')
-                }
-                # --- ↑↑↑ 修正结束 ---
-                
-                temp_filename = f"temp_{int(time.time())}_{i}.mp3"
-                output_path = os.path.join(AUDIO_FOLDER, temp_filename)
-                temp_files.append(output_path)
-
-                synthesis_success = threading.Event()
-                error_message = ""
-                def online_callback(result):
-                    nonlocal error_message
-                    if not result['success']:
-                        error_message = result.get('error', '未知在线合成错误')
-                    synthesis_success.set()
-                
-                s_thread = threading.Thread(target=self._synthesis_worker_edge, args=(processed_text, voice_params, output_path, online_callback))
-                s_thread.start()
-                s_thread.join()
-
-                if error_message:
-                    raise Exception(f"生成片段 '{processed_text}' 时失败: {error_message}")
-
-            self.update_playing_text(f"[{task['name']}] 正在合成最终音频...")
-            for file_path in temp_files:
-                segment_audio = AudioSegment.from_mp3(file_path)
-                if final_audio is None:
-                    final_audio = segment_audio
-                else:
-                    final_audio += segment_audio
-            
-            if final_audio is None:
-                raise Exception("未能生成任何有效的音频片段。")
-
-            final_task = task.copy()
-            final_audio_path = os.path.join(AUDIO_FOLDER, f"final_{int(time.time())}.wav")
-            temp_files.append(final_audio_path)
-            final_audio.export(final_audio_path, format="wav")
-            
-            final_task['content'] = final_audio_path
-            final_task['repeat'] = 1
-            
-            self._play_voice_task_internal(final_task)
-
-        except Exception as e:
-            self.log(f"!!! 执行动态语音任务 '{task['name']}' 失败: {e}")
-        finally:
-            self.log("正在清理动态语音临时文件...")
-            for f in temp_files:
-                if os.path.exists(f):
-                    try:
-                        os.remove(f)
-                    except Exception as e_del:
-                        self.log(f"删除临时文件 {os.path.basename(f)} 失败: {e_del}")
-
-#以上动态语音全套方法结束
-
     def create_registration_page(self):
         page_frame = ttk.Frame(self.page_container, padding=20)
         title_label = ttk.Label(page_frame, text="注册软件", font=self.font_14_bold, bootstyle="primary")
@@ -3141,7 +2762,6 @@ class TimedBroadcastApp:
             self.clear_all_todos()
             self.clear_all_print_tasks()
             self.clear_all_backup_tasks()
-            self.clear_all_dynamic_voice_tasks()
             messagebox.askyesno = original_askyesno
 
             self._save_to_registry("LockPasswordB64", "")
@@ -3899,22 +3519,7 @@ class TimedBroadcastApp:
             if iid not in self.task_tree.selection():
                 self.task_tree.selection_set(iid)
 
-            # --- ↓↓↓ 核心修改：在这里获取任务类型并决定状态 ↓↓↓ ---
-            # 只有当选中单个任务时，我们才进行判断
-            if len(self.task_tree.selection()) == 1:
-                index = self.task_tree.index(iid)
-                task = self.tasks[index]
-                task_type = task.get('type')
-                
-                # 如果任务类型是 'bell_schedule'，则禁用“立即播放”
-                play_now_state = 'disabled' if task_type == 'bell_schedule' else 'normal'
-            else:
-                # 如果选中了多个任务，为简单起见，也禁用“立即播放”
-                play_now_state = 'disabled'
-            
-            context_menu.add_command(label="立即播放", command=self.play_now, state=play_now_state)
-            # --- ↑↑↑ 修改结束 ↑↑↑ ---
-
+            context_menu.add_command(label="立即播放", command=self.play_now)
             context_menu.add_separator()
             context_menu.add_command(label="修改", command=self.edit_task)
             context_menu.add_command(label="删除", command=self.delete_task)
@@ -3950,13 +3555,15 @@ class TimedBroadcastApp:
         self.playback_command_queue.put(('STOP', None))
 
     def add_task(self):
+        # --- ↓↓↓ 在这里添加唯一的限制逻辑 ↓↓↓ ---
         if self.auth_info['status'] == 'Trial' and len(self.tasks) >= 3:
             messagebox.showerror(
                 "试用版限制", 
                 "试用版最多只能添加3个定时广播节目。\n\n请删除现有节目后再添加，或注册软件以解除全部限制。", 
                 parent=self.root
             )
-            return
+            return # 直接终止，不弹出选择窗口
+        # --- ↑↑↑ 限制逻辑结束 ↑↑↑ ---
 
         choice_dialog = ttk.Toplevel(self.root)
         choice_dialog.title("选择节目类型")
@@ -3994,14 +3601,8 @@ class TimedBroadcastApp:
                              bootstyle="info", width=20, command=lambda: open_and_cleanup(self.open_voice_dialog))
         voice_btn.pack(pady=8, ipady=8, fill=X)
 
-        # --- ↓↓↓ 新增代码：动态语音按钮 ↓↓↓ ---
-        dynamic_voice_btn = ttk.Button(btn_frame, text="💬→动态语音",
-                             bootstyle="success", width=20, command=lambda: open_and_cleanup(self.open_dynamic_voice_dialog))
-        dynamic_voice_btn.pack(pady=8, ipady=8, fill=X)
-        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
-
         video_btn = ttk.Button(btn_frame, text="🎬→视频节目",
-                             bootstyle="dark", width=20, command=lambda: open_and_cleanup(self.open_video_dialog))
+                             bootstyle="success", width=20, command=lambda: open_and_cleanup(self.open_video_dialog))
         video_btn.pack(pady=8, ipady=8, fill=X)
         if not VLC_AVAILABLE:
             video_btn.config(state=DISABLED, text="🎬→视频节目 (VLC未安装)")
@@ -5716,6 +5317,8 @@ class TimedBroadcastApp:
         index = self.task_tree.index(selection[0])
         task = self.tasks[index]
         
+        # 创建一个临时的、不可见的父窗口，用于传递给对话框函数
+        # 这样可以统一所有对话框的调用方式
         dummy_parent = ttk.Toplevel(self.root)
         dummy_parent.withdraw()
 
@@ -5726,11 +5329,12 @@ class TimedBroadcastApp:
             self.open_voice_dialog(dummy_parent, task_to_edit=task, index=index)
         elif task_type == 'video':
             self.open_video_dialog(dummy_parent, task_to_edit=task, index=index)
+        # --- ↓↓↓ 新增的逻辑分支 ↓↓↓ ---
         elif task_type == 'bell_schedule':
             self.open_bell_scheduler_dialog(dummy_parent, task_to_edit=task, index=index)
-        elif task_type == 'dynamic_voice':
-            self.open_dynamic_voice_dialog(dummy_parent, task_to_edit=task, index=index)
+        # --- ↑↑↑ 新增逻辑结束 ↑↑↑ ---
         else:
+            # 为未知或旧类型的任务提供一个默认的编辑方式
             self.log(f"警告：任务 '{task.get('name')}' 类型未知，尝试使用音频编辑器打开。")
             self.open_audio_dialog(dummy_parent, task_to_edit=task, index=index)
 
@@ -6730,6 +6334,7 @@ class TimedBroadcastApp:
 
                 for bell_event in task.get('generated_times', []):
                     if bell_event['time'] == current_time_str and task.get('last_run', {}).get(bell_event['time']) != current_date_str:
+                        # 构造一个临时的、可播放的音频任务
                         playable_task = {
                             'name': bell_event['name'],
                             'type': 'audio',
@@ -6739,11 +6344,12 @@ class TimedBroadcastApp:
                             'interval_type': 'first',
                             'interval_first': '1',
                         }
+                        # 铃声总是高优先级的
                         self.playback_command_queue.put(('PLAY_INTERRUPT', (playable_task, bell_event['time'])))
                         task.setdefault('last_run', {})[bell_event['time']] = current_date_str
                         self.save_tasks()
 
-            else:
+            else: # 原有逻辑
                 is_due, trigger_time = self._is_task_due(task, now)
                 if is_due:
                     tasks_to_play.append((task, trigger_time))
@@ -6751,12 +6357,12 @@ class TimedBroadcastApp:
         if not tasks_to_play:
             return
 
-        ontime_tasks = [t for t in tasks_to_play if t[0].get('delay') == 'ontime' or t[0].get('type') == 'dynamic_voice']
-        delay_tasks = [t for t in tasks_to_play if t[0].get('delay') != 'ontime' and t[0].get('type') != 'dynamic_voice']
+        ontime_tasks = [t for t in tasks_to_play if t[0].get('delay') == 'ontime']
+        delay_tasks = [t for t in tasks_to_play if t[0].get('delay') != 'ontime']
 
         if ontime_tasks:
             task, trigger_time = ontime_tasks[0]
-            self.log(f"准时/高优任务 '{task['name']}' 已到时间，执行高优先级中断。")
+            self.log(f"准时任务 '{task['name']}' 已到时间，执行高优先级中断。")
             self.playback_command_queue.put(('PLAY_INTERRUPT', (task, trigger_time)))
 
         for task, trigger_time in delay_tasks:
@@ -7161,9 +6767,6 @@ class TimedBroadcastApp:
             elif task_type == 'voice':
                 self.log(f"开始语音任务: {task['name']} (共 {task.get('repeat', 1)} 遍)")
                 self._play_voice_task_internal(task)
-            elif task_type == 'dynamic_voice':
-                self.log(f"开始动态语音任务: {task['name']}")
-                self._execute_dynamic_voice_task(task)
             elif task_type == 'video':
                 self.log(f"开始视频任务: {task['name']}")
                 self._play_video_task_internal(task, self.video_stop_event)
@@ -7453,35 +7056,21 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"播放语音内容失败: {e}")
 
-    # 请用下面的整个函数替换您代码中原来的 _play_video_task_internal 函数
-
-    # 请用下面的整个函数替换您代码中原来的 _play_video_task_internal 函数
-
-    # 请用下面的整个函数替换您代码中原来的 _play_video_task_internal 函数
-
-    # 请用下面的整个函数替换您代码中原来的 _play_video_task_internal 函数
-
-    # 请用下面的整个函数替换您代码中原来的 _play_video_task_internal 函数
-
     def _play_video_task_internal(self, task, stop_event):
         if not VLC_AVAILABLE:
             self.log("错误: python-vlc 库未安装或VLC播放器未找到，无法播放视频。")
             return
 
-        # 导入标准库用于URL解码
-        import urllib.parse
-
+        # --- ↓↓↓ 核心修改 1：动态选择User-Agent ↓↓↓ ---
         custom_ua = task.get('custom_user_agent', '').strip()
-        user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         if custom_ua:
+            user_agent = custom_ua
             self.log(f"检测到自定义User-Agent，将使用: {user_agent}")
-
-        # 仍然保留全局设置，作为对普通HTTP流的保障
-        vlc_instance_options = [
-            '--no-xlib', 
-            '--network-caching=5000',
-            f'--http-user-agent={user_agent}' 
-        ]
+        else:
+            user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        # --- ↑↑↑ 修改结束 ↑↑↑ ---
+        
+        vlc_instance_options = ['--no-xlib', '--network-caching=5000']
         
         content_path = task.get('content', '')
         final_content_path = content_path
@@ -7505,8 +7094,6 @@ class TimedBroadcastApp:
         
         main_url_part = final_content_path.split('?')[0]
         is_m3u8_playlist = main_url_part.lower().endswith(('.m3u', '.m3u8'))
-        is_folder_mode = task.get('video_type') == 'folder' and os.path.isdir(content_path)
-        is_playlist_mode = is_folder_mode or is_m3u8_playlist
 
         self.vlc_player = None
         self.vlc_list_player = None
@@ -7517,49 +7104,23 @@ class TimedBroadcastApp:
 
             instance = vlc.Instance(vlc_instance_options)
 
-            if is_folder_mode:
-                self.log(f"检测到视频文件夹模式，正在扫描: {content_path}")
+            if is_m3u8_playlist:
+                self.log(f"检测到M3U8播放列表，启用MediaListPlayer专业模式。")
+                media_list = instance.media_list_new()
+                media = instance.media_new(final_content_path)
+                media.add_option(f':http-user-agent={user_agent}')
+                media_list.add_media(media)
+                
                 self.vlc_list_player = instance.media_list_player_new()
                 self.vlc_player = self.vlc_list_player.get_media_player()
-
-                media_list = instance.media_list_new()
-                VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.mpg', '.mpeg', '.rmvb', '.rm', '.webm', '.vob', '.ts', '.3gp')
-                video_files = [os.path.join(content_path, f) for f in os.listdir(content_path) if f.lower().endswith(VIDEO_EXTENSIONS)]
-
-                if task.get('play_order') == 'random':
-                    random.shuffle(video_files)
-                else:
-                    video_files.sort()
-
-                if not video_files:
-                    raise ValueError("视频文件夹为空或不包含支持的视频文件。")
-
-                self.log(f"找到 {len(video_files)} 个视频文件，正在添加到播放列表...")
-                for video_file in video_files:
-                    media_list.add_media(instance.media_new(video_file))
                 
                 self.vlc_list_player.set_media_list(media_list)
-
-            else: # 单个文件或网络流 (包括M3U8)
-                media = instance.media_new(final_content_path)
                 
-                # --- ↓↓↓ 最终修复：采用最强力的 media.add_option() 方式 ↓↓↓ ---
-                # 无论全局是否设置，都为这个特定的媒体对象再强制指定一次User-Agent
-                # 这是解决HLS流UA问题的关键
-                if is_http_url:
-                    media.add_option(f':http-user-agent={user_agent}')
-                # --- ↑↑↑ 修复结束 ↑↑↑ ---
-
-                if is_playlist_mode: # M3U8
-                    self.log(f"检测到播放列表，启用MediaListPlayer模式。")
-                    media_list = instance.media_list_new([media])
-                    self.vlc_list_player = instance.media_list_player_new()
-                    self.vlc_player = self.vlc_list_player.get_media_player()
-                    self.vlc_list_player.set_media_list(media_list)
-                else: # 普通单个文件/流
-                    self.log(f"播放单个媒体文件/流: {final_content_path}")
-                    self.vlc_player = instance.media_player_new()
-                    self.vlc_player.set_media(media)
+            else:
+                self.log(f"播放单个媒体文件/流: {final_content_path}")
+                self.vlc_player = instance.media_player_new()
+                media = instance.media_new(final_content_path, f':http-user-agent={user_agent}')
+                self.vlc_player.set_media(media)
             
             event_manager = self.vlc_player.event_manager()
             event_manager.event_attach(vlc.EventType.MediaPlayerEncounteredError, lambda event: self.log("!!! VLC事件: 播放器遇到错误 !!!"))
@@ -7567,7 +7128,7 @@ class TimedBroadcastApp:
             event_manager.event_attach(vlc.EventType.MediaPlayerPlaying, lambda event: self.log("--- VLC事件: 状态变更为 [播放中] ---"))
             event_manager.event_attach(vlc.EventType.MediaPlayerEndReached, lambda event: self.log("--- VLC事件: 媒体播放结束 ---"))
 
-            self.root.after(0, self._create_video_window, task, is_playlist_mode)
+            self.root.after(0, self._create_video_window, task, is_m3u8_playlist)
             time.sleep(1.0)
 
             if not (self.video_window and self.video_window.winfo_exists()):
@@ -7578,7 +7139,7 @@ class TimedBroadcastApp:
             else: self.vlc_player.audio_set_mute(False)
             self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
             
-            player_to_start = self.vlc_list_player if is_playlist_mode else self.vlc_player
+            player_to_start = self.vlc_list_player if is_m3u8_playlist else self.vlc_player
             player_to_start.play()
             
             self.log("已发送播放指令，等待VLC引擎响应...")
@@ -7598,17 +7159,7 @@ class TimedBroadcastApp:
 
                 now = time.time()
                 if now - last_text_update_time >= 1.0:
-                    
-                    current_media = player_to_check.get_media()
-                    display_name = "加载中..."
-                    if current_media:
-                        mrl = current_media.get_mrl()
-                        if mrl:
-                            try:
-                                decoded_mrl = urllib.parse.unquote(mrl)
-                                display_name = os.path.basename(decoded_mrl)
-                            except Exception:
-                                display_name = mrl
+                    display_name = final_content_path if final_content_path.lower().startswith(('http', 'rtsp')) else os.path.basename(final_content_path)
                     
                     state = player_to_check.get_state()
                     status_text = "播放中"
@@ -8144,13 +7695,10 @@ class TimedBroadcastApp:
         self.save_execute_tasks()
         self.save_print_tasks()
         self.save_backup_tasks()
-        self.save_dynamic_voice_tasks()
 
         if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
-
-        self.root.destroy()
        
-        #os._exit(0)
+        os._exit(0)
 
     def toggle_mute_all(self):
         # 1. 切换静音状态
