@@ -7536,7 +7536,6 @@ class TimedBroadcastApp:
 
         import urllib.parse
 
-        # --- 清理并初始化状态 ---
         self.manual_playlist = []
         self.current_playlist_index = 0
         self.vlc_player = None
@@ -7547,11 +7546,14 @@ class TimedBroadcastApp:
             user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             content_path = task.get('content', '')
             
-            # --- 步骤 1: 在Python中构建播放列表 (self.manual_playlist) ---
+            # --- 步骤 1: 决定是否需要代理 ---
+            use_proxy = bool(custom_ua)
+            
+            # --- 步骤 2: 构建播放列表 ---
             is_playlist_mode = False
             
-            # 情况 A: 视频文件夹
             if task.get('video_type') == 'folder' and os.path.isdir(content_path):
+                # ... (文件夹逻辑保持不变) ...
                 is_playlist_mode = True
                 self.log(f"检测到视频文件夹模式，正在扫描: {content_path}")
                 VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.mpg', '.mpeg', '.rmvb', '.rm', '.webm', '.vob', '.ts', '.3gp')
@@ -7559,36 +7561,59 @@ class TimedBroadcastApp:
                 if task.get('play_order') == 'random': random.shuffle(video_files)
                 else: video_files.sort()
                 if not video_files: raise ValueError("视频文件夹为空或不包含支持的视频文件。")
-                
                 interval_type = task.get('interval_type', 'first')
                 playlist_to_use = video_files
                 if interval_type == 'first':
                     repeat_count = int(task.get('interval_first', 1))
                     playlist_to_use = video_files[:repeat_count]
                     self.log(f"应用“播 {repeat_count} 首”限制。播放列表大小: {len(playlist_to_use)}。")
-                
                 self.manual_playlist = playlist_to_use
                 self.log(f"已构建本地文件播放列表，包含 {len(self.manual_playlist)} 个项目。")
 
-            # 情况 B: 网络链接
             elif content_path.lower().startswith(('http://', 'https://')):
-                # 如果需要，启动代理
-                if custom_ua:
-                    if not self._start_ua_proxy(user_agent):
-                        self.log("!!! 代理启动失败，播放可能失败。")
+                self.log(f"正在处理网络链接: {content_path}")
+                final_url = None
+                content = None
+                response = None
 
-                # --- ▼▼▼ 核心修正 1：始终使用原始URL进行探测 ▼▼▼ ---
-                self.log(f"正在探测网络链接: {content_path}")
-                try:
-                    headers = {'User-Agent': user_agent}
-                    response = requests.get(content_path, headers=headers, timeout=15, allow_redirects=True)
-                    response.raise_for_status()
-                    final_url = response.url # 获取重定向后的最终URL
-                    content = response.text
-                except requests.exceptions.RequestException as e:
-                    raise Exception(f"获取主播放列表失败: {e}")
+                # --- ▼▼▼ 最终版智能探测逻辑 ▼▼▼ ---
+                if use_proxy:
+                    # 策略1：优先带UA访问
+                    self.log("第一步: 尝试带UA访问...")
+                    try:
+                        headers = {'User-Agent': user_agent}
+                        response = requests.get(content_path, headers=headers, timeout=15, allow_redirects=True)
+                        response.raise_for_status()
+                        final_url = response.url
+                        content = response.text
+                        self.log("带UA访问成功，获取到播放列表。")
+                    except requests.exceptions.RequestException as e:
+                        self.log(f"带UA访问失败: {e}。")
+                        # 策略2：回退到不带UA访问
+                        self.log("第二步: 尝试无UA访问...")
+                        try:
+                            response = requests.get(content_path, timeout=10, allow_redirects=True)
+                            response.raise_for_status()
+                            final_url = response.url
+                            content = response.text
+                            self.log("无UA访问成功，获取到播放列表。")
+                        except requests.exceptions.RequestException as e2:
+                            raise Exception(f"无UA访问再次失败: {e2}")
+                else:
+                    # 如果用户没有设置UA，则只进行一次不带UA的访问
+                    self.log("正在进行无UA访问...")
+                    try:
+                        response = requests.get(content_path, timeout=10, allow_redirects=True)
+                        response.raise_for_status()
+                        final_url = response.url
+                        content = response.text
+                    except requests.exceptions.RequestException as e:
+                        raise Exception(f"获取播放列表失败: {e}")
+                
+                if not final_url or content is None:
+                    raise Exception("未能获取到任何有效的播放列表内容。")
+                # --- ▲▲▲ 智能探测逻辑结束 ▲▲▲ ---
 
-                # --- ▼▼▼ 核心修正 2：智能判断M3U8类型 ▼▼▼ ---
                 is_master_playlist = '.m3u8' in content.lower() or '.m3u' in content.lower()
                 is_media_playlist_by_header = 'mpegurl' in response.headers.get('Content-Type', '').lower()
 
@@ -7604,18 +7629,23 @@ class TimedBroadcastApp:
                     if not self.manual_playlist: raise ValueError("主播放列表为空或解析失败。")
                     self.log(f"已构建网络播放列表，包含 {len(self.manual_playlist)} 个频道/流。")
                 else:
-                    # 认为是单个媒体流或媒体播放列表(Media Playlist)，作为一个整体处理
                     self.log("检测到单个媒体流或媒体播放列表(Media Playlist)，将作为一个整体播放。")
                     self.manual_playlist = [final_url]
             
-            # 情况 C: 本地单个文件
-            else:
+            else: # 本地单个文件
                 self.manual_playlist = [content_path]
 
             if not self.manual_playlist:
                 raise ValueError("未能构建有效的播放列表。")
 
-            # --- 步骤 2 & 3 (初始化VLC, 播放和监控) 保持不变 ---
+            # --- 步骤 3: 启动代理（如果需要） ---
+            if use_proxy:
+                if not self._start_ua_proxy(user_agent):
+                    self.log("!!! 代理启动失败，播放可能失败。")
+                    use_proxy = False
+
+            # --- 步骤 4 & 5 (初始化VLC, 播放和监控) ---
+            # ... (这部分代码与上一版完全相同，无需改动) ...
             if AUDIO_AVAILABLE: pygame.mixer.music.stop(); pygame.mixer.stop()
             vlc_instance_options = ['--no-xlib', f'--http-user-agent={user_agent}']
             instance = vlc.Instance(vlc_instance_options)
@@ -7634,7 +7664,7 @@ class TimedBroadcastApp:
             if self.is_muted: self.vlc_player.audio_set_mute(True)
             else: self.vlc_player.audio_set_mute(False)
             self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
-            self._play_manual_playlist_item()
+            self._play_manual_playlist_item(use_proxy)
             self.log(f"已发送播放指令，开始播放第一项。")
             start_time = time.time()
             last_text_update_time = 0
@@ -7748,26 +7778,17 @@ class TimedBroadcastApp:
             
     def _handle_previous_track(self, event=None):
         """处理“上一个”命令 (由 Ctrl+Up 触发)"""
-        if self.vlc_list_player:
-            self.vlc_list_player.previous()
-            self.log("快捷键触发：切换到上一个节目。")
-
-    def _handle_next_track(self, event=None):
-        """处理“下一个”命令 (由 Ctrl+Down 触发)"""
-        if self.vlc_list_player:
-            self.vlc_list_player.next()
-            self.log("快捷键触发：切换到下一个节目。")
-
-    def _handle_previous_track(self, event=None):
-        """处理“上一个”命令 (由 Ctrl+Up 触发)"""
         if not self.manual_playlist: return
 
         self.current_playlist_index -= 1
         if self.current_playlist_index < 0:
-            self.current_playlist_index = len(self.manual_playlist) - 1 # 循环到最后一个
+            self.current_playlist_index = len(self.manual_playlist) - 1
             
         self.log(f"快捷键触发：手动切换到上一个节目 (索引 {self.current_playlist_index})。")
-        self._play_manual_playlist_item()
+        # --- ▼▼▼ 修改：传递 use_proxy 状态 ▼▼▼ ---
+        use_proxy = bool(self.ua_proxy_port)
+        self._play_manual_playlist_item(use_proxy)
+        # --- ▲▲▲ 修改结束 ▲▲▲ ---
 
     def _handle_next_track(self, event=None):
         """处理“下一个”命令 (由 Ctrl+Down 触发)"""
@@ -7775,31 +7796,32 @@ class TimedBroadcastApp:
 
         self.current_playlist_index += 1
         if self.current_playlist_index >= len(self.manual_playlist):
-            self.current_playlist_index = 0 # 循环到第一个
+            self.current_playlist_index = 0
             
         self.log(f"快捷键触发：手动切换到下一个节目 (索引 {self.current_playlist_index})。")
-        self._play_manual_playlist_item()
+        # --- ▼▼▼ 修改：传递 use_proxy 状态 ▼▼▼ ---
+        use_proxy = bool(self.ua_proxy_port)
+        self._play_manual_playlist_item(use_proxy)
+        # --- ▲▲▲ 修改结束 ▲▲▲ ---
 
-    def _play_manual_playlist_item(self):
+    def _play_manual_playlist_item(self, use_proxy=False):
         """播放手动播放列表中的当前索引项"""
         if not self.manual_playlist or not self.vlc_player:
             return
 
         try:
-            # 从我们的Python列表中获取原始URL
             target_url = self.manual_playlist[self.current_playlist_index]
             
-            # 如果需要代理，包装URL
-            if self.ua_proxy_port and target_url.startswith(('http://', 'https://')):
-                proxy_url = f"http://127.0.0.1:{self.ua_proxy_port}/{target_url}"
-            else: # 本地文件或不需要代理的情况
-                proxy_url = target_url
+            # --- ▼▼▼ 修改：根据传入的参数决定是否包装URL ▼▼▼ ---
+            play_url = target_url
+            if use_proxy and self.ua_proxy_port and target_url.startswith(('http://', 'https://')):
+                play_url = f"http://127.0.0.1:{self.ua_proxy_port}/{target_url}"
+            # --- ▲▲▲ 修改结束 ▲▲▲ ---
 
-            self.log(f"正在加载新媒体: {proxy_url}")
+            self.log(f"正在加载新媒体: {play_url}")
             
-            # 创建新的媒体对象并命令VLC播放
             instance = self.vlc_player.get_instance()
-            media = instance.media_new(proxy_url)
+            media = instance.media_new(play_url)
             
             self.vlc_player.set_media(media)
             self.vlc_player.play()
