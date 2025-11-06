@@ -7461,6 +7461,8 @@ class TimedBroadcastApp:
 
     # 请用下面的整个函数替换您代码中原来的 _play_video_task_internal 函数
 
+    # 请用下面的整个函数替换您代码中原来的 _play_video_task_internal 函数
+
     def _play_video_task_internal(self, task, stop_event):
         if not VLC_AVAILABLE:
             self.log("错误: python-vlc 库未安装或VLC播放器未找到，无法播放视频。")
@@ -7474,7 +7476,7 @@ class TimedBroadcastApp:
         if custom_ua:
             self.log(f"检测到自定义User-Agent，将使用: {user_agent}")
 
-        # 修复1：只保留在Instance层面的全局User-Agent设置，这是最标准、最可靠的方式
+        # 仍然保留全局设置，作为对普通HTTP流的保障
         vlc_instance_options = [
             '--no-xlib', 
             '--network-caching=5000',
@@ -7539,9 +7541,15 @@ class TimedBroadcastApp:
                 self.vlc_list_player.set_media_list(media_list)
 
             else: # 单个文件或网络流 (包括M3U8)
-                # 修复1：移除这里的重复UA设置，避免冲突
                 media = instance.media_new(final_content_path)
                 
+                # --- ↓↓↓ 最终修复：采用最强力的 media.add_option() 方式 ↓↓↓ ---
+                # 无论全局是否设置，都为这个特定的媒体对象再强制指定一次User-Agent
+                # 这是解决HLS流UA问题的关键
+                if is_http_url:
+                    media.add_option(f':http-user-agent={user_agent}')
+                # --- ↑↑↑ 修复结束 ↑↑↑ ---
+
                 if is_playlist_mode: # M3U8
                     self.log(f"检测到播放列表，启用MediaListPlayer模式。")
                     media_list = instance.media_list_new([media])
@@ -7597,12 +7605,8 @@ class TimedBroadcastApp:
                         mrl = current_media.get_mrl()
                         if mrl:
                             try:
-                                # --- ↓↓↓ 修复2：使用标准库urllib.parse.unquote进行健壮的解码 ↓↓↓ ---
-                                # 这一步会将所有 %xx 编码转换为原始字符
                                 decoded_mrl = urllib.parse.unquote(mrl)
-                                # 无论解码后是 file:/// 路径还是普通路径，os.path.basename都能正确处理
                                 display_name = os.path.basename(decoded_mrl)
-                                # --- ↑↑↑ 修复结束 ↑↑↑ ---
                             except Exception:
                                 display_name = mrl
                     
@@ -7643,6 +7647,7 @@ class TimedBroadcastApp:
 
             self.root.after(0, self._destroy_video_window)
             self.log(f"视频任务 '{task['name']}' 的播放逻辑清理完毕。")
+
     def _create_video_window(self, task, is_playlist=False):
         if self.video_window and self.video_window.winfo_exists():
             self.video_window.destroy()
