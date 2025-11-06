@@ -23,6 +23,8 @@ import hashlib
 import requests
 import edge_tts
 import asyncio
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import socket
 
 # --- ↓↓↓ 新增代码：全局隐藏 subprocess 调用的控制台窗口 ↓↓↓ ---
 
@@ -183,6 +185,44 @@ EDGE_TTS_VOICES = {
     '在线-台湾-曉雨 (女)': 'zh-TW-HsiaoYuNeural',
 }
 
+class UAProxyHandler(BaseHTTPRequestHandler):
+    """
+    一个轻量级的HTTP代理处理器，专门用于为请求添加固定的User-Agent。
+    """
+    user_agent = "Mozilla/5.0"  # 默认值，会被动态修改
+
+    def do_GET(self):
+        try:
+            # 构造请求头
+            headers = {'User-Agent': self.user_agent}
+            
+            # self.path 包含了完整的原始URL，例如 /http://example.com/stream.m3u8
+            # 我们需要去掉最开始的斜杠来获取真实的URL
+            target_url = self.path[1:]
+            
+            # 使用 requests 库发起真实的请求
+            response = requests.get(target_url, headers=headers, stream=True, timeout=20)
+            
+            # 将真实服务器的响应码和响应头转发给VLC
+            self.send_response(response.status_code)
+            for key, value in response.headers.items():
+                # 过滤掉一些可能引起问题的头部信息
+                if key.lower() not in ['transfer-encoding', 'connection', 'content-encoding']:
+                    self.send_header(key, value)
+            self.end_headers()
+            
+            # 将响应内容（视频流数据）以块的形式直接写入到VLC的连接中
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    self.wfile.write(chunk)
+                    
+        except Exception as e:
+            # 如果发生任何错误，向VLC发送一个500服务器错误响应
+            self.send_error(500, f"Proxy Error: {e}")
+    
+    def log_message(self, format, *args):
+        # 屏蔽代理服务器在控制台的日志输出，保持界面清爽
+        pass
 
 class TimedBroadcastApp:
     def __init__(self, root):
@@ -249,6 +289,10 @@ class TimedBroadcastApp:
         self.video_stop_event = None
         self.is_muted = False
         self.last_bgm_volume = 1.0
+
+        self.ua_proxy_server = None
+        self.ua_proxy_thread = None
+        self.ua_proxy_port = None
 
         self.create_folder_structure()
         self.load_settings()
@@ -7462,39 +7506,46 @@ class TimedBroadcastApp:
 
         custom_ua = task.get('custom_user_agent', '').strip()
         user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        if custom_ua:
-            self.log(f"检测到自定义User-Agent，将使用: {user_agent}")
-
-        # --- ↓↓↓ 最终修复：只保留最核心、最安全的启动参数 ↓↓↓ ---
-        vlc_instance_options = [
-            '--no-xlib', 
-            # 只保留大缓存这一个最关键的网络参数，移除所有其他可能有冲突的参数
-            '--network-caching=15000', 
-        ]
-        # --- ↑↑↑ 修复结束 ↑↑↑ ---
         
-        # 保留 requests 预处理
+        # --- ▼▼▼ 核心修改 1：如果需要自定义UA，则启动代理并改写URL ▼▼▼ ---
         content_path = task.get('content', '')
         final_content_path = content_path
-        is_http_url = content_path.lower().startswith(('http://', 'https://', 'rtsp://', 'rtmp://', 'mms://'))
+
+        if custom_ua:
+            self.log(f"检测到自定义User-Agent，将启用本地代理。")
+            proxy_port = self._start_ua_proxy(user_agent)
+            if proxy_port:
+                # 将原始URL改写为通过本地代理访问的格式
+                final_content_path = f"http://127.0.0.1:{proxy_port}/{content_path}"
+                self.log(f"URL已改写，将通过代理播放: {final_content_path}")
+            else:
+                self.log("!!! 代理启动失败，将尝试直接播放原始URL。")
+        # --- ▲▲▲ 修改结束 ▲▲▲ ---
         
-        if is_http_url:
-            # 对于非HTTP/HTTPS的流（如RTSP），requests无法处理，直接跳过
-            if content_path.lower().startswith(('http://', 'https://')):
-                self.log("正在使用 requests 预处理HTTP/HTTPS URL以获取最终地址...")
-                try:
-                    headers = {'User-Agent': user_agent}
-                    response = requests.get(content_path, headers=headers, stream=True, timeout=15, allow_redirects=True)
-                    response.raise_for_status()
-                    final_content_path = response.url
-                    if final_content_path != content_path:
-                        self.log(f"URL重定向成功！最终播放地址为: {final_content_path}")
-                    else:
-                        self.log("URL无需重定向，使用原始地址。")
-                    response.close()
-                except requests.exceptions.RequestException as e:
-                    self.log(f"!!! 预处理URL时发生网络错误: {e}。将尝试使用原始地址播放。")
-                    final_content_path = content_path
+        # 即使有代理，也保留VLC实例的UA设置，作为一种备用/双重保障
+        vlc_instance_options = [
+            '--no-xlib', 
+            '--network-caching=5000',
+            f'--http-user-agent={user_agent}' 
+        ]
+        
+        # 如果不使用代理，才进行预处理
+        is_http_url = content_path.lower().startswith(('http://', 'https://'))
+        if is_http_url and not custom_ua: 
+            self.log("检测到HTTP/HTTPS链接，正在进行预处理以获取最终地址...")
+            try:
+                headers = {'User-Agent': user_agent}
+                response = requests.get(content_path, headers=headers, stream=True, timeout=10, allow_redirects=True)
+                response.raise_for_status()
+                redirected_url = response.url
+                if redirected_url != content_path:
+                    self.log(f"URL重定向成功！最终播放地址为: {redirected_url}")
+                    final_content_path = redirected_url # 更新播放地址
+                else:
+                    self.log("URL无需重定向，使用原始地址。")
+                response.close()
+            except requests.exceptions.RequestException as e:
+                self.log(f"!!! 预处理URL时发生网络错误: {e}")
         
         main_url_part = final_content_path.split('?')[0]
         is_m3u8_playlist = main_url_part.lower().endswith(('.m3u', '.m3u8'))
@@ -7510,49 +7561,31 @@ class TimedBroadcastApp:
 
             instance = vlc.Instance(vlc_instance_options)
 
-            if not instance:
-                self.log("!!! 严重错误: VLC核心引擎初始化失败(vlc.Instance()返回None) !!!")
-                self.log("!!! 请检查您的VLC安装和Python架构是否匹配。")
-                self._play_reminder_sound() 
-                return
-
             if is_folder_mode:
                 self.log(f"检测到视频文件夹模式，正在扫描: {content_path}")
                 self.vlc_list_player = instance.media_list_player_new()
                 self.vlc_player = self.vlc_list_player.get_media_player()
-
                 media_list = instance.media_list_new()
                 VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.mpg', '.mpeg', '.rmvb', '.rm', '.webm', '.vob', '.ts', '.3gp')
                 video_files = [os.path.join(content_path, f) for f in os.listdir(content_path) if f.lower().endswith(VIDEO_EXTENSIONS)]
-
-                if task.get('play_order') == 'random':
-                    random.shuffle(video_files)
-                else:
-                    video_files.sort()
-
-                if not video_files:
-                    raise ValueError("视频文件夹为空或不包含支持的视频文件。")
-
+                if task.get('play_order') == 'random': random.shuffle(video_files)
+                else: video_files.sort()
+                if not video_files: raise ValueError("视频文件夹为空或不包含支持的视频文件。")
                 self.log(f"找到 {len(video_files)} 个视频文件，正在添加到播放列表...")
-                for video_file in video_files:
-                    media_list.add_media(instance.media_new(video_file))
-                
+                for video_file in video_files: media_list.add_media(instance.media_new(video_file))
                 self.vlc_list_player.set_media_list(media_list)
-
-            else: # 单个文件或网络流 (包括M3U8)
+            else: 
+                # --- ▼▼▼ 核心修改 2：确保VLC打开的是改写后的URL ▼▼▼ ---
                 media = instance.media_new(final_content_path)
+                # --- ▲▲▲ 修改结束 ▲▲▲ ---
                 
-                # 保留最强力的 media.add_option() 来处理User-Agent
-                if is_http_url:
-                    media.add_option(f':http-user-agent={user_agent}')
-
-                if is_playlist_mode: # M3U8
+                if is_playlist_mode: 
                     self.log(f"检测到播放列表，启用MediaListPlayer模式。")
                     media_list = instance.media_list_new([media])
                     self.vlc_list_player = instance.media_list_player_new()
                     self.vlc_player = self.vlc_list_player.get_media_player()
                     self.vlc_list_player.set_media_list(media_list)
-                else: # 普通单个文件/流
+                else: 
                     self.log(f"播放单个媒体文件/流: {final_content_path}")
                     self.vlc_player = instance.media_player_new()
                     self.vlc_player.set_media(media)
@@ -7580,7 +7613,6 @@ class TimedBroadcastApp:
             self.log("已发送播放指令，等待VLC引擎响应...")
             
             player_to_check = self.vlc_player
-
             start_time = time.time()
             last_text_update_time = 0
             interval_type = task.get('interval_type', 'first')
@@ -7594,7 +7626,6 @@ class TimedBroadcastApp:
 
                 now = time.time()
                 if now - last_text_update_time >= 1.0:
-                    
                     current_media = player_to_check.get_media()
                     display_name = "加载中..."
                     if current_media:
@@ -7608,10 +7639,8 @@ class TimedBroadcastApp:
                     
                     state = player_to_check.get_state()
                     status_text = "播放中"
-                    if state == vlc.State.Buffering:
-                        status_text = "缓冲中..."
-                    elif state == vlc.State.Paused:
-                        status_text = "已暂停"
+                    if state == vlc.State.Buffering: status_text = "缓冲中..."
+                    elif state == vlc.State.Paused: status_text = "已暂停"
 
                     if interval_type == 'seconds' and duration_seconds > 0:
                         elapsed = now - start_time
@@ -8113,6 +8142,49 @@ class TimedBroadcastApp:
         self.root.after(0, self.root.deiconify)
         self.log("程序已从托盘恢复。")
 
+    def _start_ua_proxy(self, user_agent):
+        """按需启动本地UA代理服务器，并返回可用端口"""
+        if self.ua_proxy_server:
+            self.log("UA代理服务器已在运行中。")
+            return self.ua_proxy_port
+
+        try:
+            # 动态设置User-Agent
+            UAProxyHandler.user_agent = user_agent
+            
+            # 寻找一个随机的可用端口
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('', 0))
+                port = s.getsockname()[1]
+            
+            self.ua_proxy_port = port
+            self.ua_proxy_server = HTTPServer(('127.0.0.1', self.ua_proxy_port), UAProxyHandler)
+            
+            # 使用守护线程运行代理，这样主程序退出时它也会自动退出
+            self.ua_proxy_thread = threading.Thread(target=self.ua_proxy_server.serve_forever, daemon=True)
+            self.ua_proxy_thread.start()
+            
+            self.log(f"已为 User-Agent 启动本地代理，监听于 127.0.0.1:{self.ua_proxy_port}")
+            return self.ua_proxy_port
+        except Exception as e:
+            self.log(f"!!! 启动UA代理服务器失败: {e}")
+            self.ua_proxy_server = None
+            self.ua_proxy_port = None
+            return None
+
+    def _stop_ua_proxy(self):
+        """安全地关闭UA代理服务器"""
+        if self.ua_proxy_server:
+            self.log("正在关闭UA代理服务器...")
+            try:
+                # 在一个新线程中关闭，避免阻塞主线程
+                threading.Thread(target=self.ua_proxy_server.shutdown, daemon=True).start()
+                self.ua_proxy_server = None
+                self.log("UA代理服务器已关闭。")
+            except Exception as e:
+                self.log(f"关闭UA代理服务器时出错: {e}")
+
+
     def quit_app(self, icon=None, item=None):
         # --- ↓↓↓ 新增/修正：在退出时写入时间戳文件 ↓↓↓ ---
         try:
@@ -8128,6 +8200,8 @@ class TimedBroadcastApp:
         if self.tray_icon: self.tray_icon.stop()
         self.running = False
         self.playback_command_queue.put(('STOP', None))
+
+        self._stop_ua_proxy() # 退出前关闭代理服务器
 
         if self.root.state() == 'normal':
             self.settings["window_geometry"] = self.root.geometry()
