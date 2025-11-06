@@ -7465,25 +7465,34 @@ class TimedBroadcastApp:
         if custom_ua:
             self.log(f"检测到自定义User-Agent，将使用: {user_agent}")
 
-        # --- ↓↓↓ 最终修复：大幅增加缓存并添加HLS优化参数 ↓↓↓ ---
+        # 最终修复：移除导致VLC引擎损坏的--http-user-agent，只保留正确的性能参数
         vlc_instance_options = [
             '--no-xlib', 
-            # 将网络缓存从5秒增加到15秒，这是解决卡顿最关键的一步
             '--network-caching=15000', 
-            # 增加HLS直播流的边缘缓冲区，提高稳定性
             '--hls-live-edge=6',
-            # 增加复用器缓存，对某些流有帮助
             '--sout-mux-caching=2000',
-            # 全局设置User-Agent，依然是基础
-            f'--http-user-agent={user_agent}' 
         ]
-        # --- ↑↑↑ 修复结束 ↑↑↑ ---
         
-        # --- ↓↓↓ 最终修复：移除requests预处理，让VLC全权负责网络 ↓↓↓ ---
+        # 最终修复：恢复 requests 预处理，确保能找到正确的直播地址
         content_path = task.get('content', '')
-        final_content_path = content_path # 直接使用原始路径
+        final_content_path = content_path
         is_http_url = content_path.lower().startswith(('http://', 'https://'))
-        # --- ↑↑↑ 修复结束 ↑↑↑ ---
+        
+        if is_http_url:
+            self.log("正在使用 requests 预处理URL以获取最终地址...")
+            try:
+                headers = {'User-Agent': user_agent}
+                response = requests.get(content_path, headers=headers, stream=True, timeout=15, allow_redirects=True)
+                response.raise_for_status()
+                final_content_path = response.url
+                if final_content_path != content_path:
+                    self.log(f"URL重定向成功！最终播放地址为: {final_content_path}")
+                else:
+                    self.log("URL无需重定向，使用原始地址。")
+                response.close()
+            except requests.exceptions.RequestException as e:
+                self.log(f"!!! 预处理URL时发生网络错误: {e}。将尝试使用原始地址播放。")
+                final_content_path = content_path
         
         main_url_part = final_content_path.split('?')[0]
         is_m3u8_playlist = main_url_part.lower().endswith(('.m3u', '.m3u8'))
@@ -7498,6 +7507,12 @@ class TimedBroadcastApp:
                 pygame.mixer.music.stop(); pygame.mixer.stop()
 
             instance = vlc.Instance(vlc_instance_options)
+
+            if not instance:
+                self.log("!!! 严重错误: VLC核心引擎初始化失败(vlc.Instance()返回None) !!!")
+                self.log("!!! 请检查: 1. Python和VLC播放器的架构是否一致(同为64位或32位)。 2. VLC播放器是否已完整安装。")
+                self._play_reminder_sound() 
+                return
 
             if is_folder_mode:
                 self.log(f"检测到视频文件夹模式，正在扫描: {content_path}")
@@ -7525,7 +7540,7 @@ class TimedBroadcastApp:
             else: # 单个文件或网络流 (包括M3U8)
                 media = instance.media_new(final_content_path)
                 
-                # 仍然保留add_option作为对特定流的强力保障
+                # 最终修复：只使用 media.add_option() 来处理网络流的User-Agent
                 if is_http_url:
                     media.add_option(f':http-user-agent={user_agent}')
 
@@ -7584,6 +7599,7 @@ class TimedBroadcastApp:
                         mrl = current_media.get_mrl()
                         if mrl:
                             try:
+                                # 最终修复：使用标准库urllib.parse.unquote进行健壮的解码
                                 decoded_mrl = urllib.parse.unquote(mrl)
                                 display_name = os.path.basename(decoded_mrl)
                             except Exception:
