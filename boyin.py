@@ -7441,6 +7441,7 @@ class TimedBroadcastApp:
             return
 
         import urllib.parse
+        import re
 
         # --- 清理并初始化状态 ---
         self.manual_playlist = []
@@ -7456,7 +7457,7 @@ class TimedBroadcastApp:
             
             use_proxy = bool(custom_ua)
 
-            # --- 核心逻辑最终版：基于内容特征的智能判断 ---
+            # --- 核心逻辑最终版：逐行扫描，精准判断 ---
 
             # 1. 首先处理本地文件夹的情况
             if task.get('video_type') == 'folder' and os.path.isdir(content_path):
@@ -7483,34 +7484,36 @@ class TimedBroadcastApp:
                         headers = {'User-Agent': user_agent} if use_proxy else {}
                         response = requests.get(content_path, headers=headers, timeout=15, allow_redirects=True)
                         response.raise_for_status()
-                        content = response.text
+                        content_lines = response.text.splitlines() # 直接分割成行
                         final_url = response.url
                     except requests.exceptions.RequestException as e:
                         raise Exception(f"网络链接探测失败: {e}")
 
-                    # --- 黄金法则最终版：检查内容是否包含媒体切片 ---
-                    if re.search(r'\.(ts|mp4|mkv|flv)(\?|$)', content):
+                    # --- 黄金法则最终版：逐行扫描内容 ---
+                    is_direct_stream = False
+                    for line in content_lines:
+                        # 对每一行进行精确匹配
+                        if re.search(r'\.(ts|mp4|mkv|flv)(\?|$)', line):
+                            is_direct_stream = True
+                            break # 找到一个就够了，立刻停止扫描
+
+                    if is_direct_stream:
                         self.log("模式: 检测到媒体切片 -> 作为单个直播流处理")
-                        self.manual_playlist = [content_path] # 直接使用原始链接
-                        is_playlist_mode = False # 这是一个单独的流，禁用上/下切换
+                        self.manual_playlist = [content_path]
+                        is_playlist_mode = False
                     else:
-                        # 否则，我们认为它是一个频道列表，并尝试解析
                         self.log("模式: 未检测到媒体切片 -> 作为频道列表解析")
                         is_playlist_mode = True
                         parsed_items = []
-                        lines = content.split('\n')
-                        
-                        for line in lines:
+                        for line in content_lines:
                             line = line.strip()
                             if line and not line.startswith('#'):
-                                # 尝试从 "频道名,URL" 格式中提取URL
                                 if ',' in line and 'http' in line:
                                     try:
                                         url = line.split(',', 1)[1].strip()
                                         if url: parsed_items.append(url)
-                                    except IndexError:
-                                        continue
-                                else: # 否则直接将该行作为URL
+                                    except IndexError: continue
+                                else:
                                     absolute_line_url = urllib.parse.urljoin(final_url, line)
                                     parsed_items.append(absolute_line_url)
                         
@@ -7529,14 +7532,15 @@ class TimedBroadcastApp:
             
             self.log(f"最终播放列表包含 {len(self.manual_playlist)} 个项目。快捷键切换功能: {'启用' if is_playlist_mode else '禁用'}")
 
-            # --- 后续的VLC播放逻辑保持不变 ---
+            # --- 后续的VLC播放逻辑，增加优化参数 ---
             if use_proxy:
                 if not self._start_ua_proxy(user_agent):
-                    self.log("!!! 代理启动失败，播放可能失败。")
-                    use_proxy = False
+                    self.log("!!! 代理启动失败，播放可能失败。"); use_proxy = False
 
             if AUDIO_AVAILABLE: pygame.mixer.music.stop(); pygame.mixer.stop()
-            vlc_instance_options = ['--no-xlib']
+            
+            # 为VLC增加网络缓存和日志参数，增强稳定性
+            vlc_instance_options = ['--no-xlib', '--network-caching=5000']
             instance = vlc.Instance(vlc_instance_options)
             self.vlc_player = instance.media_player_new()
             
