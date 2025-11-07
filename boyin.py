@@ -4688,7 +4688,7 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改视频节目" if is_edit_mode else "添加视频节目")
         dialog.resizable(True, True)
-        dialog.minsize(800, 600)
+        dialog.minsize(800, 580) # 高度可以改回 580 了
         dialog.transient(self.root)
 
         dialog.attributes('-topmost', True)
@@ -4718,12 +4718,11 @@ class TimedBroadcastApp:
         other_frame.grid(row=3, column=0, sticky='ew', pady=5)
         other_frame.columnconfigure(1, weight=1)
 
+        # --- content_frame 内容 (无变化) ---
         ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
-
         video_type_var = tk.StringVar(value="single")
-
         ttk.Label(content_frame, text="视频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
         video_single_frame = ttk.Frame(content_frame)
         video_single_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -4731,17 +4730,12 @@ class TimedBroadcastApp:
         ttk.Radiobutton(video_single_frame, text="", variable=video_type_var, value="single").grid(row=0, column=0, sticky='w')
         video_single_entry = ttk.Entry(video_single_frame, font=self.font_11)
         video_single_entry.grid(row=0, column=1, sticky='ew', padx=5)
-
         def select_single_video():
             ftypes = [("视频文件", "*.mp4 *.mkv *.avi *.mov *.wmv *.flv"), ("所有文件", "*.*")]
             filename = filedialog.askopenfilename(title="选择视频文件", filetypes=ftypes, parent=dialog)
-            if filename:
-                video_single_entry.delete(0, END)
-                video_single_entry.insert(0, filename)
+            if filename: video_single_entry.delete(0, END); video_single_entry.insert(0, filename)
         ttk.Button(video_single_frame, text="选取...", command=select_single_video, bootstyle="outline").grid(row=0, column=2, padx=5)
-
         ttk.Label(content_frame, text="(支持本地文件路径或网络URL地址)", font=self.font_9, bootstyle="info").grid(row=2, column=1, sticky='w', padx=5)
-
         ttk.Label(content_frame, text="视频文件夹:").grid(row=3, column=0, sticky='e', padx=5, pady=2)
         video_folder_frame = ttk.Frame(content_frame)
         video_folder_frame.grid(row=3, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -4749,57 +4743,59 @@ class TimedBroadcastApp:
         ttk.Radiobutton(video_folder_frame, text="", variable=video_type_var, value="folder").grid(row=0, column=0, sticky='w')
         video_folder_entry = ttk.Entry(video_folder_frame, font=self.font_11)
         video_folder_entry.grid(row=0, column=1, sticky='ew', padx=5)
-
         def select_folder(entry_widget):
             foldername = filedialog.askdirectory(title="选择文件夹", initialdir=application_path, parent=dialog)
-            if foldername:
-                entry_widget.delete(0, END)
-                entry_widget.insert(0, foldername)
+            if foldername: entry_widget.delete(0, END); entry_widget.insert(0, foldername)
         ttk.Button(video_folder_frame, text="选取...", command=lambda: select_folder(video_folder_entry), bootstyle="outline").grid(row=0, column=2, padx=5)
-
         play_order_frame = ttk.Frame(content_frame)
         play_order_frame.grid(row=4, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         play_order_var = tk.StringVar(value="sequential")
         ttk.Radiobutton(play_order_frame, text="顺序播", variable=play_order_var, value="sequential").pack(side=LEFT, padx=10)
         ttk.Radiobutton(play_order_frame, text="随机播", variable=play_order_var, value="random").pack(side=LEFT, padx=10)
-        
         ttk.Label(play_order_frame, text="音量:").pack(side=LEFT, padx=(20, 2))
         volume_entry = ttk.Entry(play_order_frame, font=self.font_11, width=5)
         volume_entry.pack(side=LEFT)
         ttk.Label(play_order_frame, text="(0-100)").pack(side=LEFT, padx=2)
-
         custom_ua_var = tk.StringVar()
         ttk.Label(play_order_frame, text="自定义UA:").pack(side=LEFT, padx=(20, 2))
         ua_entry = ttk.Entry(play_order_frame, textvariable=custom_ua_var, font=self.font_11, width=25)
         ua_entry.pack(side=LEFT, fill=X, expand=True)
 
-        playback_frame.columnconfigure(1, weight=1)
+        # --- ▼▼▼ playback_frame 的最终布局 ▼▼▼ ---
+        playback_frame.columnconfigure(0, weight=1) # 允许伸展
+
+        # 只有一行，所有东西都在 mode_frame 里
         mode_frame = ttk.Frame(playback_frame)
-        mode_frame.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 5))
+        mode_frame.grid(row=0, column=0, sticky='w')
+        
         playback_mode_var = tk.StringVar(value="fullscreen")
         resolutions = ["640x480", "800x600", "1024x768", "1280x720", "1366x768", "1600x900", "1920x1080"]
         resolution_var = tk.StringVar(value=resolutions[2])
         resolution_combo = ttk.Combobox(mode_frame, textvariable=resolution_var, values=resolutions, font=self.font_11, width=12, state='readonly')
+        
         def toggle_resolution_combo():
             state = 'readonly' if playback_mode_var.get() == "windowed" else 'disabled'
             resolution_combo.config(state=state)
+            
         ttk.Radiobutton(mode_frame, text="无边框全屏", variable=playback_mode_var, value="fullscreen", command=toggle_resolution_combo).pack(side=LEFT, padx=5)
         ttk.Radiobutton(mode_frame, text="非全屏", variable=playback_mode_var, value="windowed", command=toggle_resolution_combo).pack(side=LEFT, padx=5)
         resolution_combo.pack(side=LEFT, padx=(5, 10))
         toggle_resolution_combo()
-        adv_frame = ttk.Frame(playback_frame)
-        adv_frame.grid(row=1, column=0, columnspan=2, sticky='w', pady=5)
+
         playback_rates = ['0.5x', '0.75x', '1.0x (正常)', '1.25x', '1.5x', '2.0x']
         playback_rate_var = tk.StringVar(value='1.0x (正常)')
-        ttk.Label(adv_frame, text="倍速:").pack(side=LEFT, padx=(5,0))
-        rate_combo = ttk.Combobox(adv_frame, textvariable=playback_rate_var, values=playback_rates, font=self.font_11, width=10)
+        
+        ttk.Label(mode_frame, text="倍速:").pack(side=LEFT, padx=(15, 0)) # 增加左边距
+        rate_combo = ttk.Combobox(mode_frame, textvariable=playback_rate_var, values=playback_rates, font=self.font_11, width=10)
         rate_combo.pack(side=LEFT, padx=2)
-        ttk.Label(adv_frame, text="(0.25-4.0)", font=self.font_9, bootstyle="secondary").pack(side=LEFT, padx=2)
+        ttk.Label(mode_frame, text="(0.25-4.0)", font=self.font_9, bootstyle="secondary").pack(side=LEFT, padx=2)
         
         ua_first_var = tk.BooleanVar()
-        probe_check = ttk.Checkbutton(adv_frame, variable=ua_first_var, text="特殊直播源 (探测时优先使用UA)")
+        probe_check = ttk.Checkbutton(mode_frame, variable=ua_first_var, text="特殊直播源 (探测时优先使用UA)")
         probe_check.pack(side=LEFT, padx=(20, 5))
+        # --- ▲▲▲ playback_frame 布局结束 ▲▲▲ ---
 
+        # ... (time_frame 和 other_frame 的内容保持不变) ...
         ttk.Label(time_frame, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         start_time_entry = ttk.Entry(time_frame, font=self.font_11)
         start_time_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
@@ -4883,6 +4879,7 @@ class TimedBroadcastApp:
             date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
 
         def save_task():
+            # ... (所有验证不变) ...
             try:
                 volume = int(volume_entry.get().strip() or 80)
                 if not (0 <= volume <= 100): messagebox.showerror("输入错误", "音量必须是 0 到 100 之间的整数。", parent=dialog); return
@@ -7475,12 +7472,16 @@ class TimedBroadcastApp:
         self.vlc_list_player = None
 
         try:
+            # --- ▼▼▼ 最终修正：在这里初始化 is_playlist_mode 作为安全默认值 ▼▼▼ ---
+            is_playlist_mode = False
+            # --- ▲▲▲ 修正结束 ▲▲▲ ---
+
             custom_ua = task.get('custom_user_agent', '').strip()
             user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             content_path = task.get('content', '')
             
             use_proxy = bool(custom_ua)
-            ua_first_probe = task.get('ua_first_probe', False) # 读取UI选项
+            ua_first_probe = task.get('ua_first_probe', False)
 
             if content_path.lower().startswith(('http://', 'https://')):
                 self.log(f"正在处理网络链接: {content_path}")
@@ -7488,7 +7489,6 @@ class TimedBroadcastApp:
                 content = None
                 response = None
 
-                # 定义探测函数，避免代码重复
                 def probe_with_ua():
                     self.log("...尝试带UA访问...")
                     headers = {'User-Agent': user_agent}
@@ -7500,7 +7500,6 @@ class TimedBroadcastApp:
 
                 try:
                     if use_proxy and ua_first_probe:
-                        # 策略1：用户勾选了“特殊模式”，带UA优先
                         self.log("探测策略：带UA优先 (特殊模式)")
                         try:
                             response = probe_with_ua()
@@ -7510,7 +7509,6 @@ class TimedBroadcastApp:
                             response = probe_without_ua()
                             response.raise_for_status()
                     else:
-                        # 策略2：默认模式，无UA优先
                         self.log("探测策略：无UA优先 (默认)")
                         try:
                             response = probe_without_ua()
@@ -7521,11 +7519,11 @@ class TimedBroadcastApp:
                                 response = probe_with_ua()
                                 response.raise_for_status()
                             else:
-                                raise e # 如果没有UA可回退，则直接抛出异常
+                                raise e
                     
                     final_url = response.url
                     content = response.text
-                    self.log("探测成功，获取到播放列表。")
+                    self.log("探测成功，获取到返回内容。")
 
                 except requests.exceptions.RequestException as e_final:
                     raise Exception(f"所有探测尝试均失败: {e_final}")
@@ -7535,18 +7533,41 @@ class TimedBroadcastApp:
                 
                 if '#EXT-X-STREAM-INF' in content:
                     is_playlist_mode = True
-                    self.log("检测到主播放列表(Master Playlist)，正在手动解析频道...")
+                    self.log("检测到 HLS 主播放列表，正在解析...")
                     lines = content.split('\n')
                     for line in lines:
                         line = line.strip()
                         if line and not line.startswith('#'):
                             absolute_line_url = urllib.parse.urljoin(final_url, line)
                             self.manual_playlist.append(absolute_line_url)
-                    if not self.manual_playlist: raise ValueError("主播放列表为空或解析失败。")
-                    self.log(f"已构建网络播放列表，包含 {len(self.manual_playlist)} 个频道/流。")
+                elif '#EXTM3U' in content and '#EXTINF' in content:
+                    is_playlist_mode = True
+                    self.log("检测到 Extended M3U 播放列表，正在解析...")
+                    lines = content.split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            absolute_line_url = urllib.parse.urljoin(final_url, line)
+                            self.manual_playlist.append(absolute_line_url)
+                elif ',' in content and 'http' in content and not content.startswith('#EXTM3U'):
+                    is_playlist_mode = True
+                    self.log("检测到自定义CSV格式播放列表，正在解析...")
+                    lines = content.split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        if ',' in line and 'http' in line:
+                            try:
+                                parts = line.split(',', 1)
+                                url = parts[1].strip()
+                                if url: self.manual_playlist.append(url)
+                            except IndexError:
+                                continue
                 else:
-                    self.log("检测到单个媒体流或媒体播放列表(Media Playlist)，将作为一个整体播放。")
+                    self.log("未识别出可解析的播放列表格式，将作为单个媒体流处理。")
                     self.manual_playlist = [final_url]
+
+                if not self.manual_playlist: raise ValueError("解析后播放列表为空。")
+                self.log(f"已构建播放列表，包含 {len(self.manual_playlist)} 个项目。")
             
             elif task.get('video_type') == 'folder' and os.path.isdir(content_path):
                 is_playlist_mode = True
