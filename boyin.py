@@ -7448,7 +7448,7 @@ class TimedBroadcastApp:
         self.current_playlist_index = 0
         self.vlc_player = None
         self.vlc_list_player = None
-        self.current_task_requires_proxy = False # 修复B的关键：初始化“短期记忆”
+        self.current_task_requires_proxy = False # 用于修复B链接的“短期记忆”
 
         try:
             is_playlist_mode = False
@@ -7456,13 +7456,13 @@ class TimedBroadcastApp:
             user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             content_path = task.get('content', '')
             
-            # --- 核心逻辑最终版: 严格遵循您的三条规则 ---
+            # --- 核心逻辑最终版: 严格遵循您的规则 ---
             
-            # 规则判断1: 播放时是否需要代理？ (对应A和E)
+            # 规则1: 播放时是否需要代理？ (只要填了UA就需要)
             playback_requires_proxy = bool(custom_ua)
             self.current_task_requires_proxy = playback_requires_proxy
 
-            # 规则判断2: 预探测时是否需要UA？ (仅对应E)
+            # 规则2: 预探测时是否需要UA？ (只有勾选“特殊”时才需要)
             probe_with_ua = playback_requires_proxy and task.get('ua_first_probe', False)
 
             # 1. 处理本地文件夹 (逻辑不变)
@@ -7487,6 +7487,7 @@ class TimedBroadcastApp:
                     self.log(f"正在探测网络链接: {content_path}")
                     self.log(f"探测策略: {'带UA探测 (特殊模式)' if probe_with_ua else '常规探测'}")
                     try:
+                        # 严格按照您的规则决定探测时是否带UA
                         headers = {'User-Agent': user_agent} if probe_with_ua else {}
                         response = requests.get(content_path, headers=headers, timeout=15, allow_redirects=True)
                         response.raise_for_status()
@@ -7495,7 +7496,7 @@ class TimedBroadcastApp:
                     except requests.exceptions.RequestException as e:
                         raise Exception(f"网络链接探测失败: {e}")
 
-                    # 修复C的关键：使用更宽容的字符串查找
+                    # 使用最稳健的字符串查找来判断
                     is_direct_stream = False
                     for line in content_lines:
                         if ".ts" in line or ".mp4" in line or ".mkv" in line or ".flv" in line:
@@ -7536,23 +7537,13 @@ class TimedBroadcastApp:
 
             if AUDIO_AVAILABLE: pygame.mixer.music.stop(); pygame.mixer.stop()
             
-            # --- 最终修复A的关键：分而治之 ---
-            use_native_ua_mode = playback_requires_proxy and not task.get('ua_first_probe', False)
-
-            if use_native_ua_mode:
-                # A链接的方案: 不启动代理，使用VLC原生UA
-                self.log("播放策略: 启用VLC原生UA模式 (针对A类链接)")
-                self.current_task_requires_proxy = False # 明确告知后续函数不要用代理
-                vlc_instance_options = ['--no-xlib', '--network-caching=5000', f'--http-user-agent={user_agent}']
-            else:
-                # B,C,D,E的方案: 沿用您现有的代理逻辑
-                self.log(f"播放策略: 标准模式 (代理: {'启用' if self.current_task_requires_proxy else '禁用'})")
-                if self.current_task_requires_proxy:
-                    if not self._start_ua_proxy(user_agent):
-                        self.log("!!! 代理启动失败，播放可能失败。"); 
-                        self.current_task_requires_proxy = False
-                vlc_instance_options = ['--no-xlib', '--network-caching=5000']
-
+            # --- 最终修复A的关键：彻底移除VLC原生UA，只依赖代理 ---
+            if playback_requires_proxy:
+                if not self._start_ua_proxy(user_agent):
+                    self.log("!!! 代理启动失败，播放可能失败。"); 
+                    self.current_task_requires_proxy = False
+            
+            vlc_instance_options = ['--no-xlib', '--network-caching=5000']
             instance = vlc.Instance(vlc_instance_options)
             self.vlc_player = instance.media_player_new()
             
