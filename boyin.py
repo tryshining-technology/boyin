@@ -7534,7 +7534,7 @@ class TimedBroadcastApp:
             if AUDIO_AVAILABLE: pygame.mixer.music.stop(); pygame.mixer.stop()
             
             # --- 修复A的关键：为VLC实例也设置UA，形成双保险 ---
-            vlc_instance_options = ['--no-xlib', '--network-caching=1500', f'--http-user-agent={user_agent}']
+            vlc_instance_options = ['--no-xlib', '--network-caching=5000']
             instance = vlc.Instance(vlc_instance_options)
             self.vlc_player = instance.media_player_new()
             
