@@ -7455,163 +7455,124 @@ class TimedBroadcastApp:
             content_path = task.get('content', '')
             
             use_proxy = bool(custom_ua)
-            ua_first_probe = task.get('ua_first_probe', False)
 
-            if content_path.lower().startswith(('http://', 'https://')):
-                self.log(f"正在处理网络链接: {content_path}")
-                final_url = None
-                content = None
-                response = None
+            # --- 核心逻辑最终版：基于内容特征的智能判断 ---
 
-                # 定义探测函数
-                def probe_with_ua():
-                    self.log("...尝试带UA访问...")
-                    headers = {'User-Agent': user_agent}
-                    return requests.get(content_path, headers=headers, timeout=15, allow_redirects=True)
-
-                def probe_without_ua():
-                    self.log("...尝试无UA访问...")
-                    return requests.get(content_path, timeout=10, allow_redirects=True)
-
-                try:
-                    if use_proxy and ua_first_probe:
-                        self.log("探测策略：带UA优先 (特殊模式)")
-                        try:
-                            response = probe_with_ua()
-                            response.raise_for_status()
-                        except requests.exceptions.RequestException as e:
-                            self.log(f"带UA访问失败: {e}，回退到无UA访问。")
-                            response = probe_without_ua()
-                            response.raise_for_status()
-                    else:
-                        self.log("探测策略：无UA优先 (默认)")
-                        try:
-                            response = probe_without_ua()
-                            # 检查返回的内容是否是“假成功”的UA错误提示
-                            if use_proxy and "user-agent" in response.text.lower() and response.status_code == 200:
-                                self.log("无UA访问返回了UA错误提示，将强制尝试带UA访问。")
-                                raise requests.exceptions.RequestException("Server returned UA error page.")
-                            response.raise_for_status()
-                        except requests.exceptions.RequestException as e:
-                            self.log(f"无UA访问失败或需要UA: {e}")
-                            if use_proxy:
-                                self.log("回退阶段: 尝试带UA访问...")
-                                response = probe_with_ua()
-                                response.raise_for_status()
-                            else:
-                                raise e
-                    
-                    final_url = response.url
-                    content = response.text
-                    self.log("探测成功，获取到返回内容。")
-
-                except requests.exceptions.RequestException as e_final:
-                    raise Exception(f"所有探测尝试均失败: {e_final}")
-
-                if not final_url or content is None:
-                    raise Exception("未能获取到任何有效的播放列表内容。")
-                
-                # --- ▼▼▼ 最终、最强大的判断逻辑 ▼▼▼ ---
-                if '#EXT-X-STREAM-INF' in content:
-                    is_playlist_mode = True
-                    self.log("检测到 HLS 主播放列表，正在解析...")
-                    lines = content.split('\n')
-                    for line in lines:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            absolute_line_url = urllib.parse.urljoin(final_url, line)
-                            self.manual_playlist.append(absolute_line_url)
-                elif '#EXTM3U' in content and '#EXTINF' in content:
-                    is_playlist_mode = True
-                    self.log("检测到 Extended M3U 播放列表，正在解析...")
-                    lines = content.split('\n')
-                    for line in lines:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            absolute_line_url = urllib.parse.urljoin(final_url, line)
-                            self.manual_playlist.append(absolute_line_url)
-                elif ',' in content and 'http' in content and not content.startswith('#EXTM3U'):
-                    is_playlist_mode = True
-                    self.log("检测到自定义CSV格式播放列表，正在解析...")
-                    lines = content.split('\n')
-                    for line in lines:
-                        line = line.strip()
-                        if ',' in line and 'http' in line:
-                            try:
-                                parts = line.split(',', 1)
-                                url = parts[1].strip()
-                                if url: self.manual_playlist.append(url)
-                            except IndexError:
-                                continue
-                else:
-                    self.log("未识别出可解析的播放列表格式，将作为单个媒体流处理。")
-                    self.manual_playlist = [final_url]
-                # --- ▲▲▲ 判断逻辑结束 ▲▲▲ ---
-
-                if not self.manual_playlist: raise ValueError("解析后播放列表为空。")
-                self.log(f"已构建播放列表，包含 {len(self.manual_playlist)} 个项目。")
-            
-            elif task.get('video_type') == 'folder' and os.path.isdir(content_path):
+            # 1. 首先处理本地文件夹的情况
+            if task.get('video_type') == 'folder' and os.path.isdir(content_path):
                 is_playlist_mode = True
-                self.log(f"检测到视频文件夹模式，正在扫描: {content_path}")
+                self.log(f"模式: 本地文件夹 -> 解析为播放列表")
                 VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.mpg', '.mpeg', '.rmvb', '.rm', '.webm', '.vob', '.ts', '.3gp')
                 video_files = [os.path.join(content_path, f) for f in os.listdir(content_path) if f.lower().endswith(VIDEO_EXTENSIONS)]
                 if task.get('play_order') == 'random': random.shuffle(video_files)
                 else: video_files.sort()
                 if not video_files: raise ValueError("视频文件夹为空或不包含支持的视频文件。")
-                interval_type = task.get('interval_type', 'first')
+                
                 playlist_to_use = video_files
-                if interval_type == 'first':
+                if task.get('interval_type', 'first') == 'first':
                     repeat_count = int(task.get('interval_first', 1))
                     playlist_to_use = video_files[:repeat_count]
-                    self.log(f"应用“播 {repeat_count} 首”限制。播放列表大小: {len(playlist_to_use)}。")
                 self.manual_playlist = playlist_to_use
-                self.log(f"已构建本地文件播放列表，包含 {len(self.manual_playlist)} 个项目。")
-            
-            else: # 本地单个文件
-                self.manual_playlist = [content_path]
+
+            # 2. 处理网络链接和本地单个文件
+            else:
+                # 对于网络链接，我们需要先探测其内容
+                if content_path.lower().startswith(('http://', 'https://')):
+                    self.log(f"正在探测网络链接: {content_path}")
+                    try:
+                        headers = {'User-Agent': user_agent} if use_proxy else {}
+                        response = requests.get(content_path, headers=headers, timeout=15, allow_redirects=True)
+                        response.raise_for_status()
+                        content = response.text
+                        final_url = response.url
+                    except requests.exceptions.RequestException as e:
+                        raise Exception(f"网络链接探测失败: {e}")
+
+                    # --- 黄金法则最终版：检查内容是否包含媒体切片 ---
+                    if re.search(r'\.(ts|mp4|mkv|flv)(\?|$)', content):
+                        self.log("模式: 检测到媒体切片 -> 作为单个直播流处理")
+                        self.manual_playlist = [content_path] # 直接使用原始链接
+                        is_playlist_mode = False # 这是一个单独的流，禁用上/下切换
+                    else:
+                        # 否则，我们认为它是一个频道列表，并尝试解析
+                        self.log("模式: 未检测到媒体切片 -> 作为频道列表解析")
+                        is_playlist_mode = True
+                        parsed_items = []
+                        lines = content.split('\n')
+                        
+                        for line in lines:
+                            line = line.strip()
+                            if line and not line.startswith('#'):
+                                # 尝试从 "频道名,URL" 格式中提取URL
+                                if ',' in line and 'http' in line:
+                                    try:
+                                        url = line.split(',', 1)[1].strip()
+                                        if url: parsed_items.append(url)
+                                    except IndexError:
+                                        continue
+                                else: # 否则直接将该行作为URL
+                                    absolute_line_url = urllib.parse.urljoin(final_url, line)
+                                    parsed_items.append(absolute_line_url)
+                        
+                        if not parsed_items:
+                             raise ValueError("频道列表为空或解析失败。")
+                        self.manual_playlist = parsed_items
+                
+                # 3. 对于本地单个文件，直接放入列表
+                else:
+                    self.log("模式: 本地单个文件")
+                    self.manual_playlist = [content_path]
+                    is_playlist_mode = False
 
             if not self.manual_playlist:
                 raise ValueError("未能构建有效的播放列表。")
+            
+            self.log(f"最终播放列表包含 {len(self.manual_playlist)} 个项目。快捷键切换功能: {'启用' if is_playlist_mode else '禁用'}")
 
+            # --- 后续的VLC播放逻辑保持不变 ---
             if use_proxy:
                 if not self._start_ua_proxy(user_agent):
                     self.log("!!! 代理启动失败，播放可能失败。")
                     use_proxy = False
 
             if AUDIO_AVAILABLE: pygame.mixer.music.stop(); pygame.mixer.stop()
-            vlc_instance_options = ['--no-xlib', f'--http-user-agent={user_agent}']
+            vlc_instance_options = ['--no-xlib']
             instance = vlc.Instance(vlc_instance_options)
             self.vlc_player = instance.media_player_new()
+            
             if is_playlist_mode:
                 def next_item_on_end(event):
-                    self.log("--- VLC事件: 媒体播放结束，自动切换到下一个 ---")
                     self.root.after(100, self._handle_next_track)
                 event_manager = self.vlc_player.event_manager()
                 event_manager.event_attach(vlc.EventType.MediaPlayerEndReached, next_item_on_end)
+
             self.root.after(0, self._create_video_window, task, is_playlist_mode)
             time.sleep(1.0)
             if not (self.video_window and self.video_window.winfo_exists()):
                 raise Exception("视频窗口创建失败")
+            
             self.vlc_player.set_hwnd(self.video_window.winfo_id())
             if self.is_muted: self.vlc_player.audio_set_mute(True)
             else: self.vlc_player.audio_set_mute(False)
             self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
+            
             self._play_manual_playlist_item(use_proxy)
             self.log(f"已发送播放指令，开始播放第一项。")
+            
             start_time = time.time()
             last_text_update_time = 0
             interval_type = task.get('interval_type', 'first')
             duration_seconds = int(task.get('interval_seconds', 0))
+            
             while not stop_event.is_set():
                 if self._is_interrupted():
-                    self.log("播放被新指令中断。")
-                    break
+                    self.log("播放被新指令中断。"); break
+                
                 state = self.vlc_player.get_state()
                 if state in {vlc.State.Ended, vlc.State.Stopped, vlc.State.Error}:
                     if not is_playlist_mode:
-                        self.log(f"单个媒体播放结束，状态: {state}")
-                        break
+                        self.log(f"单个媒体播放结束，状态: {state}"); break
+                
                 now = time.time()
                 if now - last_text_update_time >= 1.0:
                     current_media = self.vlc_player.get_media()
@@ -7629,13 +7590,13 @@ class TimedBroadcastApp:
                     if interval_type == 'seconds' and duration_seconds > 0:
                         elapsed = now - start_time
                         if elapsed >= duration_seconds:
-                            self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
-                            break
+                            self.log(f"已达到 {duration_seconds} 秒播放时长限制。"); break
                         remaining_seconds = int(duration_seconds - elapsed)
                         self.update_playing_text(f"[{task['name']}] {display_name} ({status_text} - 剩余 {remaining_seconds} 秒)")
                     else:
                         self.update_playing_text(f"[{task['name']}] {display_name} ({status_text})")
                     last_text_update_time = now
+                
                 time.sleep(0.2)
 
         except Exception as e:
