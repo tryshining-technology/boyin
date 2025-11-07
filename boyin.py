@@ -7536,6 +7536,7 @@ class TimedBroadcastApp:
 
         import urllib.parse
 
+        # --- 清理并初始化状态 ---
         self.manual_playlist = []
         self.current_playlist_index = 0
         self.vlc_player = None
@@ -7546,74 +7547,42 @@ class TimedBroadcastApp:
             user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             content_path = task.get('content', '')
             
-            # --- 步骤 1: 决定是否需要代理 ---
+            # --- ▼▼▼ 您的最终版核心逻辑 ▼▼▼ ---
             use_proxy = bool(custom_ua)
-            
-            # --- 步骤 2: 构建播放列表 ---
-            is_playlist_mode = False
-            
-            if task.get('video_type') == 'folder' and os.path.isdir(content_path):
-                # ... (文件夹逻辑保持不变) ...
-                is_playlist_mode = True
-                self.log(f"检测到视频文件夹模式，正在扫描: {content_path}")
-                VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.mpg', '.mpeg', '.rmvb', '.rm', '.webm', '.vob', '.ts', '.3gp')
-                video_files = [os.path.join(content_path, f) for f in os.listdir(content_path) if f.lower().endswith(VIDEO_EXTENSIONS)]
-                if task.get('play_order') == 'random': random.shuffle(video_files)
-                else: video_files.sort()
-                if not video_files: raise ValueError("视频文件夹为空或不包含支持的视频文件。")
-                interval_type = task.get('interval_type', 'first')
-                playlist_to_use = video_files
-                if interval_type == 'first':
-                    repeat_count = int(task.get('interval_first', 1))
-                    playlist_to_use = video_files[:repeat_count]
-                    self.log(f"应用“播 {repeat_count} 首”限制。播放列表大小: {len(playlist_to_use)}。")
-                self.manual_playlist = playlist_to_use
-                self.log(f"已构建本地文件播放列表，包含 {len(self.manual_playlist)} 个项目。")
 
-            elif content_path.lower().startswith(('http://', 'https://')):
+            if content_path.lower().startswith(('http://', 'https://')):
                 self.log(f"正在处理网络链接: {content_path}")
                 final_url = None
                 content = None
                 response = None
 
-                # --- ▼▼▼ 最终版智能探测逻辑 ▼▼▼ ---
+                # 探测阶段：根据是否有UA，执行不同但唯一的策略
                 if use_proxy:
-                    # 策略1：优先带UA访问
-                    self.log("第一步: 尝试带UA访问...")
-                    try:
-                        headers = {'User-Agent': user_agent}
-                        response = requests.get(content_path, headers=headers, timeout=15, allow_redirects=True)
-                        response.raise_for_status()
-                        final_url = response.url
-                        content = response.text
-                        self.log("带UA访问成功，获取到播放列表。")
-                    except requests.exceptions.RequestException as e:
-                        self.log(f"带UA访问失败: {e}。")
-                        # 策略2：回退到不带UA访问
-                        self.log("第二步: 尝试无UA访问...")
-                        try:
-                            response = requests.get(content_path, timeout=10, allow_redirects=True)
-                            response.raise_for_status()
-                            final_url = response.url
-                            content = response.text
-                            self.log("无UA访问成功，获取到播放列表。")
-                        except requests.exceptions.RequestException as e2:
-                            raise Exception(f"无UA访问再次失败: {e2}")
-                else:
-                    # 如果用户没有设置UA，则只进行一次不带UA的访问
-                    self.log("正在进行无UA访问...")
+                    # 用户填写了UA -> 策略：先无UA探测，后续播放走代理
+                    self.log("策略：有UA。先进行无UA探测...")
                     try:
                         response = requests.get(content_path, timeout=10, allow_redirects=True)
                         response.raise_for_status()
-                        final_url = response.url
-                        content = response.text
+                        self.log("无UA探测成功。")
+                    except requests.exceptions.RequestException as e:
+                        # 如果连无UA探测都失败了，说明链接本身有问题
+                        raise Exception(f"探测主列表失败（无UA）: {e}")
+                else:
+                    # 用户未填写UA -> 策略：无UA探测，后续播放也无代理
+                    self.log("策略：无UA。直接访问...")
+                    try:
+                        response = requests.get(content_path, timeout=10, allow_redirects=True)
+                        response.raise_for_status()
                     except requests.exceptions.RequestException as e:
                         raise Exception(f"获取播放列表失败: {e}")
                 
+                final_url = response.url
+                content = response.text
+
                 if not final_url or content is None:
                     raise Exception("未能获取到任何有效的播放列表内容。")
-                # --- ▲▲▲ 智能探测逻辑结束 ▲▲▲ ---
-
+                
+                # 解析阶段 (逻辑不变)
                 is_master_playlist = '.m3u8' in content.lower() or '.m3u' in content.lower()
                 is_media_playlist_by_header = 'mpegurl' in response.headers.get('Content-Type', '').lower()
 
@@ -7631,6 +7600,24 @@ class TimedBroadcastApp:
                 else:
                     self.log("检测到单个媒体流或媒体播放列表(Media Playlist)，将作为一个整体播放。")
                     self.manual_playlist = [final_url]
+            
+            elif task.get('video_type') == 'folder' and os.path.isdir(content_path):
+                # ... (文件夹逻辑完全不变) ...
+                is_playlist_mode = True
+                self.log(f"检测到视频文件夹模式，正在扫描: {content_path}")
+                VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.mpg', '.mpeg', '.rmvb', '.rm', '.webm', '.vob', '.ts', '.3gp')
+                video_files = [os.path.join(content_path, f) for f in os.listdir(content_path) if f.lower().endswith(VIDEO_EXTENSIONS)]
+                if task.get('play_order') == 'random': random.shuffle(video_files)
+                else: video_files.sort()
+                if not video_files: raise ValueError("视频文件夹为空或不包含支持的视频文件。")
+                interval_type = task.get('interval_type', 'first')
+                playlist_to_use = video_files
+                if interval_type == 'first':
+                    repeat_count = int(task.get('interval_first', 1))
+                    playlist_to_use = video_files[:repeat_count]
+                    self.log(f"应用“播 {repeat_count} 首”限制。播放列表大小: {len(playlist_to_use)}。")
+                self.manual_playlist = playlist_to_use
+                self.log(f"已构建本地文件播放列表，包含 {len(self.manual_playlist)} 个项目。")
             
             else: # 本地单个文件
                 self.manual_playlist = [content_path]
