@@ -7543,11 +7543,14 @@ class TimedBroadcastApp:
         self.vlc_list_player = None
 
         try:
+            # --- ▼▼▼ 核心修正：将 is_playlist_mode 的初始化移到 try 块内部 ▼▼▼ ---
+            is_playlist_mode = False
+            # --- ▲▲▲ 修正结束 ▲▲▲ ---
+
             custom_ua = task.get('custom_user_agent', '').strip()
             user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             content_path = task.get('content', '')
             
-            # --- ▼▼▼ 您的最终版核心逻辑 ▼▼▼ ---
             use_proxy = bool(custom_ua)
 
             if content_path.lower().startswith(('http://', 'https://')):
@@ -7556,19 +7559,15 @@ class TimedBroadcastApp:
                 content = None
                 response = None
 
-                # 探测阶段：根据是否有UA，执行不同但唯一的策略
                 if use_proxy:
-                    # 用户填写了UA -> 策略：先无UA探测，后续播放走代理
                     self.log("策略：有UA。先进行无UA探测...")
                     try:
                         response = requests.get(content_path, timeout=10, allow_redirects=True)
                         response.raise_for_status()
                         self.log("无UA探测成功。")
                     except requests.exceptions.RequestException as e:
-                        # 如果连无UA探测都失败了，说明链接本身有问题
                         raise Exception(f"探测主列表失败（无UA）: {e}")
                 else:
-                    # 用户未填写UA -> 策略：无UA探测，后续播放也无代理
                     self.log("策略：无UA。直接访问...")
                     try:
                         response = requests.get(content_path, timeout=10, allow_redirects=True)
@@ -7582,7 +7581,6 @@ class TimedBroadcastApp:
                 if not final_url or content is None:
                     raise Exception("未能获取到任何有效的播放列表内容。")
                 
-                # 解析阶段 (逻辑不变)
                 is_master_playlist = '.m3u8' in content.lower() or '.m3u' in content.lower()
                 is_media_playlist_by_header = 'mpegurl' in response.headers.get('Content-Type', '').lower()
 
@@ -7602,7 +7600,6 @@ class TimedBroadcastApp:
                     self.manual_playlist = [final_url]
             
             elif task.get('video_type') == 'folder' and os.path.isdir(content_path):
-                # ... (文件夹逻辑完全不变) ...
                 is_playlist_mode = True
                 self.log(f"检测到视频文件夹模式，正在扫描: {content_path}")
                 VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.mpg', '.mpeg', '.rmvb', '.rm', '.webm', '.vob', '.ts', '.3gp')
@@ -7625,14 +7622,11 @@ class TimedBroadcastApp:
             if not self.manual_playlist:
                 raise ValueError("未能构建有效的播放列表。")
 
-            # --- 步骤 3: 启动代理（如果需要） ---
             if use_proxy:
                 if not self._start_ua_proxy(user_agent):
                     self.log("!!! 代理启动失败，播放可能失败。")
                     use_proxy = False
 
-            # --- 步骤 4 & 5 (初始化VLC, 播放和监控) ---
-            # ... (这部分代码与上一版完全相同，无需改动) ...
             if AUDIO_AVAILABLE: pygame.mixer.music.stop(); pygame.mixer.stop()
             vlc_instance_options = ['--no-xlib', f'--http-user-agent={user_agent}']
             instance = vlc.Instance(vlc_instance_options)
