@@ -4688,7 +4688,7 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改视频节目" if is_edit_mode else "添加视频节目")
         dialog.resizable(True, True)
-        dialog.minsize(800, 580)
+        dialog.minsize(800, 600)
         dialog.transient(self.root)
 
         dialog.attributes('-topmost', True)
@@ -4768,45 +4768,37 @@ class TimedBroadcastApp:
         volume_entry.pack(side=LEFT)
         ttk.Label(play_order_frame, text="(0-100)").pack(side=LEFT, padx=2)
 
-        # --- ↓↓↓ 新增UI：自定义User-Agent输入框 ↓↓↓ ---
         custom_ua_var = tk.StringVar()
         ttk.Label(play_order_frame, text="自定义UA:").pack(side=LEFT, padx=(20, 2))
         ua_entry = ttk.Entry(play_order_frame, textvariable=custom_ua_var, font=self.font_11, width=25)
         ua_entry.pack(side=LEFT, fill=X, expand=True)
-        # --- ↑↑↑ 新增结束 ↑↑↑ ---
 
+        playback_frame.columnconfigure(1, weight=1)
+        mode_frame = ttk.Frame(playback_frame)
+        mode_frame.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 5))
         playback_mode_var = tk.StringVar(value="fullscreen")
         resolutions = ["640x480", "800x600", "1024x768", "1280x720", "1366x768", "1600x900", "1920x1080"]
         resolution_var = tk.StringVar(value=resolutions[2])
-
-        playback_rates = ['0.5x', '0.75x', '1.0x (正常)', '1.25x', '1.5x', '2.0x']
-        playback_rate_var = tk.StringVar(value='1.0x (正常)')
-
-        mode_frame = ttk.Frame(playback_frame)
-        mode_frame.grid(row=0, column=0, columnspan=3, sticky='w')
-
         resolution_combo = ttk.Combobox(mode_frame, textvariable=resolution_var, values=resolutions, font=self.font_11, width=12, state='readonly')
-
         def toggle_resolution_combo():
-            if playback_mode_var.get() == "windowed":
-                resolution_combo.config(state='readonly')
-            else:
-                resolution_combo.config(state='disabled')
-
+            state = 'readonly' if playback_mode_var.get() == "windowed" else 'disabled'
+            resolution_combo.config(state=state)
         ttk.Radiobutton(mode_frame, text="无边框全屏", variable=playback_mode_var, value="fullscreen", command=toggle_resolution_combo).pack(side=LEFT, padx=5)
         ttk.Radiobutton(mode_frame, text="非全屏", variable=playback_mode_var, value="windowed", command=toggle_resolution_combo).pack(side=LEFT, padx=5)
         resolution_combo.pack(side=LEFT, padx=(5, 10))
-
-        ttk.Label(mode_frame, text="倍速:").pack(side=LEFT)
-        rate_combo = ttk.Combobox(mode_frame, textvariable=playback_rate_var, values=playback_rates, font=self.font_11, width=10)
-        rate_combo.pack(side=LEFT, padx=2)
-        ttk.Label(mode_frame, text="(0.25-4.0)", font=self.font_9, bootstyle="secondary").pack(side=LEFT, padx=2)
-
         toggle_resolution_combo()
-
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
-        time_frame.grid(row=2, column=0, sticky='ew', pady=4)
-        time_frame.columnconfigure(1, weight=1)
+        adv_frame = ttk.Frame(playback_frame)
+        adv_frame.grid(row=1, column=0, columnspan=2, sticky='w', pady=5)
+        playback_rates = ['0.5x', '0.75x', '1.0x (正常)', '1.25x', '1.5x', '2.0x']
+        playback_rate_var = tk.StringVar(value='1.0x (正常)')
+        ttk.Label(adv_frame, text="倍速:").pack(side=LEFT, padx=(5,0))
+        rate_combo = ttk.Combobox(adv_frame, textvariable=playback_rate_var, values=playback_rates, font=self.font_11, width=10)
+        rate_combo.pack(side=LEFT, padx=2)
+        ttk.Label(adv_frame, text="(0.25-4.0)", font=self.font_9, bootstyle="secondary").pack(side=LEFT, padx=2)
+        
+        ua_first_var = tk.BooleanVar()
+        probe_check = ttk.Checkbutton(adv_frame, variable=ua_first_var, text="特殊直播源 (探测时优先使用UA)")
+        probe_check.pack(side=LEFT, padx=(20, 5))
 
         ttk.Label(time_frame, text="开始时间:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         start_time_entry = ttk.Entry(time_frame, font=self.font_11)
@@ -4814,28 +4806,21 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(start_time_entry, self._handle_time_scroll)
         ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
-        
         batch_add_container = ttk.Frame(time_frame)
         batch_add_container.grid(row=0, column=4, rowspan=3, sticky='n', padx=5)
-
         batch_interval_frame = ttk.Frame(batch_add_container)
         batch_interval_frame.pack(pady=(0, 2))
         ttk.Label(batch_interval_frame, text="每").pack(side=LEFT)
         batch_interval_entry = ttk.Entry(batch_interval_frame, font=self.font_11, width=4)
         batch_interval_entry.pack(side=LEFT, padx=(2,2))
         ttk.Label(batch_interval_frame, text="分钟").pack(side=LEFT)
-
         batch_count_frame = ttk.Frame(batch_add_container)
         batch_count_frame.pack(pady=(0, 5))
         ttk.Label(batch_count_frame, text="共").pack(side=LEFT)
         batch_count_entry = ttk.Entry(batch_count_frame, font=self.font_11, width=4)
         batch_count_entry.pack(side=LEFT, padx=(2,2))
         ttk.Label(batch_count_frame, text="次   ").pack(side=LEFT)
-
-        ttk.Button(batch_add_container, text="批量添加", 
-                   command=lambda: self._apply_batch_time_addition(start_time_entry, batch_interval_entry, batch_count_entry, dialog), 
-                   bootstyle="outline-info").pack(fill=X)
-
+        ttk.Button(batch_add_container, text="批量添加", command=lambda: self._apply_batch_time_addition(start_time_entry, batch_interval_entry, batch_count_entry, dialog), bootstyle="outline-info").pack(fill=X)
         interval_var = tk.StringVar(value="first")
         ttk.Label(time_frame, text="间隔播报:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
         interval_frame1 = ttk.Frame(time_frame)
@@ -4844,29 +4829,21 @@ class TimedBroadcastApp:
         interval_first_entry = ttk.Entry(interval_frame1, font=self.font_11, width=15)
         interval_first_entry.pack(side=LEFT, padx=5)
         ttk.Label(interval_frame1, text="(单视频时,指 n 遍)").pack(side=LEFT, padx=5)
-
         interval_frame2 = ttk.Frame(time_frame)
         interval_frame2.grid(row=2, column=1, columnspan=2, sticky='w', padx=5, pady=2)
         ttk.Radiobutton(interval_frame2, text="播 n 秒", variable=interval_var, value="seconds").pack(side=LEFT)
         interval_seconds_entry = ttk.Entry(interval_frame2, font=self.font_11, width=15)
         interval_seconds_entry.pack(side=LEFT, padx=5)
         ttk.Label(interval_frame2, text="(3600秒 = 1小时)").pack(side=LEFT, padx=5)
-
         ttk.Label(time_frame, text="周几/几号:").grid(row=3, column=0, sticky='e', padx=5, pady=3)
         weekday_entry = ttk.Entry(time_frame, font=self.font_11)
         weekday_entry.grid(row=3, column=1, sticky='ew', padx=5, pady=3)
         ttk.Button(time_frame, text="选取...", command=lambda: self.show_weekday_settings_dialog(weekday_entry), bootstyle="outline").grid(row=3, column=3, padx=5)
-
         ttk.Label(time_frame, text="日期范围:").grid(row=4, column=0, sticky='e', padx=5, pady=3)
         date_range_entry = ttk.Entry(time_frame, font=self.font_11)
         date_range_entry.grid(row=4, column=1, sticky='ew', padx=5, pady=3)
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=4, column=3, padx=5)
-
-        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=10)
-        other_frame.grid(row=3, column=0, sticky='ew', pady=5)
-        other_frame.columnconfigure(1, weight=1)
-
         delay_var = tk.StringVar(value="ontime")
         ttk.Label(other_frame, text="模式:").grid(row=0, column=0, sticky='nw', padx=5, pady=2)
         delay_frame = ttk.Frame(other_frame)
@@ -4874,7 +4851,6 @@ class TimedBroadcastApp:
         ttk.Radiobutton(delay_frame, text="准时播 - 如果有别的节目正在播，终止他们（默认）", variable=delay_var, value="ontime").pack(anchor='w')
         ttk.Radiobutton(delay_frame, text="可延后 - 如果有别的节目正在播，排队等候", variable=delay_var, value="delay").pack(anchor='w')
         ttk.Radiobutton(delay_frame, text="立即播 - 添加后停止其他节目,立即播放此节目", variable=delay_var, value="immediate").pack(anchor='w')
-
         dialog_button_frame = ttk.Frame(other_frame)
         dialog_button_frame.grid(row=0, column=2, sticky='se', padx=20, pady=10)
 
@@ -4882,15 +4858,12 @@ class TimedBroadcastApp:
             task = task_to_edit
             name_entry.insert(0, task.get('name', ''))
             video_type_var.set(task.get('video_type', 'single'))
-            if task.get('video_type') == 'single':
-                video_single_entry.insert(0, task.get('content', ''))
-            else:
-                video_folder_entry.insert(0, task.get('content', ''))
+            if task.get('video_type') == 'single': video_single_entry.insert(0, task.get('content', ''))
+            else: video_folder_entry.insert(0, task.get('content', ''))
             play_order_var.set(task.get('play_order', 'sequential'))
             volume_entry.insert(0, task.get('volume', '80'))
-            # --- ↓↓↓ 新增：加载自定义UA ↓↓↓ ---
             custom_ua_var.set(task.get('custom_user_agent', ''))
-            # --- ↑↑↑ 新增结束 ↑↑↑ ---
+            ua_first_var.set(task.get('ua_first_probe', False))
             playback_mode_var.set(task.get('playback_mode', 'fullscreen'))
             resolution_var.set(task.get('resolution', '1024x768'))
             playback_rate_var.set(task.get('playback_rate', '1.0x (正常)'))
@@ -4912,79 +4885,41 @@ class TimedBroadcastApp:
         def save_task():
             try:
                 volume = int(volume_entry.get().strip() or 80)
-                if not (0 <= volume <= 100):
-                    messagebox.showerror("输入错误", "音量必须是 0 到 100 之间的整数。", parent=dialog)
-                    return
-            except ValueError:
-                messagebox.showerror("输入错误", "音量必须是一个有效的整数。", parent=dialog)
-                return
-
+                if not (0 <= volume <= 100): messagebox.showerror("输入错误", "音量必须是 0 到 100 之间的整数。", parent=dialog); return
+            except ValueError: messagebox.showerror("输入错误", "音量必须是一个有效的整数。", parent=dialog); return
             if interval_var.get() == 'first':
                 try:
                     interval_first = int(interval_first_entry.get().strip() or 1)
-                    if interval_first < 1:
-                        messagebox.showerror("输入错误", "“播 n 首”的次数必须大于或等于 1。", parent=dialog)
-                        return
-                except ValueError:
-                    messagebox.showerror("输入错误", "“播 n 首”的次数必须是一个有效的整数。", parent=dialog)
-                    return
+                    if interval_first < 1: messagebox.showerror("输入错误", "“播 n 首”的次数必须大于或等于 1。", parent=dialog); return
+                except ValueError: messagebox.showerror("输入错误", "“播 n 首”的次数必须是一个有效的整数。", parent=dialog); return
             else: 
                 try:
                     interval_seconds = int(interval_seconds_entry.get().strip() or 1)
-                    if interval_seconds < 1:
-                        messagebox.showerror("输入错误", "“播 n 秒”的秒数必须大于或等于 1。", parent=dialog)
-                        return
-                except ValueError:
-                    messagebox.showerror("输入错误", "“播 n 秒”的秒数必须是一个有效的整数。", parent=dialog)
-                    return
-
-            if not weekday_entry.get().strip():
-                messagebox.showerror("输入错误", "“周几/几号”规则不能为空，请点击“选取...”进行设置。", parent=dialog)
-                return
-            
-            if not date_range_entry.get().strip():
-                messagebox.showerror("输入错误", "“日期范围”不能为空，请点击“设置...”进行配置。", parent=dialog)
-                return
-            
+                    if interval_seconds < 1: messagebox.showerror("输入错误", "“播 n 秒”的秒数必须大于或等于 1。", parent=dialog); return
+                except ValueError: messagebox.showerror("输入错误", "“播 n 秒”的秒数必须是一个有效的整数。", parent=dialog); return
+            if not weekday_entry.get().strip(): messagebox.showerror("输入错误", "“周几/几号”规则不能为空，请点击“选取...”进行设置。", parent=dialog); return
+            if not date_range_entry.get().strip(): messagebox.showerror("输入错误", "“日期范围”不能为空，请点击“设置...”进行配置。", parent=dialog); return
             video_path = video_single_entry.get().strip() if video_type_var.get() == "single" else video_folder_entry.get().strip()
-            
             is_url = video_path.lower().startswith(('http://', 'https://', 'rtsp://', 'rtmp://', 'mms://'))
-            
-            if not video_path:
-                messagebox.showwarning("警告", "请选择一个视频文件/文件夹，或输入一个网络地址", parent=dialog)
-                return
-            if not is_url and not os.path.exists(video_path):
-                 messagebox.showwarning("警告", "本地文件或文件夹路径不存在，请重新选择。", parent=dialog)
-                 return
-            
+            if not video_path: messagebox.showwarning("警告", "请选择一个视频文件/文件夹，或输入一个网络地址", parent=dialog); return
+            if not is_url and not os.path.exists(video_path): messagebox.showwarning("警告", "本地文件或文件夹路径不存在，请重新选择。", parent=dialog); return
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
             if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
             is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
             if not is_valid_date: messagebox.showwarning("格式错误", date_msg, parent=dialog); return
-
             rate_input = playback_rate_var.get().strip()
             rate_match = re.match(r"(\d+(\.\d+)?)", rate_input)
-            if not rate_match:
-                messagebox.showwarning("输入错误", "无效的播放倍速值。", parent=dialog)
-                return
+            if not rate_match: messagebox.showwarning("输入错误", "无效的播放倍速值。", parent=dialog); return
             rate_str = rate_match.group(1)
-
             try:
                 rate_val = float(rate_str)
-                if not (0.25 <= rate_val <= 4.0):
-                    messagebox.showwarning("输入错误", "播放倍速必须在 0.25 和 4.0 之间。", parent=dialog)
-                    return
-            except ValueError:
-                messagebox.showwarning("输入错误", "无效的播放倍速值。", parent=dialog)
-                return
-
+                if not (0.25 <= rate_val <= 4.0): messagebox.showwarning("输入错误", "播放倍速必须在 0.25 和 4.0 之间。", parent=dialog); return
+            except ValueError: messagebox.showwarning("输入错误", "无效的播放倍速值。", parent=dialog); return
             play_mode = delay_var.get()
             play_this_task_now = (play_mode == 'immediate')
             saved_delay_type = 'ontime' if play_mode == 'immediate' else play_mode
-
             task_name = name_entry.get().strip()
-            if not task_name and not is_url:
-                task_name = os.path.basename(video_path)
+            if not task_name and not is_url: task_name = os.path.basename(video_path)
 
             new_task_data = {
                 'name': task_name,
@@ -5000,18 +4935,15 @@ class TimedBroadcastApp:
                 'playback_mode': playback_mode_var.get(),
                 'resolution': resolution_var.get(),
                 'playback_rate': rate_input,
-                # --- ↓↓↓ 新增：保存自定义UA ↓↓↓ ---
                 'custom_user_agent': custom_ua_var.get().strip(),
-                # --- ↑↑↑ 新增结束 ↑↑↑ ---
+                'ua_first_probe': ua_first_var.get(),
                 'weekday': weekday_entry.get().strip(),
                 'date_range': date_msg,
                 'delay': saved_delay_type,
                 'status': '启用' if not is_edit_mode else task_to_edit.get('status', '启用'),
                 'last_run': {} if not is_edit_mode else task_to_edit.get('last_run', {}),
             }
-            if not new_task_data['name'] or not new_task_data['time']:
-                messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog)
-                return
+            if not new_task_data['name'] or not new_task_data['time']: messagebox.showwarning("警告", "请填写必要信息（节目名称、开始时间）", parent=dialog); return
 
             if is_edit_mode:
                 self.tasks[index] = new_task_data
@@ -7543,15 +7475,12 @@ class TimedBroadcastApp:
         self.vlc_list_player = None
 
         try:
-            # --- ▼▼▼ 核心修正：将 is_playlist_mode 的初始化移到 try 块内部 ▼▼▼ ---
-            is_playlist_mode = False
-            # --- ▲▲▲ 修正结束 ▲▲▲ ---
-
             custom_ua = task.get('custom_user_agent', '').strip()
             user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             content_path = task.get('content', '')
             
             use_proxy = bool(custom_ua)
+            ua_first_probe = task.get('ua_first_probe', False) # 读取UI选项
 
             if content_path.lower().startswith(('http://', 'https://')):
                 self.log(f"正在处理网络链接: {content_path}")
@@ -7559,32 +7488,52 @@ class TimedBroadcastApp:
                 content = None
                 response = None
 
-                if use_proxy:
-                    self.log("策略：有UA。先进行无UA探测...")
-                    try:
-                        response = requests.get(content_path, timeout=10, allow_redirects=True)
-                        response.raise_for_status()
-                        self.log("无UA探测成功。")
-                    except requests.exceptions.RequestException as e:
-                        raise Exception(f"探测主列表失败（无UA）: {e}")
-                else:
-                    self.log("策略：无UA。直接访问...")
-                    try:
-                        response = requests.get(content_path, timeout=10, allow_redirects=True)
-                        response.raise_for_status()
-                    except requests.exceptions.RequestException as e:
-                        raise Exception(f"获取播放列表失败: {e}")
-                
-                final_url = response.url
-                content = response.text
+                # 定义探测函数，避免代码重复
+                def probe_with_ua():
+                    self.log("...尝试带UA访问...")
+                    headers = {'User-Agent': user_agent}
+                    return requests.get(content_path, headers=headers, timeout=15, allow_redirects=True)
+
+                def probe_without_ua():
+                    self.log("...尝试无UA访问...")
+                    return requests.get(content_path, timeout=10, allow_redirects=True)
+
+                try:
+                    if use_proxy and ua_first_probe:
+                        # 策略1：用户勾选了“特殊模式”，带UA优先
+                        self.log("探测策略：带UA优先 (特殊模式)")
+                        try:
+                            response = probe_with_ua()
+                            response.raise_for_status()
+                        except requests.exceptions.RequestException as e:
+                            self.log(f"带UA访问失败: {e}，回退到无UA访问。")
+                            response = probe_without_ua()
+                            response.raise_for_status()
+                    else:
+                        # 策略2：默认模式，无UA优先
+                        self.log("探测策略：无UA优先 (默认)")
+                        try:
+                            response = probe_without_ua()
+                            response.raise_for_status()
+                        except requests.exceptions.RequestException as e:
+                            self.log(f"无UA访问失败: {e}，回退到带UA访问。")
+                            if use_proxy:
+                                response = probe_with_ua()
+                                response.raise_for_status()
+                            else:
+                                raise e # 如果没有UA可回退，则直接抛出异常
+                    
+                    final_url = response.url
+                    content = response.text
+                    self.log("探测成功，获取到播放列表。")
+
+                except requests.exceptions.RequestException as e_final:
+                    raise Exception(f"所有探测尝试均失败: {e_final}")
 
                 if not final_url or content is None:
                     raise Exception("未能获取到任何有效的播放列表内容。")
                 
-                is_master_playlist = '.m3u8' in content.lower() or '.m3u' in content.lower()
-                is_media_playlist_by_header = 'mpegurl' in response.headers.get('Content-Type', '').lower()
-
-                if is_master_playlist and is_media_playlist_by_header:
+                if '#EXT-X-STREAM-INF' in content:
                     is_playlist_mode = True
                     self.log("检测到主播放列表(Master Playlist)，正在手动解析频道...")
                     lines = content.split('\n')
