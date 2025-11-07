@@ -7472,10 +7472,7 @@ class TimedBroadcastApp:
         self.vlc_list_player = None
 
         try:
-            # --- ▼▼▼ 最终修正：在这里初始化 is_playlist_mode 作为安全默认值 ▼▼▼ ---
             is_playlist_mode = False
-            # --- ▲▲▲ 修正结束 ▲▲▲ ---
-
             custom_ua = task.get('custom_user_agent', '').strip()
             user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             content_path = task.get('content', '')
@@ -7489,6 +7486,7 @@ class TimedBroadcastApp:
                 content = None
                 response = None
 
+                # 定义探测函数
                 def probe_with_ua():
                     self.log("...尝试带UA访问...")
                     headers = {'User-Agent': user_agent}
@@ -7512,10 +7510,15 @@ class TimedBroadcastApp:
                         self.log("探测策略：无UA优先 (默认)")
                         try:
                             response = probe_without_ua()
+                            # 检查返回的内容是否是“假成功”的UA错误提示
+                            if use_proxy and "user-agent" in response.text.lower() and response.status_code == 200:
+                                self.log("无UA访问返回了UA错误提示，将强制尝试带UA访问。")
+                                raise requests.exceptions.RequestException("Server returned UA error page.")
                             response.raise_for_status()
                         except requests.exceptions.RequestException as e:
-                            self.log(f"无UA访问失败: {e}，回退到带UA访问。")
+                            self.log(f"无UA访问失败或需要UA: {e}")
                             if use_proxy:
+                                self.log("回退阶段: 尝试带UA访问...")
                                 response = probe_with_ua()
                                 response.raise_for_status()
                             else:
@@ -7531,6 +7534,7 @@ class TimedBroadcastApp:
                 if not final_url or content is None:
                     raise Exception("未能获取到任何有效的播放列表内容。")
                 
+                # --- ▼▼▼ 最终、最强大的判断逻辑 ▼▼▼ ---
                 if '#EXT-X-STREAM-INF' in content:
                     is_playlist_mode = True
                     self.log("检测到 HLS 主播放列表，正在解析...")
@@ -7565,6 +7569,7 @@ class TimedBroadcastApp:
                 else:
                     self.log("未识别出可解析的播放列表格式，将作为单个媒体流处理。")
                     self.manual_playlist = [final_url]
+                # --- ▲▲▲ 判断逻辑结束 ▲▲▲ ---
 
                 if not self.manual_playlist: raise ValueError("解析后播放列表为空。")
                 self.log(f"已构建播放列表，包含 {len(self.manual_playlist)} 个项目。")
