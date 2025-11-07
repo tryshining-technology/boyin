@@ -7456,10 +7456,16 @@ class TimedBroadcastApp:
             user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             content_path = task.get('content', '')
             
-            use_proxy = bool(custom_ua)
-            self.current_task_requires_proxy = use_proxy # 修复B的关键：记住当前任务的代理需求
+            # --- 核心逻辑最终版: 严格遵循您的三条规则 ---
+            
+            # 规则判断1: 播放时是否需要代理？ (对应A和E)
+            playback_requires_proxy = bool(custom_ua)
+            self.current_task_requires_proxy = playback_requires_proxy
 
-            # 1. 首先处理本地文件夹的情况 (逻辑不变)
+            # 规则判断2: 预探测时是否需要UA？ (仅对应E)
+            probe_with_ua = playback_requires_proxy and task.get('ua_first_probe', False)
+
+            # 1. 处理本地文件夹 (逻辑不变)
             if task.get('video_type') == 'folder' and os.path.isdir(content_path):
                 is_playlist_mode = True
                 self.log(f"模式: 本地文件夹 -> 解析为播放列表")
@@ -7467,7 +7473,7 @@ class TimedBroadcastApp:
                 video_files = [os.path.join(content_path, f) for f in os.listdir(content_path) if f.lower().endswith(VIDEO_EXTENSIONS)]
                 if task.get('play_order') == 'random': random.shuffle(video_files)
                 else: video_files.sort()
-                if not video_files: raise ValueError("视频文件夹为空或不包含支持的视频文件。")
+                if not video_files: raise ValueError("视频文件夹为空。")
                 
                 playlist_to_use = video_files
                 if task.get('interval_type', 'first') == 'first':
@@ -7479,8 +7485,9 @@ class TimedBroadcastApp:
             else:
                 if content_path.lower().startswith(('http://', 'https://')):
                     self.log(f"正在探测网络链接: {content_path}")
+                    self.log(f"探测策略: {'带UA探测 (特殊模式)' if probe_with_ua else '常规探测'}")
                     try:
-                        headers = {'User-Agent': user_agent} if use_proxy else {}
+                        headers = {'User-Agent': user_agent} if probe_with_ua else {}
                         response = requests.get(content_path, headers=headers, timeout=15, allow_redirects=True)
                         response.raise_for_status()
                         content_lines = response.text.splitlines()
@@ -7488,7 +7495,7 @@ class TimedBroadcastApp:
                     except requests.exceptions.RequestException as e:
                         raise Exception(f"网络链接探测失败: {e}")
 
-                    # --- 修复C的关键：使用更宽容的字符串查找 ---
+                    # 修复C的关键：使用更宽容的字符串查找
                     is_direct_stream = False
                     for line in content_lines:
                         if ".ts" in line or ".mp4" in line or ".mkv" in line or ".flv" in line:
@@ -7527,14 +7534,25 @@ class TimedBroadcastApp:
             
             self.log(f"最终播放列表包含 {len(self.manual_playlist)} 个项目。快捷键切换功能: {'启用' if is_playlist_mode else '禁用'}")
 
-            if use_proxy:
-                if not self._start_ua_proxy(user_agent):
-                    self.log("!!! 代理启动失败，播放可能失败。"); use_proxy = False
-
             if AUDIO_AVAILABLE: pygame.mixer.music.stop(); pygame.mixer.stop()
             
-            # --- 修复A的关键：为VLC实例也设置UA，形成双保险 ---
-            vlc_instance_options = ['--no-xlib', '--network-caching=5000']
+            # --- 最终修复A的关键：分而治之 ---
+            use_native_ua_mode = playback_requires_proxy and not task.get('ua_first_probe', False)
+
+            if use_native_ua_mode:
+                # A链接的方案: 不启动代理，使用VLC原生UA
+                self.log("播放策略: 启用VLC原生UA模式 (针对A类链接)")
+                self.current_task_requires_proxy = False # 明确告知后续函数不要用代理
+                vlc_instance_options = ['--no-xlib', '--network-caching=5000', f'--http-user-agent={user_agent}']
+            else:
+                # B,C,D,E的方案: 沿用您现有的代理逻辑
+                self.log(f"播放策略: 标准模式 (代理: {'启用' if self.current_task_requires_proxy else '禁用'})")
+                if self.current_task_requires_proxy:
+                    if not self._start_ua_proxy(user_agent):
+                        self.log("!!! 代理启动失败，播放可能失败。"); 
+                        self.current_task_requires_proxy = False
+                vlc_instance_options = ['--no-xlib', '--network-caching=5000']
+
             instance = vlc.Instance(vlc_instance_options)
             self.vlc_player = instance.media_player_new()
             
@@ -7554,7 +7572,7 @@ class TimedBroadcastApp:
             else: self.vlc_player.audio_set_mute(False)
             self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
             
-            self._play_manual_playlist_item() # <--- 修改点
+            self._play_manual_playlist_item()
             self.log(f"已发送播放指令，开始播放第一项。")
             
             # ... (后续的监控循环代码保持不变) ...
