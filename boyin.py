@@ -7448,6 +7448,7 @@ class TimedBroadcastApp:
         self.current_playlist_index = 0
         self.vlc_player = None
         self.vlc_list_player = None
+        self.current_task_requires_proxy = False # 修复B的关键：初始化“短期记忆”
 
         try:
             is_playlist_mode = False
@@ -7456,10 +7457,9 @@ class TimedBroadcastApp:
             content_path = task.get('content', '')
             
             use_proxy = bool(custom_ua)
+            self.current_task_requires_proxy = use_proxy # 修复B的关键：记住当前任务的代理需求
 
-            # --- 核心逻辑最终版：逐行扫描，精准判断 ---
-
-            # 1. 首先处理本地文件夹的情况
+            # 1. 首先处理本地文件夹的情况 (逻辑不变)
             if task.get('video_type') == 'folder' and os.path.isdir(content_path):
                 is_playlist_mode = True
                 self.log(f"模式: 本地文件夹 -> 解析为播放列表")
@@ -7477,25 +7477,23 @@ class TimedBroadcastApp:
 
             # 2. 处理网络链接和本地单个文件
             else:
-                # 对于网络链接，我们需要先探测其内容
                 if content_path.lower().startswith(('http://', 'https://')):
                     self.log(f"正在探测网络链接: {content_path}")
                     try:
                         headers = {'User-Agent': user_agent} if use_proxy else {}
                         response = requests.get(content_path, headers=headers, timeout=15, allow_redirects=True)
                         response.raise_for_status()
-                        content_lines = response.text.splitlines() # 直接分割成行
+                        content_lines = response.text.splitlines()
                         final_url = response.url
                     except requests.exceptions.RequestException as e:
                         raise Exception(f"网络链接探测失败: {e}")
 
-                    # --- 黄金法则最终版：逐行扫描内容 ---
+                    # --- 修复C的关键：使用更宽容的字符串查找 ---
                     is_direct_stream = False
                     for line in content_lines:
-                        # 对每一行进行精确匹配
-                        if re.search(r'\.(ts|mp4|mkv|flv)(\?|$)', line):
+                        if ".ts" in line or ".mp4" in line or ".mkv" in line or ".flv" in line:
                             is_direct_stream = True
-                            break # 找到一个就够了，立刻停止扫描
+                            break
 
                     if is_direct_stream:
                         self.log("模式: 检测到媒体切片 -> 作为单个直播流处理")
@@ -7517,11 +7515,8 @@ class TimedBroadcastApp:
                                     absolute_line_url = urllib.parse.urljoin(final_url, line)
                                     parsed_items.append(absolute_line_url)
                         
-                        if not parsed_items:
-                             raise ValueError("频道列表为空或解析失败。")
+                        if not parsed_items: raise ValueError("频道列表为空或解析失败。")
                         self.manual_playlist = parsed_items
-                
-                # 3. 对于本地单个文件，直接放入列表
                 else:
                     self.log("模式: 本地单个文件")
                     self.manual_playlist = [content_path]
@@ -7532,15 +7527,14 @@ class TimedBroadcastApp:
             
             self.log(f"最终播放列表包含 {len(self.manual_playlist)} 个项目。快捷键切换功能: {'启用' if is_playlist_mode else '禁用'}")
 
-            # --- 后续的VLC播放逻辑，增加优化参数 ---
             if use_proxy:
                 if not self._start_ua_proxy(user_agent):
                     self.log("!!! 代理启动失败，播放可能失败。"); use_proxy = False
 
             if AUDIO_AVAILABLE: pygame.mixer.music.stop(); pygame.mixer.stop()
             
-            # 为VLC增加网络缓存和日志参数，增强稳定性
-            vlc_instance_options = ['--no-xlib', '--network-caching=5000']
+            # --- 修复A的关键：为VLC实例也设置UA，形成双保险 ---
+            vlc_instance_options = ['--no-xlib', '--network-caching=1500', f'--http-user-agent={user_agent}']
             instance = vlc.Instance(vlc_instance_options)
             self.vlc_player = instance.media_player_new()
             
@@ -7560,23 +7554,19 @@ class TimedBroadcastApp:
             else: self.vlc_player.audio_set_mute(False)
             self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
             
-            self._play_manual_playlist_item(use_proxy)
+            self._play_manual_playlist_item() # <--- 修改点
             self.log(f"已发送播放指令，开始播放第一项。")
             
+            # ... (后续的监控循环代码保持不变) ...
             start_time = time.time()
             last_text_update_time = 0
             interval_type = task.get('interval_type', 'first')
             duration_seconds = int(task.get('interval_seconds', 0))
-            
             while not stop_event.is_set():
-                if self._is_interrupted():
-                    self.log("播放被新指令中断。"); break
-                
+                if self._is_interrupted(): self.log("播放被新指令中断。"); break
                 state = self.vlc_player.get_state()
                 if state in {vlc.State.Ended, vlc.State.Stopped, vlc.State.Error}:
-                    if not is_playlist_mode:
-                        self.log(f"单个媒体播放结束，状态: {state}"); break
-                
+                    if not is_playlist_mode: self.log(f"单个媒体播放结束，状态: {state}"); break
                 now = time.time()
                 if now - last_text_update_time >= 1.0:
                     current_media = self.vlc_player.get_media()
@@ -7593,22 +7583,19 @@ class TimedBroadcastApp:
                     elif state == vlc.State.Paused: status_text = "已暂停"
                     if interval_type == 'seconds' and duration_seconds > 0:
                         elapsed = now - start_time
-                        if elapsed >= duration_seconds:
-                            self.log(f"已达到 {duration_seconds} 秒播放时长限制。"); break
+                        if elapsed >= duration_seconds: self.log(f"已达到 {duration_seconds} 秒播放时长限制。"); break
                         remaining_seconds = int(duration_seconds - elapsed)
                         self.update_playing_text(f"[{task['name']}] {display_name} ({status_text} - 剩余 {remaining_seconds} 秒)")
                     else:
                         self.update_playing_text(f"[{task['name']}] {display_name} ({status_text})")
                     last_text_update_time = now
-                
                 time.sleep(0.2)
 
         except Exception as e:
             self.log(f"!!! 播放视频任务 '{task['name']}' 时发生严重错误: {e}")
         finally:
-            if self.vlc_player:
-                self.vlc_player.stop()
-                self.vlc_player = None
+            if self.vlc_player: self.vlc_player.stop()
+            self.vlc_player = None
             self.root.after(0, self._destroy_video_window)
             self.log(f"视频任务 '{task['name']}' 的播放逻辑清理完毕。")
 
@@ -7678,31 +7665,19 @@ class TimedBroadcastApp:
         """处理“上一个”命令 (由 Ctrl+Up 触发)"""
         if not self.manual_playlist: return
 
-        self.current_playlist_index -= 1
-        if self.current_playlist_index < 0:
-            self.current_playlist_index = len(self.manual_playlist) - 1
-            
+        self.current_playlist_index = (self.current_playlist_index - 1 + len(self.manual_playlist)) % len(self.manual_playlist)
         self.log(f"快捷键触发：手动切换到上一个节目 (索引 {self.current_playlist_index})。")
-        # --- ▼▼▼ 修改：传递 use_proxy 状态 ▼▼▼ ---
-        use_proxy = bool(self.ua_proxy_port)
-        self._play_manual_playlist_item(use_proxy)
-        # --- ▲▲▲ 修改结束 ▲▲▲ ---
+        self._play_manual_playlist_item()
 
     def _handle_next_track(self, event=None):
         """处理“下一个”命令 (由 Ctrl+Down 触发)"""
         if not self.manual_playlist: return
 
-        self.current_playlist_index += 1
-        if self.current_playlist_index >= len(self.manual_playlist):
-            self.current_playlist_index = 0
-            
+        self.current_playlist_index = (self.current_playlist_index + 1) % len(self.manual_playlist)
         self.log(f"快捷键触发：手动切换到下一个节目 (索引 {self.current_playlist_index})。")
-        # --- ▼▼▼ 修改：传递 use_proxy 状态 ▼▼▼ ---
-        use_proxy = bool(self.ua_proxy_port)
-        self._play_manual_playlist_item(use_proxy)
-        # --- ▲▲▲ 修改结束 ▲▲▲ ---
+        self._play_manual_playlist_item()
 
-    def _play_manual_playlist_item(self, use_proxy=False):
+    def _play_manual_playlist_item(self):
         """播放手动播放列表中的当前索引项"""
         if not self.manual_playlist or not self.vlc_player:
             return
@@ -7710,11 +7685,10 @@ class TimedBroadcastApp:
         try:
             target_url = self.manual_playlist[self.current_playlist_index]
             
-            # --- ▼▼▼ 修改：根据传入的参数决定是否包装URL ▼▼▼ ---
+            # --- 修复B的关键：根据当前任务的原始需求决定是否使用代理 ---
             play_url = target_url
-            if use_proxy and self.ua_proxy_port and target_url.startswith(('http://', 'https://')):
+            if self.current_task_requires_proxy and self.ua_proxy_port and target_url.startswith(('http://', 'https://')):
                 play_url = f"http://127.0.0.1:{self.ua_proxy_port}/{target_url}"
-            # --- ▲▲▲ 修改结束 ▲▲▲ ---
 
             self.log(f"正在加载新媒体: {play_url}")
             
