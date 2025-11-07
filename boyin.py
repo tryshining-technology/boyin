@@ -194,56 +194,33 @@ class UAProxyHandler(BaseHTTPRequestHandler):
     user_agent = "Mozilla/5.0"
 
     def do_GET(self):
+        """
+        一个简化且修正后的代理处理器。
+        它的唯一工作就是添加 User-Agent，然后透明地转发响应。
+        它不再尝试解析或重写M3U8播放列表，让VLC原生处理它们。
+        """
         try:
+            # 准备带有自定义User-Agent的请求头
             headers = {'User-Agent': self.user_agent}
             target_url = self.path[1:]
             
+            # 发起网络请求
             response = requests.get(target_url, headers=headers, stream=True, timeout=20)
             
+            # 将原始的状态码（如 200 OK, 404 Not Found）返回给VLC
             self.send_response(response.status_code)
             
-            content_type = response.headers.get('Content-Type', '').lower()
+            # 将服务器返回的原始头信息，原封不动地返回给VLC
+            # 排除一些可能引起问题的头信息
+            for key, value in response.headers.items():
+                if key.lower() not in ['transfer-encoding', 'connection', 'content-encoding']:
+                    self.send_header(key, value)
+            self.end_headers()
             
-            # --- ▼▼▼ 核心修改：判断是否为M3U8播放列表 ▼▼▼ ---
-            if 'mpegurl' in content_type or target_url.lower().endswith(('.m3u8', '.m3u')):
-                self.log_message(f"Rewriting M3U8 playlist: {target_url}")
-                
-                # 将响应内容解码为文本
-                body = response.text
-                lines = body.split('\n')
-                new_lines = []
-                
-                for line in lines:
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        # 对于注释行或空行，直接保留
-                        new_lines.append(line)
-                        continue
-                    
-                    # --- ▼▼▼ 核心修改：改写URL ▼▼▼ ---
-                    # 使用 urljoin 来智能处理绝对路径和相对路径
-                    absolute_line_url = urljoin(target_url, line)
-                    
-                    # 将处理后的绝对URL再次包装成指向我们代理的URL
-                    rewritten_url = f"http://127.0.0.1:{self.server.server_port}/{absolute_line_url}"
-                    new_lines.append(rewritten_url)
-
-                # 将改写后的内容重新编码并发送
-                new_body = '\n'.join(new_lines).encode('utf-8')
-                self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
-                self.send_header('Content-Length', str(len(new_body)))
-                self.end_headers()
-                self.wfile.write(new_body)
-
-            else: # 如果不是M3U8 (例如是 .ts 视频切片)，则直接转发
-                for key, value in response.headers.items():
-                    if key.lower() not in ['transfer-encoding', 'connection', 'content-encoding']:
-                        self.send_header(key, value)
-                self.end_headers()
-                
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        self.wfile.write(chunk)
+            # 将服务器返回的原始内容，一块一块地直接流式传输给VLC
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    self.wfile.write(chunk)
                         
         except Exception as e:
             self.send_error(500, f"Proxy Error: {e}")
