@@ -7461,6 +7461,7 @@ class TimedBroadcastApp:
         import urllib.parse
 
         custom_ua = task.get('custom_user_agent', '').strip()
+        # 只有当用户填写了UA时，才使用它；否则，让VLC自己决定。
         user_agent = custom_ua or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         if custom_ua:
             self.log(f"检测到自定义User-Agent，将使用: {user_agent}")
@@ -7469,6 +7470,9 @@ class TimedBroadcastApp:
         vlc_instance_options = [
             '--no-xlib', 
             '--network-caching=5000'
+            '--live-caching=3000'
+            '--avcodec-hw=auto'
+            '--hls-segment-threads=2'
         ]
         
         content_path = task.get('content', '')
@@ -7478,6 +7482,7 @@ class TimedBroadcastApp:
         if is_http_url:
             self.log("检测到HTTP/HTTPS链接，正在进行预处理以获取最终地址...")
             try:
+                # 预处理时，如果用户定义了UA，就用用户的，否则用通用的
                 headers = {'User-Agent': user_agent}
                 response = requests.get(content_path, headers=headers, stream=True, timeout=10, allow_redirects=True)
                 response.raise_for_status()
@@ -7527,13 +7532,17 @@ class TimedBroadcastApp:
 
             else: # 单个文件或网络流 (包括M3U8)
                 # ---
-                # --- ▼▼▼ 最终的正确实现 (严格遵循您查到的方法二) ▼▼▼
+                # --- ▼▼▼ 最终的、最精准的修正：只在需要时才添加UA ▼▼▼
                 # ---
                 # 1. 先创建一个不带任何选项的媒体对象
                 media = instance.media_new(final_content_path)
-                # 2. 然后调用 add_option 方法，并正确地包含冒号 ':'
-                media.add_option(f':http-user-agent={user_agent}')
-                # --- ▲▲▲ 实现结束 ▲▲▲ ---
+                
+                # 2. 检查用户是否在UI中填写了自定义UA
+                if custom_ua:
+                    # 只有当用户填写了UA时，我们才为这个媒体对象添加选项
+                    self.log("检测到自定义UA，正在为媒体对象添加选项...")
+                    media.add_option(f':http-user-agent={user_agent}')
+                # --- ▲▲▲ 修正结束 ▲▲▲ ---
                 
                 if is_playlist_mode: # M3U8
                     self.log(f"检测到播放列表，启用MediaListPlayer模式。")
@@ -7607,6 +7616,7 @@ class TimedBroadcastApp:
             if self.vlc_player: self.vlc_player.stop(); self.vlc_player = None
             self.root.after(0, self._destroy_video_window)
             self.log(f"视频任务 '{task['name']}' 的播放逻辑清理完毕。")
+
     def _create_video_window(self, task, is_playlist=False):
         if self.video_window and self.video_window.winfo_exists():
             self.video_window.destroy()
