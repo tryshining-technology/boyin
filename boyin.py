@@ -250,6 +250,7 @@ class TimedBroadcastApp:
         self.video_stop_event = None
         self.is_muted = False
         self.last_bgm_volume = 1.0
+        self.is_media_processing = False
 
         self.create_folder_structure()
         self.load_settings()
@@ -694,11 +695,14 @@ class TimedBroadcastApp:
         notebook.add(execute_tab, text=' 定时运行 ')
         notebook.add(print_tab, text=' 定时打印 ')
         notebook.add(backup_tab, text=' 定时备份 ')
+        media_processing_tab = ttk.Frame(notebook, padding=10)
+        notebook.add(media_processing_tab, text=' 媒体处理 ')
 
         self._build_screenshot_ui(screenshot_tab)
         self._build_execute_ui(execute_tab)
         self._build_print_ui(print_tab)
         self._build_backup_ui(backup_tab)
+        self._build_media_processing_ui(media_processing_tab)
 
         return page_frame
 
@@ -1238,6 +1242,240 @@ class TimedBroadcastApp:
             ttk.Button(action_frame, text=text, command=cmd, bootstyle=style).pack(pady=5, fill=X)
             
         self.update_backup_list()
+
+    def _build_media_processing_ui(self, parent_frame):
+        """构建“媒体处理”选项卡的UI界面"""
+        parent_frame.columnconfigure(0, weight=1)
+
+        # --- 在 __init__ 中需要添加 self.is_media_processing = False ---
+
+        # --- 顶部说明 ---
+        desc_label = ttk.Label(parent_frame, 
+                               text="此页面功能依赖于软件根目录下的 ffmpeg.exe，用于即时处理音视频文件。\n注意：同一时间只能执行一个媒体处理任务。",
+                               font=self.font_10, bootstyle="info", wraplength=700)
+        desc_label.pack(fill=X, pady=(0, 15))
+
+        # --- 1. 提取音频功能区 ---
+        extract_lf = ttk.LabelFrame(parent_frame, text="1. 从视频中提取音频", padding=15)
+        extract_lf.pack(fill=X, pady=10)
+        extract_lf.columnconfigure(1, weight=1)
+
+        ttk.Label(extract_lf, text="源视频文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        self.extract_source_entry = ttk.Entry(extract_lf, font=self.font_11)
+        self.extract_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        ttk.Button(extract_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_source_file(self.extract_source_entry, self.extract_output_entry, ".mp3")).grid(row=0, column=2, padx=5)
+
+        ttk.Label(extract_lf, text="输出音频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        self.extract_output_entry = ttk.Entry(extract_lf, font=self.font_11)
+        self.extract_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
+        ttk.Button(extract_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_output_file(self.extract_output_entry, ".mp3", [("MP3 音频文件", "*.mp3")])).grid(row=1, column=2, padx=5)
+
+        extract_action_frame = ttk.Frame(extract_lf)
+        extract_action_frame.grid(row=2, column=1, sticky='w', pady=10)
+        self.extract_button = ttk.Button(extract_action_frame, text="开始提取", bootstyle="success", command=lambda: self.start_media_processing('extract'))
+        self.extract_button.pack(side=LEFT)
+        self.extract_progress = ttk.Progressbar(extract_action_frame, length=300, mode='determinate')
+        self.extract_progress.pack(side=LEFT, padx=15, fill=X, expand=True)
+        self.extract_status_label = ttk.Label(extract_action_frame, text="准备就绪", font=self.font_9, bootstyle="secondary")
+        self.extract_status_label.pack(side=LEFT, padx=10)
+
+        # --- 2. 转换视频格式功能区 ---
+        convert_lf = ttk.LabelFrame(parent_frame, text="2. 转换视频格式为通用MP4", padding=15)
+        convert_lf.pack(fill=X, pady=10)
+        convert_lf.columnconfigure(1, weight=1)
+
+        ttk.Label(convert_lf, text="源视频文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        self.convert_source_entry = ttk.Entry(convert_lf, font=self.font_11)
+        self.convert_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        ttk.Button(convert_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_source_file(self.convert_source_entry, self.convert_output_entry, ".mp4")).grid(row=0, column=2, padx=5)
+
+        ttk.Label(convert_lf, text="输出视频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        self.convert_output_entry = ttk.Entry(convert_lf, font=self.font_11)
+        self.convert_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
+        ttk.Button(convert_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_output_file(self.convert_output_entry, ".mp4", [("MP4 视频文件", "*.mp4")])).grid(row=1, column=2, padx=5)
+
+        convert_action_frame = ttk.Frame(convert_lf)
+        convert_action_frame.grid(row=2, column=1, sticky='w', pady=10)
+        self.convert_button = ttk.Button(convert_action_frame, text="开始转换", bootstyle="success", command=lambda: self.start_media_processing('convert'))
+        self.convert_button.pack(side=LEFT)
+        self.convert_progress = ttk.Progressbar(convert_action_frame, length=300, mode='determinate')
+        self.convert_progress.pack(side=LEFT, padx=15, fill=X, expand=True)
+        self.convert_status_label = ttk.Label(convert_action_frame, text="准备就绪", font=self.font_9, bootstyle="secondary")
+        self.convert_status_label.pack(side=LEFT, padx=10)
+
+        # --- 3. 剪辑音/视频功能区 ---
+        clip_lf = ttk.LabelFrame(parent_frame, text="3. 剪辑音视频片段", padding=15)
+        clip_lf.pack(fill=X, pady=10)
+        clip_lf.columnconfigure(1, weight=1)
+
+        ttk.Label(clip_lf, text="源文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        self.clip_source_entry = ttk.Entry(clip_lf, font=self.font_11)
+        self.clip_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        ttk.Button(clip_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_source_file(self.clip_source_entry, self.clip_output_entry, "_clipped.mp4")).grid(row=0, column=2, padx=5)
+
+        ttk.Label(clip_lf, text="输出文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        self.clip_output_entry = ttk.Entry(clip_lf, font=self.font_11)
+        self.clip_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
+        ttk.Button(clip_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_output_file(self.clip_output_entry, ".mp4", [("媒体文件", "*.mp4 *.mp3")])).grid(row=1, column=2, padx=5)
+
+        time_frame = ttk.Frame(clip_lf)
+        time_frame.grid(row=2, column=1, sticky='w', pady=5)
+        ttk.Label(time_frame, text="开始时间:").pack(side=LEFT, padx=(0, 5))
+        self.clip_start_entry = ttk.Entry(time_frame, font=self.font_11, width=12)
+        self.clip_start_entry.pack(side=LEFT)
+        ttk.Label(time_frame, text="结束时间:").pack(side=LEFT, padx=(15, 5))
+        self.clip_end_entry = ttk.Entry(time_frame, font=self.font_11, width=12)
+        self.clip_end_entry.pack(side=LEFT)
+        ttk.Label(time_frame, text="(格式: HH:MM:SS)", font=self.font_9, bootstyle="secondary").pack(side=LEFT, padx=10)
+
+        clip_action_frame = ttk.Frame(clip_lf)
+        clip_action_frame.grid(row=3, column=1, sticky='w', pady=10)
+        self.clip_button = ttk.Button(clip_action_frame, text="开始剪辑", bootstyle="success", command=lambda: self.start_media_processing('clip'))
+        self.clip_button.pack(side=LEFT)
+        self.clip_progress = ttk.Progressbar(clip_action_frame, length=300, mode='determinate')
+        self.clip_progress.pack(side=LEFT, padx=15, fill=X, expand=True)
+        self.clip_status_label = ttk.Label(clip_action_frame, text="准备就绪", font=self.font_9, bootstyle="secondary")
+        self.clip_status_label.pack(side=LEFT, padx=10)
+
+    def _select_media_output_file(self, entry_widget, default_extension, filetypes):
+        """通用函数：选择输出文件的保存路径"""
+        filepath = filedialog.asksaveasfilename(title="指定输出文件", defaultextension=default_extension, filetypes=filetypes)
+        
+        if not filepath:
+            return
+            
+        entry_widget.delete(0, END)
+        entry_widget.insert(0, filepath)
+
+    def start_media_processing(self, task_type):
+        """所有媒体处理任务的统一入口/调度函数"""
+        if self.is_media_processing:
+            messagebox.showwarning("正在处理中", "请等待当前媒体处理任务完成后再开始新的任务。", parent=self.root)
+            return
+
+        # --- 根据任务类型，获取输入、输出和UI控件 ---
+        if task_type == 'extract':
+            source_file = self.extract_source_entry.get().strip()
+            output_file = self.extract_output_entry.get().strip()
+            ui_controls = {'button': self.extract_button, 'progress': self.extract_progress, 'status': self.extract_status_label}
+            command = ['ffmpeg', '-i', source_file, '-vn', '-acodec', 'libmp3lame', '-q:a', '2', output_file, '-y']
+        elif task_type == 'convert':
+            source_file = self.convert_source_entry.get().strip()
+            output_file = self.convert_output_entry.get().strip()
+            ui_controls = {'button': self.convert_button, 'progress': self.convert_progress, 'status': self.convert_status_label}
+            command = ['ffmpeg', '-i', source_file, '-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-c:a', 'aac', '-b:a', '192k', output_file, '-y']
+        elif task_type == 'clip':
+            source_file = self.clip_source_entry.get().strip()
+            output_file = self.clip_output_entry.get().strip()
+            start_time = self.clip_start_entry.get().strip()
+            end_time = self.clip_end_entry.get().strip()
+            ui_controls = {'button': self.clip_button, 'progress': self.clip_progress, 'status': self.clip_status_label}
+            if not start_time or not end_time:
+                messagebox.showerror("输入错误", "剪辑任务必须填写开始时间和结束时间。", parent=self.root)
+                return
+            command = ['ffmpeg', '-i', source_file, '-ss', start_time, '-to', end_time, '-c', 'copy', output_file, '-y']
+        else:
+            return
+
+        if not source_file or not output_file:
+            messagebox.showerror("输入错误", "源文件和输出文件路径不能为空。", parent=self.root)
+            return
+
+        # --- 上锁并更新UI，准备开始 ---
+        self.is_media_processing = True
+        for btn in [self.extract_button, self.convert_button, self.clip_button]:
+            btn.config(state=DISABLED)
+        
+        ui_controls['progress']['value'] = 0
+        ui_controls['status'].config(text="正在准备...")
+
+        # --- 启动后台线程执行任务 ---
+        threading.Thread(target=self._run_ffmpeg_task, args=(command, source_file, ui_controls), daemon=True).start()
+
+    def _get_media_duration(self, filepath):
+        """使用ffmpeg快速获取媒体文件的总时长（秒）"""
+        command = ['ffmpeg', '-i', filepath]
+        try:
+            # 在Windows上隐藏控制台窗口
+            startupinfo = None
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0
+
+            process = subprocess.Popen(command, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', startupinfo=startupinfo)
+            _, stderr = process.communicate(timeout=5)
+            
+            duration_match = re.search(r"Duration: (\d{2}):(\d{2}):(\d{2})\.(\d{2})", stderr)
+            if duration_match:
+                hours = int(duration_match.group(1))
+                minutes = int(duration_match.group(2))
+                seconds = int(duration_match.group(3))
+                milliseconds = int(duration_match.group(4))
+                return hours * 3600 + minutes * 60 + seconds + milliseconds / 100.0
+        except Exception as e:
+            self.log(f"获取媒体时长失败: {e}")
+        return None
+
+    def _run_ffmpeg_task(self, command, source_file, ui_controls):
+        """在后台线程中执行ffmpeg命令，并实时更新UI"""
+        try:
+            # 1. 获取总时长用于计算进度
+            total_duration = self._get_media_duration(source_file)
+            if total_duration is None and "-c:v" in command: # 仅在需要转码时才强求时长
+                raise ValueError("无法获取源文件总时长，无法计算进度。")
+
+            # 2. 启动主处理进程
+            creation_flags = 0
+            if sys.platform == "win32":
+                creation_flags = subprocess.CREATE_NO_WINDOW
+
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', creationflags=creation_flags)
+
+            # 3. 实时读取输出并解析进度
+            while True:
+                line = process.stdout.readline()
+                if not line:
+                    break
+                
+                if total_duration:
+                    time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})", line)
+                    if time_match:
+                        hours = int(time_match.group(1))
+                        minutes = int(time_match.group(2))
+                        seconds = int(time_match.group(3))
+                        milliseconds = int(time_match.group(4))
+                        current_time = hours * 3600 + minutes * 60 + seconds + milliseconds / 100.0
+                        progress_percent = (current_time / total_duration) * 100
+                        
+                        def update_ui(p, t):
+                            ui_controls['progress']['value'] = p
+                            ui_controls['status'].config(text=f"正在处理... {int(p)}%")
+                        
+                        self.root.after(0, update_ui, progress_percent, current_time)
+
+            process.wait()
+
+            # 4. 检查结果
+            if process.returncode == 0:
+                self.root.after(0, lambda: ui_controls['progress'].config(value=100))
+                self.root.after(0, lambda: ui_controls['status'].config(text="处理完成！", bootstyle="success"))
+                self.root.after(100, lambda: messagebox.showinfo("成功", "媒体处理任务已成功完成！", parent=self.root))
+            else:
+                raise Exception(f"FFmpeg处理失败，返回码: {process.returncode}")
+
+        except Exception as e:
+            self.log(f"媒体处理任务失败: {e}")
+            self.root.after(0, lambda: ui_controls['status'].config(text="处理失败！", bootstyle="danger"))
+            self.root.after(100, lambda: messagebox.showerror("失败", f"媒体处理任务失败：\n{e}", parent=self.root))
+
+        finally:
+            # 5. 解锁并恢复UI状态
+            self.is_media_processing = False
+            def restore_buttons():
+                for btn in [self.extract_button, self.convert_button, self.clip_button]:
+                    btn.config(state=NORMAL)
+            self.root.after(0, restore_buttons)
 
     # --- 定时运行功能的全套方法 ---
     
@@ -6934,17 +7172,19 @@ class TimedBroadcastApp:
 
             # 2. 检查文件是否存在并播放
             if pregen_file_path and os.path.exists(pregen_file_path):
-                self.log(f"找到预生成的语音文件 '{os.path.basename(pregen_file_path)}'，直接播放。")
+                # --- ↓↓↓ 核心修改：从调用音频播放器改为调用语音播放器 ↓↓↓ ---
+                self.log(f"找到预生成的语音文件 '{os.path.basename(pregen_file_path)}'，将附加提示音和背景音乐后播放。")
                 
-                # 构建一个临时的“音频任务”来播放这个文件
+                # 构建一个临时的“语音任务”来播放这个文件
+                # 这样可以复用 _play_voice_task_internal 的完整逻辑（提示音+BGM+语音）
                 playback_task = task.copy()
-                playback_task['type'] = 'audio'
-                playback_task['audio_type'] = 'single'
-                playback_task['content'] = pregen_file_path
-                playback_task['interval_type'] = 'first'
-                playback_task['interval_first'] = '1' # 动态语音只播一遍
+                playback_task['type'] = 'voice'  # 关键：保持任务类型为 'voice'
+                playback_task['content'] = pregen_file_path  # 将内容指向我们预生成的文件
+                playback_task['repeat'] = '1'  # 动态语音只播一遍
                 
-                self._play_audio_task_internal(playback_task)
+                # 调用正确的、功能齐全的语音播放函数
+                self._play_voice_task_internal(playback_task)
+                # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
                 
                 # 播放完毕后删除文件
                 try:
