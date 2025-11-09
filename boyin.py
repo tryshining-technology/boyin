@@ -491,7 +491,7 @@ class TimedBroadcastApp:
         self.status_labels = []
         status_texts = ["当前时间", "系统状态", "播放状态", "任务数量", "待办事项"]
 
-        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251105", font=self.font_11,
+        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251109", font=self.font_11,
                                     bootstyle=(SECONDARY, INVERSE), padding=(15, 0))
         copyright_label.pack(side=RIGHT, padx=2)
 
@@ -6846,6 +6846,7 @@ class TimedBroadcastApp:
 
     def _pregenerate_dynamic_voice_task(self, task, trigger_datetime):
         """在后台预生成动态语音文件，但不播放。"""
+        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
         try:
             # 使用任务内容（文本、语音、速度等）的哈希值来确保任务修改后会生成新文件
             task_details_str = f"{task.get('source_text', '')}{task.get('speed', '0')}{task.get('pitch', '0')}"
@@ -6916,6 +6917,8 @@ class TimedBroadcastApp:
                     if os.path.exists(f):
                         try: os.remove(f)
                         except: pass
+            pythoncom.CoUninitialize()
+
 
     def _play_dynamic_voice_task(self, task, trigger_time):
         """播放动态语音任务，优先使用预生成的文件。"""
