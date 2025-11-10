@@ -1517,7 +1517,6 @@ class TimedBroadcastApp:
         source_lf.columnconfigure(1, weight=1)
 
         self.stream_source_var = tk.StringVar(value="file")
-        self.stream_source_var.trace_add("write", self._toggle_stream_source_controls)
 
         # 文件源
         file_rb = ttk.Radiobutton(source_lf, text="视频文件:", variable=self.stream_source_var, value="file")
@@ -1576,6 +1575,7 @@ class TimedBroadcastApp:
         ip_frame = ttk.Frame(control_lf)
         ip_frame.grid(row=3, column=0, columnspan=2, sticky='ew', pady=(10, 0))
         ttk.Label(ip_frame, text=f"(本机IP地址: {self._get_local_ip()})", font=self.font_9, bootstyle="secondary").pack(side=LEFT)
+        self.stream_source_var.trace_add("write", self._toggle_stream_source_controls)
 
         # --- 初始化UI状态 ---
         self._toggle_stream_source_controls()
