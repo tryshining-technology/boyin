@@ -8039,7 +8039,7 @@ class TimedBroadcastApp:
                     '--effect-list=spectrum',       # 使用频谱效果
                     f'--effect-width={frame_width}',   # 频谱宽度
                     f'--effect-height={frame_height}', # 频谱高度
-                    '--no-video-title-show'，         # 不显示标题
+                    '--no-video-title-show',        # 不显示标题
                      '--no-video-deco',
                     f'--aspect-ratio={frame_width}:{frame_height}'
                 ])
