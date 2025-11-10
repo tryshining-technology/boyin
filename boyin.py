@@ -8011,48 +8011,20 @@ class TimedBroadcastApp:
         if VLC_AVAILABLE:
             self.log(f"检测到VLC，使用VLC引擎播放任务 '{task['name']}'。")
             try:
-                # 显示频谱框架
                 self.root.after(0, lambda: self.spectrum_frame.pack(side=LEFT, padx=20, fill=Y))
                 
-                # 等待UI更新
-                time.sleep(0.1)
-                
-                # 确保 spectrum_frame 已经创建并可见
-                if not (self.spectrum_frame and self.spectrum_frame.winfo_exists()):
-                    self.log("警告: 频谱框架未正确创建")
-                
-                # --- ↓↓↓ 核心修正：在 Instance 级别设置频谱可视化参数 ---
-                # 获取 spectrum_frame 的尺寸
-                self.root.update_idletasks()  # 强制更新布局
-                frame_width = self.spectrum_frame.winfo_width()
-                frame_height = self.spectrum_frame.winfo_height()
-                
-                # 提供一个默认值以防万一
-                if frame_width <= 1: frame_width = 200
-                if frame_height <= 1: frame_height = 35
-                
-                self.log(f"频谱框架尺寸: {frame_width}x{frame_height}")
-                
-                instance = vlc.Instance([
-                    '--no-xlib',
-                    '--vout=directx',
-                    '--audio-visual=visual',
-                    '--vfilter=spectrometer',   # 使用频谱仪滤镜
-                    '--spect-3d',               # 启用3D效果
-                    '--no-video-title-show'
-                ])
+                # --- ↓↓↓ 核心修正 #1：创建一个“干净”的VLC实例 ---
+                instance = vlc.Instance(['--no-xlib'])
                 # --- ↑↑↑ 修正结束 ↑↑↑ ---
 
                 self.vlc_player = instance.media_player_new()
 
-                # 将播放器输出绑定到 spectrum_frame
                 time.sleep(0.1) 
                 if self.spectrum_frame and self.spectrum_frame.winfo_exists():
                     hwnd = self.spectrum_frame.winfo_id()
                     self.log(f"将VLC绑定到窗口 ID: {hwnd}")
                     self.vlc_player.set_hwnd(hwnd)
 
-                # 设置静音状态
                 if self.is_muted:
                     self.vlc_player.audio_set_mute(True)
                 else:
@@ -8066,14 +8038,20 @@ class TimedBroadcastApp:
                         self.log(f"任务 '{task['name']}' 被新指令中断。")
                         break
                     
-                    # 创建媒体对象（不需要在这里添加可视化选项）
                     media = instance.media_new(audio_path)
+                    
+                    # --- ↓↓↓ 核心修正 #2：将所有可视化参数作为选项，添加到 Media 对象上 ---
+                    media.add_option(':vout=directx')
+                    media.add_option(':audio-visual=visual')
+                    media.add_option(':vfilter=spectrometer')
+                    media.add_option(':spect-3d')
+                    media.add_option(':no-video-title-show')
+                    # --- ↑↑↑ 修正结束 ↑↑↑ ---
                     
                     self.vlc_player.set_media(media)
                     self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
                     self.vlc_player.play()
                     
-                    # 等待播放开始
                     time.sleep(0.3)
                     
                     self.log(f"播放状态: {self.vlc_player.get_state()}")
@@ -8118,7 +8096,7 @@ class TimedBroadcastApp:
                 self.root.after(0, self.spectrum_frame.pack_forget)
 
         else:
-            # Pygame播放逻辑
+            # Pygame播放逻辑 (保持不变)
             self.root.after(0, self.spectrum_frame.pack_forget)
             
             if not AUDIO_AVAILABLE:
@@ -8185,7 +8163,6 @@ class TimedBroadcastApp:
                 except Exception as e:
                     self.log(f"播放音频文件 {os.path.basename(audio_path)} 失败: {e}")
                     continue
-
     def _play_voice_task_internal(self, task):
         if not AUDIO_AVAILABLE:
             self.log("错误: Pygame未初始化，无法播放语音。")
