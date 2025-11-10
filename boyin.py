@@ -8035,11 +8035,11 @@ class TimedBroadcastApp:
                 
                 instance = vlc.Instance([
                     '--no-xlib',
-                    '--vout=directx',
-                    '--audio-visual=visual',
-                    '--vfilter=spectrometer', # 将滤镜更换为 spectrometer
-                    '--spect-3d',             # 启用3D效果
-                    '--no-video-title-show'
+                    '--audio-visual=visual',        # 启用音频可视化
+                    '--effect-list=spectrum',       # 使用频谱效果
+                    f'--effect-width={frame_width}',   # 频谱宽度
+                    f'--effect-height={frame_height}', # 频谱高度
+                    '--no-video-title-show'         # 不显示标题
                 ])
                 # --- ↑↑↑ 修正结束 ↑↑↑ ---
 
