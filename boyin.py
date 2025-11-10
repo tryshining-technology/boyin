@@ -1252,11 +1252,9 @@ class TimedBroadcastApp:
         """构建“媒体处理”选项卡的UI界面"""
         parent_frame.columnconfigure(0, weight=1)
 
-        # --- 在 __init__ 中需要添加 self.is_media_processing = False ---
-
         # --- 顶部说明 ---
         desc_label = ttk.Label(parent_frame, 
-                               text="此页面功能依赖于软件根目录下的 ffmpeg.exe，用于即时处理音视频文件。注意：同一时间只能执行一个媒体处理任务。",
+                               text="此页面功能依赖于软件根目录下的 ffmpeg.exe，用于即时处理音视频文件。\n注意：同一时间只能执行一个媒体处理任务。",
                                font=self.font_10, bootstyle="info", wraplength=700)
         desc_label.pack(fill=X, pady=(0, 15))
 
@@ -1268,14 +1266,15 @@ class TimedBroadcastApp:
         ttk.Label(extract_lf, text="源视频文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
         self.extract_source_entry = ttk.Entry(extract_lf, font=self.font_11)
         self.extract_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        # --- ↓↓↓ 关键修正：为“浏览”按钮绑定command ↓↓↓ ---
-        ttk.Button(extract_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_source_file(self.extract_source_entry, self.extract_output_entry, ".mp3")).grid(row=0, column=2, padx=5)
+        # --- ↓↓↓ 关键修正：使用默认参数来立即绑定变量 ↓↓↓ ---
+        ttk.Button(extract_lf, text="浏览...", bootstyle="outline", 
+                   command=lambda w=self.extract_source_entry, o=self.extract_output_entry, e=".mp3": self._select_media_source_file(w, o, e)).grid(row=0, column=2, padx=5)
 
         ttk.Label(extract_lf, text="输出音频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
         self.extract_output_entry = ttk.Entry(extract_lf, font=self.font_11)
         self.extract_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
-        # --- ↓↓↓ 关键修正：为“浏览”按钮绑定command ↓↓↓ ---
-        ttk.Button(extract_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_output_file(self.extract_output_entry, ".mp3", [("MP3 音频文件", "*.mp3")])).grid(row=1, column=2, padx=5)
+        ttk.Button(extract_lf, text="浏览...", bootstyle="outline", 
+                   command=lambda w=self.extract_output_entry: self._select_media_output_file(w, ".mp3", [("MP3 音频文件", "*.mp3")])).grid(row=1, column=2, padx=5)
 
         extract_action_frame = ttk.Frame(extract_lf)
         extract_action_frame.grid(row=2, column=1, sticky='w', pady=10)
@@ -1294,14 +1293,15 @@ class TimedBroadcastApp:
         ttk.Label(convert_lf, text="源视频文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
         self.convert_source_entry = ttk.Entry(convert_lf, font=self.font_11)
         self.convert_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        # --- ↓↓↓ 关键修正：为“浏览”按钮绑定command ↓↓↓ ---
-        ttk.Button(convert_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_source_file(self.convert_source_entry, self.convert_output_entry, ".mp4")).grid(row=0, column=2, padx=5)
+        # --- ↓↓↓ 关键修正：使用默认参数来立即绑定变量 ↓↓↓ ---
+        ttk.Button(convert_lf, text="浏览...", bootstyle="outline", 
+                   command=lambda w=self.convert_source_entry, o=self.convert_output_entry, e=".mp4": self._select_media_source_file(w, o, e)).grid(row=0, column=2, padx=5)
 
         ttk.Label(convert_lf, text="输出视频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
         self.convert_output_entry = ttk.Entry(convert_lf, font=self.font_11)
         self.convert_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
-        # --- ↓↓↓ 关键修正：为“浏览”按钮绑定command ↓↓↓ ---
-        ttk.Button(convert_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_output_file(self.convert_output_entry, ".mp4", [("MP4 视频文件", "*.mp4")])).grid(row=1, column=2, padx=5)
+        ttk.Button(convert_lf, text="浏览...", bootstyle="outline", 
+                   command=lambda w=self.convert_output_entry: self._select_media_output_file(w, ".mp4", [("MP4 视频文件", "*.mp4")])).grid(row=1, column=2, padx=5)
 
         convert_action_frame = ttk.Frame(convert_lf)
         convert_action_frame.grid(row=2, column=1, sticky='w', pady=10)
@@ -1320,14 +1320,15 @@ class TimedBroadcastApp:
         ttk.Label(clip_lf, text="源文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
         self.clip_source_entry = ttk.Entry(clip_lf, font=self.font_11)
         self.clip_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        # --- ↓↓↓ 关键修正：为“浏览”按钮绑定command ↓↓↓ ---
-        ttk.Button(clip_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_source_file(self.clip_source_entry, self.clip_output_entry, "_clipped.mp4")).grid(row=0, column=2, padx=5)
+        # --- ↓↓↓ 关键修正：使用默认参数来立即绑定变量 ↓↓↓ ---
+        ttk.Button(clip_lf, text="浏览...", bootstyle="outline", 
+                   command=lambda w=self.clip_source_entry, o=self.clip_output_entry, e="_clipped.mp4": self._select_media_source_file(w, o, e)).grid(row=0, column=2, padx=5)
 
         ttk.Label(clip_lf, text="输出文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
         self.clip_output_entry = ttk.Entry(clip_lf, font=self.font_11)
         self.clip_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
-        # --- ↓↓↓ 关键修正：为“浏览”按钮绑定command ↓↓↓ ---
-        ttk.Button(clip_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_output_file(self.clip_output_entry, ".mp4", [("媒体文件", "*.mp4 *.mp3")])).grid(row=1, column=2, padx=5)
+        ttk.Button(clip_lf, text="浏览...", bootstyle="outline", 
+                   command=lambda w=self.clip_output_entry: self._select_media_output_file(w, ".mp4", [("媒体文件", "*.mp4 *.mp3")])).grid(row=1, column=2, padx=5)
 
         time_frame = ttk.Frame(clip_lf)
         time_frame.grid(row=2, column=1, sticky='w', pady=5)
@@ -1347,7 +1348,6 @@ class TimedBroadcastApp:
         self.clip_progress.pack(side=LEFT, padx=15, fill=X, expand=True)
         self.clip_status_label = ttk.Label(clip_action_frame, text="准备就绪", font=self.font_9, bootstyle="secondary")
         self.clip_status_label.pack(side=LEFT, padx=10)
-
     def _select_media_output_file(self, entry_widget, default_extension, filetypes):
         """通用函数：选择输出文件的保存路径"""
         filepath = filedialog.asksaveasfilename(title="指定输出文件", defaultextension=default_extension, filetypes=filetypes)
@@ -1631,7 +1631,12 @@ class TimedBroadcastApp:
             messagebox.showerror("输入错误", "端口号必须是 1024 到 65535 之间的整数。", parent=self.root)
             return
 
-        # 2. 根据清晰度预设构建sout字符串 (VLC的“魔法咒语”)
+        # 2. 获取用于显示的局域网IP地址
+        local_ip = self._get_local_ip()
+        if local_ip == "127.0.0.1":
+            messagebox.showwarning("网络警告", "未能获取到有效的局域网IP地址，串流可能仅本机可见。", parent=self.root)
+
+        # 3. 根据清晰度预设构建sout字符串
         quality = self.stream_quality_combo.get()
         presets = {
             "流畅 (480p, 800kbps)": {"vcodec": "h264", "vb": "800", "height": "480", "acodec": "mpga", "ab": "128"},
@@ -1641,12 +1646,15 @@ class TimedBroadcastApp:
         p = presets[quality]
         
         transcode_settings = f"vcodec={p['vcodec']},vb={p['vb']},height={p['height']},acodec={p['acodec']},ab={p['ab']}"
-        sout_string = f"#transcode{{{transcode_settings}}}:rtp{{sdp=rtsp://:{port}/stream}}"
+        sout_string = f"#transcode{{{transcode_settings}}}:rtp{{sdp=rtsp://0.0.0.0:{port}/stream}}"
 
-        # 3. 准备VLC实例和媒体
+        # 4. 准备VLC实例和媒体
         try:
             self.log(f"正在准备串流... 参数: {sout_string}")
-            self.vlc_stream_instance = vlc.Instance(f"--sout={sout_string}")
+            
+            # --- ↓↓↓ 核心修改：添加 "--vout=dummy" 参数以禁用本地视频输出 ↓↓↓ ---
+            self.vlc_stream_instance = vlc.Instance(f"--sout={sout_string}", "--vout=dummy")
+            # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
             
             if source_type == 'file':
                 media = self.vlc_stream_instance.media_new(source_path)
@@ -1656,15 +1664,15 @@ class TimedBroadcastApp:
             self.vlc_stream_player = self.vlc_stream_instance.media_player_new()
             self.vlc_stream_player.set_media(media)
 
-            # 4. 启动播放（即开始串流）
+            # 5. 启动播放（即开始串流）
             self.vlc_stream_player.play()
             self.log("串流已启动！")
 
-            # 5. 更新UI状态
+            # 6. 更新UI状态
             self.is_streaming = True
             self.stream_start_stop_button.config(text="■ 停止串流", bootstyle="danger")
             self.stream_status_label.config(text="串流中...", bootstyle="success")
-            stream_url = f"rtsp://{self._get_local_ip()}:{port}/stream"
+            stream_url = f"rtsp://{local_ip}:{port}/stream"
             self.stream_url_label.config(text=stream_url)
             
             # 禁用所有设置控件
