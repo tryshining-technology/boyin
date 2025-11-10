@@ -1348,6 +1348,26 @@ class TimedBroadcastApp:
         self.clip_progress.pack(side=LEFT, padx=15, fill=X, expand=True)
         self.clip_status_label = ttk.Label(clip_action_frame, text="准备就绪", font=self.font_9, bootstyle="secondary")
         self.clip_status_label.pack(side=LEFT, padx=10)
+
+    def _select_media_source_file(self, entry_widget, output_entry_widget, output_extension):
+        """通用函数：选择源媒体文件，并智能填充输出路径"""
+        filetypes = [("所有支持的媒体文件", "*.mp4 *.mkv *.avi *.mov *.mp3 *.wav *.flac"), ("所有文件", "*.*")]
+        filepath = filedialog.askopenfilename(title="选择源文件", filetypes=filetypes)
+        
+        if not filepath:
+            return
+
+        entry_widget.delete(0, END)
+        entry_widget.insert(0, filepath)
+
+        # 智能填充输出路径
+        if output_entry_widget:
+            source_dir = os.path.dirname(filepath)
+            source_basename, _ = os.path.splitext(os.path.basename(filepath))
+            output_path = os.path.join(source_dir, f"{source_basename}{output_extension}")
+            output_entry_widget.delete(0, END)
+            output_entry_widget.insert(0, output_path)
+
     def _select_media_output_file(self, entry_widget, default_extension, filetypes):
         """通用函数：选择输出文件的保存路径"""
         filepath = filedialog.asksaveasfilename(title="指定输出文件", defaultextension=default_extension, filetypes=filetypes)
