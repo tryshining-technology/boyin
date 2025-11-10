@@ -1677,7 +1677,7 @@ class TimedBroadcastApp:
         # 4. 构建sout字符串
         quality = self.stream_quality_combo.get()
         presets = {
-            "流畅 (480p, 800kbps)": {"vcodec": "h24", "vb": "800", "height": "480", "acodec": "mp3", "ab": "128"},
+            "流畅 (480p, 800kbps)": {"vcodec": "h264", "vb": "800", "height": "480", "acodec": "mp3", "ab": "128"},
             "标清 (720p, 1.5Mbps)": {"vcodec": "h264", "vb": "1500", "height": "720", "acodec": "mp3", "ab": "128"},
             "高清 (1080p, 4Mbps)": {"vcodec": "h264", "vb": "4000", "height": "1080", "acodec": "mp3", "ab": "192"}
         }
@@ -1695,7 +1695,7 @@ class TimedBroadcastApp:
             # === 方法A：在 Instance 级别设置 sout（推荐） ===
             vlc_args = [
                 "--vout=dummy",           # 禁用视频输出窗口
-                # "--no-sout-audio",      # 如果不需要音频可以去掉这行
+                # "--no-sout-audio",        # 如果需要音频可以去掉这行
                 f"--sout={sout_string}",  # 在实例级别设置串流输出
                 "--sout-keep",            # 保持串流连接
                 "--verbose=2",            # 详细日志
@@ -8015,7 +8015,8 @@ class TimedBroadcastApp:
             folder_path = task['content']
             if os.path.isdir(folder_path):
                 supported_extensions = ('.mp3', '.wav', '.ogg', '.flac', '.m4a', '.wma', '.ape')
-                all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(supported_extensions)]
+                all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) 
+                            if f.lower().endswith(supported_extensions)]
                 if task.get('play_order') == 'random':
                     random.shuffle(all_files)
                 
@@ -8031,18 +8032,48 @@ class TimedBroadcastApp:
         if VLC_AVAILABLE:
             self.log(f"检测到VLC，使用VLC引擎播放任务 '{task['name']}'。")
             try:
+                # 显示频谱框架
                 self.root.after(0, lambda: self.spectrum_frame.pack(side=LEFT, padx=20, fill=Y))
                 
-                # --- ↓↓↓ 核心修正：创建一个干净的VLC实例 ---
-                instance = vlc.Instance()
+                # 等待UI更新
+                time.sleep(0.1)
+                
+                # 确保 spectrum_frame 已经创建并可见
+                if not (self.spectrum_frame and self.spectrum_frame.winfo_exists()):
+                    self.log("警告: 频谱框架未正确创建")
+                
+                # --- ↓↓↓ 核心修正：在 Instance 级别设置频谱可视化参数 ---
+                # 获取 spectrum_frame 的尺寸
+                self.root.update_idletasks()  # 强制更新布局
+                frame_width = self.spectrum_frame.winfo_width()
+                frame_height = self.spectrum_frame.winfo_height()
+                
+                # 提供一个默认值以防万一
+                if frame_width <= 1: frame_width = 200
+                if frame_height <= 1: frame_height = 35
+                
+                self.log(f"频谱框架尺寸: {frame_width}x{frame_height}")
+                
+                instance = vlc.Instance([
+                    '--no-xlib',
+                    '--audio-visual=visual',        # 启用音频可视化
+                    '--effect-list=spectrum',       # 使用频谱效果
+                    f'--effect-width={frame_width}',   # 频谱宽度
+                    f'--effect-height={frame_height}', # 频谱高度
+                    '--no-video-title-show'         # 不显示标题
+                ])
                 # --- ↑↑↑ 修正结束 ↑↑↑ ---
 
                 self.vlc_player = instance.media_player_new()
 
+                # 将播放器输出绑定到 spectrum_frame
                 time.sleep(0.1) 
                 if self.spectrum_frame and self.spectrum_frame.winfo_exists():
-                    self.vlc_player.set_hwnd(self.spectrum_frame.winfo_id())
+                    hwnd = self.spectrum_frame.winfo_id()
+                    self.log(f"将VLC绑定到窗口 ID: {hwnd}")
+                    self.vlc_player.set_hwnd(hwnd)
 
+                # 设置静音状态
                 if self.is_muted:
                     self.vlc_player.audio_set_mute(True)
                 else:
@@ -8056,18 +8087,17 @@ class TimedBroadcastApp:
                         self.log(f"任务 '{task['name']}' 被新指令中断。")
                         break
                     
+                    # 创建媒体对象（不需要在这里添加可视化选项）
                     media = instance.media_new(audio_path)
                     
-                    # --- ↓↓↓ 核心修正：将频谱参数作为选项添加到 Media 对象上 ---
-                    media.add_option(':vfilter=visual')
-                    media.add_option(':visual-type=spectrum')
-                    media.add_option(':no-video-title-show')
-                    # --- ↑↑↑ 修正结束 ↑↑↑ ---
-
                     self.vlc_player.set_media(media)
                     self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
                     self.vlc_player.play()
-                    time.sleep(0.2)
+                    
+                    # 等待播放开始
+                    time.sleep(0.3)
+                    
+                    self.log(f"播放状态: {self.vlc_player.get_state()}")
 
                     last_text_update_time = 0
                     while self.vlc_player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
@@ -8100,6 +8130,8 @@ class TimedBroadcastApp:
 
             except Exception as e:
                 self.log(f"使用VLC播放音频失败: {e}")
+                import traceback
+                self.log(traceback.format_exc())
             finally:
                 if self.vlc_player:
                     self.vlc_player.stop()
@@ -8107,6 +8139,7 @@ class TimedBroadcastApp:
                 self.root.after(0, self.spectrum_frame.pack_forget)
 
         else:
+            # Pygame播放逻辑
             self.root.after(0, self.spectrum_frame.pack_forget)
             
             if not AUDIO_AVAILABLE:
