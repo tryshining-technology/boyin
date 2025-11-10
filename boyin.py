@@ -251,6 +251,9 @@ class TimedBroadcastApp:
         self.is_muted = False
         self.last_bgm_volume = 1.0
         self.is_media_processing = False
+        self.vlc_stream_instance = None
+        self.vlc_stream_player = None
+        self.is_streaming = False
 
         self.create_folder_structure()
         self.load_settings()
@@ -690,19 +693,21 @@ class TimedBroadcastApp:
         execute_tab = ttk.Frame(notebook, padding=10)
         print_tab = ttk.Frame(notebook, padding=10)
         backup_tab = ttk.Frame(notebook, padding=10)
-
+        media_processing_tab = ttk.Frame(notebook, padding=10)
+        streaming_tab = ttk.Frame(notebook, padding=10)
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
         notebook.add(print_tab, text=' 定时打印 ')
         notebook.add(backup_tab, text=' 定时备份 ')
-        media_processing_tab = ttk.Frame(notebook, padding=10)
         notebook.add(media_processing_tab, text=' 媒体处理 ')
+        notebook.add(streaming_tab, text=' 串流模式 ')
 
         self._build_screenshot_ui(screenshot_tab)
         self._build_execute_ui(execute_tab)
         self._build_print_ui(print_tab)
         self._build_backup_ui(backup_tab)
         self._build_media_processing_ui(media_processing_tab)
+        self._build_streaming_ui(streaming_tab)
 
         return page_frame
 
@@ -1251,7 +1256,7 @@ class TimedBroadcastApp:
 
         # --- 顶部说明 ---
         desc_label = ttk.Label(parent_frame, 
-                               text="此页面功能依赖于软件根目录下的 ffmpeg.exe，用于即时处理音视频文件。\n注意：同一时间只能执行一个媒体处理任务。",
+                               text="此页面功能依赖于软件根目录下的 ffmpeg.exe，用于即时处理音视频文件。注意：同一时间只能执行一个媒体处理任务。",
                                font=self.font_10, bootstyle="info", wraplength=700)
         desc_label.pack(fill=X, pady=(0, 15))
 
@@ -1263,11 +1268,13 @@ class TimedBroadcastApp:
         ttk.Label(extract_lf, text="源视频文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
         self.extract_source_entry = ttk.Entry(extract_lf, font=self.font_11)
         self.extract_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        # --- ↓↓↓ 关键修正：为“浏览”按钮绑定command ↓↓↓ ---
         ttk.Button(extract_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_source_file(self.extract_source_entry, self.extract_output_entry, ".mp3")).grid(row=0, column=2, padx=5)
 
         ttk.Label(extract_lf, text="输出音频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
         self.extract_output_entry = ttk.Entry(extract_lf, font=self.font_11)
         self.extract_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
+        # --- ↓↓↓ 关键修正：为“浏览”按钮绑定command ↓↓↓ ---
         ttk.Button(extract_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_output_file(self.extract_output_entry, ".mp3", [("MP3 音频文件", "*.mp3")])).grid(row=1, column=2, padx=5)
 
         extract_action_frame = ttk.Frame(extract_lf)
@@ -1287,11 +1294,13 @@ class TimedBroadcastApp:
         ttk.Label(convert_lf, text="源视频文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
         self.convert_source_entry = ttk.Entry(convert_lf, font=self.font_11)
         self.convert_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        # --- ↓↓↓ 关键修正：为“浏览”按钮绑定command ↓↓↓ ---
         ttk.Button(convert_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_source_file(self.convert_source_entry, self.convert_output_entry, ".mp4")).grid(row=0, column=2, padx=5)
 
         ttk.Label(convert_lf, text="输出视频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
         self.convert_output_entry = ttk.Entry(convert_lf, font=self.font_11)
         self.convert_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
+        # --- ↓↓↓ 关键修正：为“浏览”按钮绑定command ↓↓↓ ---
         ttk.Button(convert_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_output_file(self.convert_output_entry, ".mp4", [("MP4 视频文件", "*.mp4")])).grid(row=1, column=2, padx=5)
 
         convert_action_frame = ttk.Frame(convert_lf)
@@ -1311,11 +1320,13 @@ class TimedBroadcastApp:
         ttk.Label(clip_lf, text="源文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
         self.clip_source_entry = ttk.Entry(clip_lf, font=self.font_11)
         self.clip_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        # --- ↓↓↓ 关键修正：为“浏览”按钮绑定command ↓↓↓ ---
         ttk.Button(clip_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_source_file(self.clip_source_entry, self.clip_output_entry, "_clipped.mp4")).grid(row=0, column=2, padx=5)
 
         ttk.Label(clip_lf, text="输出文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
         self.clip_output_entry = ttk.Entry(clip_lf, font=self.font_11)
         self.clip_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
+        # --- ↓↓↓ 关键修正：为“浏览”按钮绑定command ↓↓↓ ---
         ttk.Button(clip_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_output_file(self.clip_output_entry, ".mp4", [("媒体文件", "*.mp4 *.mp3")])).grid(row=1, column=2, padx=5)
 
         time_frame = ttk.Frame(clip_lf)
@@ -1476,6 +1487,238 @@ class TimedBroadcastApp:
                 for btn in [self.extract_button, self.convert_button, self.clip_button]:
                     btn.config(state=NORMAL)
             self.root.after(0, restore_buttons)
+
+    def _get_local_ip(self):
+        """获取本机的局域网IP地址"""
+        try:
+            import socket
+            # 创建一个套接字连接到一个公共DNS服务器（不实际发送数据）
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1" # 获取失败则返回本地回环地址
+
+    def _build_streaming_ui(self, parent_frame):
+        """构建“串流模式”选项卡的UI界面"""
+        parent_frame.columnconfigure(0, weight=1)
+
+        # --- 顶部说明 ---
+        desc_label = ttk.Label(parent_frame, 
+                               text="将本机作为流媒体服务器，向局域网广播音视频。其他设备可通过VLC等播放器访问串流地址。\n注意：串流会消耗大量CPU资源，且可能需要您手动配置Windows防火墙以允许其他设备访问。",
+                               font=self.font_10, bootstyle="info", wraplength=700)
+        desc_label.pack(fill=X, pady=(0, 15))
+
+        # --- 1. 选择串流源 ---
+        source_lf = ttk.LabelFrame(parent_frame, text="1. 选择串流源", padding=15)
+        source_lf.pack(fill=X, pady=10)
+        source_lf.columnconfigure(1, weight=1)
+
+        self.stream_source_var = tk.StringVar(value="file")
+        self.stream_source_var.trace_add("write", self._toggle_stream_source_controls)
+
+        # 文件源
+        file_rb = ttk.Radiobutton(source_lf, text="视频文件:", variable=self.stream_source_var, value="file")
+        file_rb.grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        self.stream_file_entry = ttk.Entry(source_lf, font=self.font_11)
+        self.stream_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        self.stream_file_browse_btn = ttk.Button(source_lf, text="浏览...", bootstyle="outline", command=self._select_stream_source_file)
+        self.stream_file_browse_btn.grid(row=0, column=2, padx=5)
+
+        # 桌面源
+        desktop_rb = ttk.Radiobutton(source_lf, text="桌面屏幕:", variable=self.stream_source_var, value="desktop")
+        desktop_rb.grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        self.stream_desktop_label = ttk.Label(source_lf, text="主屏幕 (自动检测)", font=self.font_11, bootstyle="secondary")
+        self.stream_desktop_label.grid(row=1, column=1, sticky='w', padx=5)
+
+        # --- 2. 设置串流参数 ---
+        params_lf = ttk.LabelFrame(parent_frame, text="2. 设置串流参数", padding=15)
+        params_lf.pack(fill=X, pady=10)
+        
+        quality_frame = ttk.Frame(params_lf)
+        quality_frame.pack(fill=X, pady=5)
+        ttk.Label(quality_frame, text="清晰度预设:").pack(side=LEFT, padx=(0, 10))
+        qualities = ["流畅 (480p, 800kbps)", "标清 (720p, 1.5Mbps)", "高清 (1080p, 4Mbps)"]
+        self.stream_quality_combo = ttk.Combobox(quality_frame, values=qualities, font=self.font_11, state='readonly')
+        self.stream_quality_combo.pack(side=LEFT)
+        self.stream_quality_combo.set(qualities[1]) # 默认选择“标清”
+
+        port_frame = ttk.Frame(params_lf)
+        port_frame.pack(fill=X, pady=5)
+        ttk.Label(port_frame, text="串流端口:").pack(side=LEFT, padx=(0, 28))
+        self.stream_port_entry = ttk.Entry(port_frame, font=self.font_11, width=10)
+        self.stream_port_entry.pack(side=LEFT)
+        self.stream_port_entry.insert(0, "8554")
+        ttk.Label(port_frame, text="(高级用户可修改，范围 1024-65535)", font=self.font_9, bootstyle="secondary").pack(side=LEFT, padx=10)
+
+        # --- 3. 开始/停止串流 ---
+        control_lf = ttk.LabelFrame(parent_frame, text="3. 控制与状态", padding=15)
+        control_lf.pack(fill=X, pady=10)
+        control_lf.columnconfigure(0, weight=1)
+
+        self.stream_start_stop_button = ttk.Button(control_lf, text="▶ 开始串流", bootstyle="success-outline", style="lg.TButton", command=self._toggle_streaming)
+        self.stream_start_stop_button.grid(row=0, column=0, columnspan=2, sticky='ew', ipady=8, pady=10)
+
+        status_frame = ttk.Frame(control_lf)
+        status_frame.grid(row=1, column=0, columnspan=2, sticky='ew', pady=5)
+        ttk.Label(status_frame, text="当前状态:").pack(side=LEFT)
+        self.stream_status_label = ttk.Label(status_frame, text="已停止", font=self.font_11_bold, bootstyle="danger")
+        self.stream_status_label.pack(side=LEFT, padx=5)
+
+        url_frame = ttk.Frame(control_lf)
+        url_frame.grid(row=2, column=0, columnspan=2, sticky='ew', pady=5)
+        ttk.Label(url_frame, text="串流地址:").pack(side=LEFT)
+        self.stream_url_label = ttk.Label(url_frame, text="(串流开始后此处将显示地址)", font=self.font_11, bootstyle="info")
+        self.stream_url_label.pack(side=LEFT, padx=5)
+        
+        ip_frame = ttk.Frame(control_lf)
+        ip_frame.grid(row=3, column=0, columnspan=2, sticky='ew', pady=(10, 0))
+        ttk.Label(ip_frame, text=f"(本机IP地址: {self._get_local_ip()})", font=self.font_9, bootstyle="secondary").pack(side=LEFT)
+
+        # --- 初始化UI状态 ---
+        self._toggle_stream_source_controls()
+
+    def _select_stream_source_file(self):
+        """为串流功能选择源视频文件"""
+        filetypes = [("所有支持的视频文件", "*.mp4 *.mkv *.avi *.mov"), ("所有文件", "*.*")]
+        filepath = filedialog.askopenfilename(title="选择要串流的视频文件", filetypes=filetypes)
+        
+        if not filepath:
+            return
+
+        self.stream_file_entry.delete(0, END)
+        self.stream_file_entry.insert(0, filepath)
+
+    def _toggle_stream_source_controls(self, *args):
+        """根据选择的串流源，切换UI控件的可用状态"""
+        source = self.stream_source_var.get()
+        if source == 'file':
+            self.stream_file_entry.config(state=NORMAL)
+            self.stream_file_browse_btn.config(state=NORMAL)
+        elif source == 'desktop':
+            self.stream_file_entry.config(state=DISABLED)
+            self.stream_file_browse_btn.config(state=DISABLED)
+
+    def _toggle_streaming(self):
+        """切换串流状态的總控函数"""
+        if self.is_streaming:
+            self._stop_streaming()
+        else:
+            self._start_streaming()
+
+    def _start_streaming(self):
+        """开始VLC串流"""
+        if not VLC_AVAILABLE:
+            messagebox.showerror("依赖缺失", "未找到VLC核心库，无法启动串流功能。", parent=self.root)
+            return
+
+        # 1. 验证输入
+        source_type = self.stream_source_var.get()
+        source_path = self.stream_file_entry.get().strip()
+        port_str = self.stream_port_entry.get().strip()
+
+        if source_type == 'file' and (not source_path or not os.path.exists(source_path)):
+            messagebox.showerror("输入错误", "请选择一个有效的视频文件作为串流源。", parent=self.root)
+            return
+        
+        try:
+            port = int(port_str)
+            if not (1024 <= port <= 65535):
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("输入错误", "端口号必须是 1024 到 65535 之间的整数。", parent=self.root)
+            return
+
+        # 2. 根据清晰度预设构建sout字符串 (VLC的“魔法咒语”)
+        quality = self.stream_quality_combo.get()
+        presets = {
+            "流畅 (480p, 800kbps)": {"vcodec": "h264", "vb": "800", "height": "480", "acodec": "mpga", "ab": "128"},
+            "标清 (720p, 1.5Mbps)": {"vcodec": "h264", "vb": "1500", "height": "720", "acodec": "mpga", "ab": "128"},
+            "高清 (1080p, 4Mbps)": {"vcodec": "h264", "vb": "4000", "height": "1080", "acodec": "mpga", "ab": "192"}
+        }
+        p = presets[quality]
+        
+        transcode_settings = f"vcodec={p['vcodec']},vb={p['vb']},height={p['height']},acodec={p['acodec']},ab={p['ab']}"
+        sout_string = f"#transcode{{{transcode_settings}}}:rtp{{sdp=rtsp://:{port}/stream}}"
+
+        # 3. 准备VLC实例和媒体
+        try:
+            self.log(f"正在准备串流... 参数: {sout_string}")
+            self.vlc_stream_instance = vlc.Instance(f"--sout={sout_string}")
+            
+            if source_type == 'file':
+                media = self.vlc_stream_instance.media_new(source_path)
+            else: # desktop
+                media = self.vlc_stream_instance.media_new("screen://")
+            
+            self.vlc_stream_player = self.vlc_stream_instance.media_player_new()
+            self.vlc_stream_player.set_media(media)
+
+            # 4. 启动播放（即开始串流）
+            self.vlc_stream_player.play()
+            self.log("串流已启动！")
+
+            # 5. 更新UI状态
+            self.is_streaming = True
+            self.stream_start_stop_button.config(text="■ 停止串流", bootstyle="danger")
+            self.stream_status_label.config(text="串流中...", bootstyle="success")
+            stream_url = f"rtsp://{self._get_local_ip()}:{port}/stream"
+            self.stream_url_label.config(text=stream_url)
+            
+            # 禁用所有设置控件
+            for widget in [self.stream_file_entry, self.stream_file_browse_btn, self.stream_quality_combo, self.stream_port_entry]:
+                widget.config(state=DISABLED)
+            
+            # 禁用单选按钮
+            for child in self.stream_file_browse_btn.master.winfo_children():
+                if isinstance(child, (ttk.Radiobutton)):
+                    child.config(state=DISABLED)
+
+        except Exception as e:
+            self.log(f"!!! 启动串流失败: {e}")
+            messagebox.showerror("启动失败", f"无法启动串流服务：\n{e}", parent=self.root)
+            self._stop_streaming() # 确保清理资源
+
+    def _stop_streaming(self):
+        """停止VLC串流"""
+        if not self.is_streaming and not self.vlc_stream_player:
+            return
+
+        self.log("正在停止串流...")
+        try:
+            if self.vlc_stream_player:
+                self.vlc_stream_player.stop()
+                self.vlc_stream_player.release()
+            if self.vlc_stream_instance:
+                self.vlc_stream_instance.release()
+        except Exception as e:
+            self.log(f"停止串流时发生错误: {e}")
+        finally:
+            self.vlc_stream_player = None
+            self.vlc_stream_instance = None
+            self.is_streaming = False
+
+            # 恢复UI状态
+            self.stream_start_stop_button.config(text="▶ 开始串流", bootstyle="success-outline")
+            self.stream_status_label.config(text="已停止", bootstyle="danger")
+            self.stream_url_label.config(text="(串流开始后此处将显示地址)")
+
+            # 启用所有设置控件
+            for widget in [self.stream_file_entry, self.stream_file_browse_btn, self.stream_quality_combo, self.stream_port_entry]:
+                widget.config(state=NORMAL)
+            
+            # 启用单选按钮
+            for child in self.stream_file_browse_btn.master.winfo_children():
+                if isinstance(child, (ttk.Radiobutton)):
+                    child.config(state=NORMAL)
+            
+            # 重新应用一次控件状态，确保文件/桌面切换的禁用状态正确
+            self._toggle_stream_source_controls()
+            self.log("串流已停止。")
+
+    
 
     # --- 定时运行功能的全套方法 ---
     
