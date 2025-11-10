@@ -1666,14 +1666,14 @@ class TimedBroadcastApp:
         # 3. 根据清晰度预设构建sout字符串
         quality = self.stream_quality_combo.get()
         presets = {
-            "流畅 (480p, 800kbps)": {"vcodec": "h264", "vb": "800", "height": "480", "acodec": "mpga", "ab": "128"},
-            "标清 (720p, 1.5Mbps)": {"vcodec": "h264", "vb": "1500", "height": "720", "acodec": "mpga", "ab": "128"},
-            "高清 (1080p, 4Mbps)": {"vcodec": "h264", "vb": "4000", "height": "1080", "acodec": "mpga", "ab": "192"}
+            "流畅 (480p, 800kbps)": {"vcodec": "h264", "vb": "800", "height": "480", "acodec": "mp3", "ab": "128"},
+            "标清 (720p, 1.5Mbps)": {"vcodec": "h264", "vb": "1500", "height": "720", "acodec": "mp3", "ab": "128"},
+            "高清 (1080p, 4Mbps)": {"vcodec": "h264", "vb": "4000", "height": "1080", "acodec": "mp3", "ab": "192"}
         }
         p = presets[quality]
         
         transcode_settings = f"vcodec={p['vcodec']},vb={p['vb']},height={p['height']},acodec={p['acodec']},ab={p['ab']}"
-        sout_string = f"#transcode{{{transcode_settings}}}:duplicate{{dst=std{{access=rtsp,mux=ts,dst=0.0.0.0:{port}/stream}}}}"
+        sout_string = f"#transcode{{{transcode_settings}}}:http{{mux=ffmpeg{{mux=flv}},dst=:{port}/stream}}"
 
         # 4. 准备VLC实例和媒体
         try:
@@ -1699,7 +1699,7 @@ class TimedBroadcastApp:
             self.is_streaming = True
             self.stream_start_stop_button.config(text="■ 停止串流", bootstyle="danger")
             self.stream_status_label.config(text="串流中...", bootstyle="success")
-            stream_url = f"rtsp://{local_ip}:{port}/stream"
+            stream_url = f"http://{local_ip}:{port}/stream"
             self.stream_url_label.config(text=stream_url)
             
             # 禁用所有设置控件
