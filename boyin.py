@@ -8033,15 +8033,13 @@ class TimedBroadcastApp:
                 
                 self.log(f"频谱框架尺寸: {frame_width}x{frame_height}")
                 
-                instance = vlc.Instance([
+                 instance = vlc.Instance([
                     '--no-xlib',
-                    '--audio-visual=visual',        # 启用音频可视化
-                    '--effect-list=goom',       # 使用频谱效果
-                    f'--effect-width={frame_width}',   # 频谱宽度
-                    f'--effect-height={frame_height}', # 频谱高度
-                    '--no-video-title-show',        # 不显示标题
-                     '--no-video-deco',
-                    f'--aspect-ratio={frame_width}:{frame_height}'
+                    '--vout=directx',
+                    '--audio-visual=visual',
+                    '--vfilter=spectrometer', # 将滤镜更换为 spectrometer
+                    '--spect-3d',             # 启用3D效果
+                    '--no-video-title-show'
                 ])
                 # --- ↑↑↑ 修正结束 ↑↑↑ ---
 
