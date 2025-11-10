@@ -1682,7 +1682,7 @@ class TimedBroadcastApp:
         }
         p = presets[quality]
         transcode_settings = f"vcodec={p['vcodec']},vb={p['vb']},height={p['height']},acodec={p['acodec']},ab={p['ab']},channels=2,samplerate=44100"
-        sout_string = f"#transcode{{{transcode_settings}}}:http{{mux=ts,dst=:{port}/stream}}"
+        sout_string = f"#transcode{{{transcode_settings}}}:standard{{access=http,mux=ts,dst=:{port}/stream}}"
         self.log(f"串流配置: {sout_string}")
 
         # 5. 准备VLC实例和媒体
@@ -8036,7 +8036,7 @@ class TimedBroadcastApp:
                 instance = vlc.Instance([
                     '--no-xlib',
                     '--audio-visual=visual',        # 启用音频可视化
-                    '--effect-list=spectrum',       # 使用频谱效果
+                    '--effect-list=goom',       # 使用频谱效果
                     f'--effect-width={frame_width}',   # 频谱宽度
                     f'--effect-height={frame_height}', # 频谱高度
                     '--no-video-title-show',        # 不显示标题
