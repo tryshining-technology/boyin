@@ -8033,7 +8033,7 @@ class TimedBroadcastApp:
                 
                 self.log(f"频谱框架尺寸: {frame_width}x{frame_height}")
                 
-                 instance = vlc.Instance([
+                instance = vlc.Instance([
                     '--no-xlib',
                     '--vout=directx',
                     '--audio-visual=visual',
