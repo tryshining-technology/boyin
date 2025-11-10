@@ -1266,15 +1266,17 @@ class TimedBroadcastApp:
         ttk.Label(extract_lf, text="源视频文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
         self.extract_source_entry = ttk.Entry(extract_lf, font=self.font_11)
         self.extract_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        # --- ↓↓↓ 关键修正：使用默认参数来立即绑定变量 ↓↓↓ ---
-        ttk.Button(extract_lf, text="浏览...", bootstyle="outline", 
-                   command=lambda w=self.extract_source_entry, o=self.extract_output_entry, e=".mp3": self._select_media_source_file(w, o, e)).grid(row=0, column=2, padx=5)
 
         ttk.Label(extract_lf, text="输出音频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
         self.extract_output_entry = ttk.Entry(extract_lf, font=self.font_11)
         self.extract_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
+
+        # --- ↓↓↓ 核心修正：lambda不再使用默认参数，而是直接引用已创建的控件 ---
         ttk.Button(extract_lf, text="浏览...", bootstyle="outline", 
-                   command=lambda w=self.extract_output_entry: self._select_media_output_file(w, ".mp3", [("MP3 音频文件", "*.mp3")])).grid(row=1, column=2, padx=5)
+                   command=lambda: self._select_media_source_file(self.extract_source_entry, self.extract_output_entry, ".mp3")).grid(row=0, column=2, padx=5)
+        ttk.Button(extract_lf, text="浏览...", bootstyle="outline", 
+                   command=lambda: self._select_media_output_file(self.extract_output_entry, ".mp3", [("MP3 音频文件", "*.mp3")])).grid(row=1, column=2, padx=5)
+        # --- ↑↑↑ 修正结束 ↑↑↑ ---
 
         extract_action_frame = ttk.Frame(extract_lf)
         extract_action_frame.grid(row=2, column=1, sticky='w', pady=10)
@@ -1293,15 +1295,17 @@ class TimedBroadcastApp:
         ttk.Label(convert_lf, text="源视频文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
         self.convert_source_entry = ttk.Entry(convert_lf, font=self.font_11)
         self.convert_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        # --- ↓↓↓ 关键修正：使用默认参数来立即绑定变量 ↓↓↓ ---
-        ttk.Button(convert_lf, text="浏览...", bootstyle="outline", 
-                   command=lambda w=self.convert_source_entry, o=self.convert_output_entry, e=".mp4": self._select_media_source_file(w, o, e)).grid(row=0, column=2, padx=5)
 
         ttk.Label(convert_lf, text="输出视频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
         self.convert_output_entry = ttk.Entry(convert_lf, font=self.font_11)
         self.convert_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
+
+        # --- ↓↓↓ 核心修正：同样修改这里的 lambda ---
         ttk.Button(convert_lf, text="浏览...", bootstyle="outline", 
-                   command=lambda w=self.convert_output_entry: self._select_media_output_file(w, ".mp4", [("MP4 视频文件", "*.mp4")])).grid(row=1, column=2, padx=5)
+                   command=lambda: self._select_media_source_file(self.convert_source_entry, self.convert_output_entry, ".mp4")).grid(row=0, column=2, padx=5)
+        ttk.Button(convert_lf, text="浏览...", bootstyle="outline", 
+                   command=lambda: self._select_media_output_file(self.convert_output_entry, ".mp4", [("MP4 视频文件", "*.mp4")])).grid(row=1, column=2, padx=5)
+        # --- ↑↑↑ 修正结束 ↑↑↑ ---
 
         convert_action_frame = ttk.Frame(convert_lf)
         convert_action_frame.grid(row=2, column=1, sticky='w', pady=10)
@@ -1320,15 +1324,17 @@ class TimedBroadcastApp:
         ttk.Label(clip_lf, text="源文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
         self.clip_source_entry = ttk.Entry(clip_lf, font=self.font_11)
         self.clip_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        # --- ↓↓↓ 关键修正：使用默认参数来立即绑定变量 ↓↓↓ ---
-        ttk.Button(clip_lf, text="浏览...", bootstyle="outline", 
-                   command=lambda w=self.clip_source_entry, o=self.clip_output_entry, e="_clipped.mp4": self._select_media_source_file(w, o, e)).grid(row=0, column=2, padx=5)
 
         ttk.Label(clip_lf, text="输出文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
         self.clip_output_entry = ttk.Entry(clip_lf, font=self.font_11)
         self.clip_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
+
+        # --- ↓↓↓ 核心修正：同样修改这里的 lambda ---
         ttk.Button(clip_lf, text="浏览...", bootstyle="outline", 
-                   command=lambda w=self.clip_output_entry: self._select_media_output_file(w, ".mp4", [("媒体文件", "*.mp4 *.mp3")])).grid(row=1, column=2, padx=5)
+                   command=lambda: self._select_media_source_file(self.clip_source_entry, self.clip_output_entry, "_clipped.mp4")).grid(row=0, column=2, padx=5)
+        ttk.Button(clip_lf, text="浏览...", bootstyle="outline", 
+                   command=lambda: self._select_media_output_file(self.clip_output_entry, ".mp4", [("媒体文件", "*.mp4 *.mp3")])).grid(row=1, column=2, padx=5)
+        # --- ↑↑↑ 修正结束 ↑↑↑ ---
 
         time_frame = ttk.Frame(clip_lf)
         time_frame.grid(row=2, column=1, sticky='w', pady=5)
