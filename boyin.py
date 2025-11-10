@@ -1433,14 +1433,11 @@ class TimedBroadcastApp:
         """使用ffmpeg快速获取媒体文件的总时长（秒）"""
         command = ['ffmpeg', '-i', filepath]
         try:
-            # 在Windows上隐藏控制台窗口
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 0
+            # --- ↓↓↓ 核心修正：彻底删除 startupinfo 参数 ↓↓↓ ---
+            # 您顶部的全局代码会自动帮我们处理好窗口隐藏，所以这里我们什么都不用加。
+            process = subprocess.Popen(command, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
+            # --- ↑↑↑ 修正结束 ↑↑↑ ---
 
-            process = subprocess.Popen(command, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', startupinfo=startupinfo)
             _, stderr = process.communicate(timeout=5)
             
             duration_match = re.search(r"Duration: (\d{2}):(\d{2}):(\d{2})\.(\d{2})", stderr)
@@ -1676,7 +1673,7 @@ class TimedBroadcastApp:
         p = presets[quality]
         
         transcode_settings = f"vcodec={p['vcodec']},vb={p['vb']},height={p['height']},acodec={p['acodec']},ab={p['ab']}"
-        sout_string = f"#transcode{{{transcode_settings}}}:rtp{{sdp=rtsp://0.0.0.0:{port}/stream}}"
+        sout_string = f"#transcode{{{transcode_settings}}}:duplicate{{dst=std{{access=rtsp,mux=ts,dst=0.0.0.0:{port}/stream}}}}"
 
         # 4. 准备VLC实例和媒体
         try:
