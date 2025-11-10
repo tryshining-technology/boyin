@@ -1637,90 +1637,153 @@ class TimedBroadcastApp:
             self._start_streaming()
 
     def _start_streaming(self):
-        """开始VLC串流"""
-        if not VLC_AVAILABLE:
-            messagebox.showerror("依赖缺失", "未找到VLC核心库，无法启动串流功能。", parent=self.root)
-            return
+    """开始VLC串流 - 带详细诊断"""
+    if not VLC_AVAILABLE:
+        messagebox.showerror("依赖缺失", "未找到VLC核心库，无法启动串流功能。", parent=self.root)
+        return
 
-        # 1. 验证输入 (不变)
-        source_type = self.stream_source_var.get()
-        source_path = self.stream_file_entry.get().strip()
-        port_str = self.stream_port_entry.get().strip()
+    # 1. 验证输入
+    source_type = self.stream_source_var.get()
+    source_path = self.stream_file_entry.get().strip()
+    port_str = self.stream_port_entry.get().strip()
 
-        if source_type == 'file' and (not source_path or not os.path.exists(source_path)):
-            messagebox.showerror("输入错误", "请选择一个有效的视频文件作为串流源。", parent=self.root)
-            return
+    if source_type == 'file' and (not source_path or not os.path.exists(source_path)):
+        messagebox.showerror("输入错误", "请选择一个有效的视频文件作为串流源。", parent=self.root)
+        return
+    
+    try:
+        port = int(port_str)
+        if not (1024 <= port <= 65535):
+            raise ValueError
+    except ValueError:
+        messagebox.showerror("输入错误", "端口号必须是 1024 到 65535 之间的整数。", parent=self.root)
+        return
+
+    # 2. 检查端口是否已被占用
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    result = sock.connect_ex(('127.0.0.1', port))
+    sock.close()
+    
+    if result == 0:
+        messagebox.showerror("端口冲突", f"端口 {port} 已被占用，请更换端口号。", parent=self.root)
+        return
+    
+    # 3. 获取IP地址
+    local_ip = self._get_local_ip()
+    if local_ip == "127.0.0.1":
+        messagebox.showwarning("网络警告", "未能获取到有效的局域网IP地址，串流可能仅本机可见。", parent=self.root)
+
+    # 4. 构建sout字符串
+    quality = self.stream_quality_combo.get()
+    presets = {
+        "流畅 (480p, 800kbps)": {"vcodec": "h264", "vb": "800", "height": "480", "acodec": "mp3", "ab": "128"},
+        "标清 (720p, 1.5Mbps)": {"vcodec": "h264", "vb": "1500", "height": "720", "acodec": "mp3", "ab": "128"},
+        "高清 (1080p, 4Mbps)": {"vcodec": "h264", "vb": "4000", "height": "1080", "acodec": "mp3", "ab": "192"}
+    }
+    p = presets[quality]
+    
+    transcode_settings = f"vcodec={p['vcodec']},vb={p['vb']},height={p['height']},acodec={p['acodec']},ab={p['ab']},channels=2,samplerate=44100"
+    
+    # 使用 HTTP + TS 格式（最兼容）
+    sout_string = f"#transcode{{{transcode_settings}}}:http{{mux=ts,dst=:{port}/stream}}"
+    
+    self.log(f"串流配置: {sout_string}")
+
+    # 5. 准备VLC实例和媒体
+    try:
+        # === 方法A：在 Instance 级别设置 sout（推荐） ===
+        vlc_args = [
+            "--vout=dummy",           # 禁用视频输出窗口
+            "--no-sout-audio",        # 如果不需要音频可以去掉这行
+            f"--sout={sout_string}",  # 在实例级别设置串流输出
+            "--sout-keep",            # 保持串流连接
+            "--verbose=2",            # 详细日志
+            "--file-logging",         # 启用文件日志
+            "--logfile=vlc-stream-debug.log"  # 日志文件
+        ]
         
-        try:
-            port = int(port_str)
-            if not (1024 <= port <= 65535):
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("输入错误", "端口号必须是 1024 到 65535 之间的整数。", parent=self.root)
-            return
-
-        # 2. 获取IP地址 (不变)
-        local_ip = self._get_local_ip()
-        if local_ip == "127.0.0.1":
-            messagebox.showwarning("网络警告", "未能获取到有效的局域网IP地址，串流可能仅本机可见。", parent=self.root)
-
-        # 3. 构建sout字符串
-        quality = self.stream_quality_combo.get()
-        presets = {
-            "流畅 (480p, 800kbps)": {"vcodec": "h264", "vb": "800", "height": "480", "acodec": "mp3", "ab": "128"},
-            "标清 (720p, 1.5Mbps)": {"vcodec": "h264", "vb": "1500", "height": "720", "acodec": "mp3", "ab": "128"},
-            "高清 (1080p, 4Mbps)": {"vcodec": "h264", "vb": "4000", "height": "1080", "acodec": "mp3", "ab": "192"}
-        }
-        p = presets[quality]
+        self.vlc_stream_instance = vlc.Instance(vlc_args)
         
-        transcode_settings = f"vcodec={p['vcodec']},vb={p['vb']},height={p['height']},acodec={p['acodec']},ab={p['ab']}"
+        if source_type == 'file':
+            self.log(f"准备串流文件: {source_path}")
+            media = self.vlc_stream_instance.media_new(source_path)
+        else: # desktop
+            self.log("准备串流桌面...")
+            media = self.vlc_stream_instance.media_new("screen://")
+            media.add_option(":screen-fps=15")        # 降低帧率以减少卡顿
+            media.add_option(":screen-caching=300")
         
-        # --- ↓↓↓ 核心修正：使用最稳定、最明确的 sout 语法链 ---
-        sout_string = f":sout=#transcode{{{transcode_settings}}}:duplicate{{dst=std{{access=http,mux=ts,dst=:{port}/stream}}}}"
-        # --- ↑↑↑ 修正结束 ↑↑↑ ---
+        self.vlc_stream_player = self.vlc_stream_instance.media_player_new()
+        self.vlc_stream_player.set_media(media)
 
-        # 4. 准备VLC实例和媒体
-        try:
-            self.log(f"正在准备串流... 参数: {sout_string}")
-            
-            # --- ↓↓↓ 核心修正：创建一个“干净”的VLC实例，并将sout作为media的选项 ---
-            self.vlc_stream_instance = vlc.Instance("--vout=dummy")
-            
-            if source_type == 'file':
-                media = self.vlc_stream_instance.media_new(source_path, sout_string)
-            else: # desktop
-                media = self.vlc_stream_instance.media_new("screen://", sout_string)
-            
-            media.add_option(":no-sout-rtp-sap")
-            media.add_option(":no-sout-standard-sap")
-            media.add_option(":sout-keep")
-            # --- ↑↑↑ 修正结束 ↑↑↑ ---
+        # 6. 启动播放
+        ret = self.vlc_stream_player.play()
+        
+        if ret == -1:
+            raise Exception("VLC播放器启动失败（返回-1）")
+        
+        self.log("VLC播放指令已发送，等待串流启动...")
+        
+        # 等待一会儿让串流初始化
+        import time
+        time.sleep(2)
+        
+        # 7. 检查串流是否真的启动了
+        state = self.vlc_stream_player.get_state()
+        self.log(f"VLC播放器状态: {state}")
+        
+        # 尝试连接到串流端口验证
+        import socket
+        test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        test_sock.settimeout(3)
+        test_result = test_sock.connect_ex(('127.0.0.1', port))
+        test_sock.close()
+        
+        if test_result != 0:
+            self.log(f"!!! 警告: 无法连接到串流端口 {port}，串流可能未成功启动")
+            self.log("!!! 请检查 vlc-stream-debug.log 文件获取详细错误信息")
+            messagebox.showwarning("串流警告", 
+                f"串流可能未成功启动！\n端口 {port} 无法连接。\n\n请检查:\n1. 防火墙是否开放端口\n2. 查看 vlc-stream-debug.log 日志文件", 
+                parent=self.root)
+        else:
+            self.log(f"✓ 串流端口 {port} 已开放，串流正在运行")
 
-            self.vlc_stream_player = self.vlc_stream_instance.media_player_new()
-            self.vlc_stream_player.set_media(media)
+        # 8. 更新UI状态
+        self.is_streaming = True
+        self.stream_start_stop_button.config(text="■ 停止串流", bootstyle="danger")
+        self.stream_status_label.config(text="串流中...", bootstyle="success")
+        stream_url = f"http://{local_ip}:{port}/stream"
+        self.stream_url_label.config(text=stream_url)
+        
+        # 显示使用说明
+        self.log("=" * 50)
+        self.log(f"串流地址: {stream_url}")
+        self.log(f"本机测试: http://127.0.0.1:{port}/stream")
+        self.log("使用方法:")
+        self.log("  1. VLC播放器: 媒体 -> 打开网络串流 -> 输入地址")
+        self.log("  2. 命令行: vlc http://IP:PORT/stream")
+        self.log("  3. PotPlayer/MPC-HC 等播放器也可以")
+        self.log("=" * 50)
+        
+        # 禁用控件
+        for widget in [self.stream_file_entry, self.stream_file_browse_btn, 
+                      self.stream_quality_combo, self.stream_port_entry]:
+            widget.config(state=DISABLED)
+        
+        for child in self.stream_file_browse_btn.master.winfo_children():
+            if isinstance(child, (ttk.Radiobutton)):
+                child.config(state=DISABLED)
 
-            # 5. 启动播放
-            self.vlc_stream_player.play()
-            self.log("串流已启动！")
-
-            # 6. 更新UI状态 (不变)
-            self.is_streaming = True
-            self.stream_start_stop_button.config(text="■ 停止串流", bootstyle="danger")
-            self.stream_status_label.config(text="串流中...", bootstyle="success")
-            stream_url = f"http://{local_ip}:{port}/stream"
-            self.stream_url_label.config(text=stream_url)
-            
-            for widget in [self.stream_file_entry, self.stream_file_browse_btn, self.stream_quality_combo, self.stream_port_entry]:
-                widget.config(state=DISABLED)
-            
-            for child in self.stream_file_browse_btn.master.winfo_children():
-                if isinstance(child, (ttk.Radiobutton)):
-                    child.config(state=DISABLED)
-
-        except Exception as e:
-            self.log(f"!!! 启动串流失败: {e}")
-            messagebox.showerror("启动失败", f"无法启动串流服务：\n{e}", parent=self.root)
-            self._stop_streaming()
+    except Exception as e:
+        self.log(f"!!! 启动串流失败: {e}")
+        import traceback
+        error_detail = traceback.format_exc()
+        self.log(error_detail)
+        messagebox.showerror("启动失败", 
+            f"无法启动串流服务：\n{e}\n\n详细错误请查看日志窗口", 
+            parent=self.root)
+        self._stop_streaming()
 
     def _stop_streaming(self):
         """停止VLC串流"""
@@ -7970,13 +8033,10 @@ class TimedBroadcastApp:
             try:
                 self.root.after(0, lambda: self.spectrum_frame.pack(side=LEFT, padx=20, fill=Y))
                 
-                vlc_options = [
-                    '--no-xlib',
-                    '--vfilter=visual',
-                    '--visual-type=spectrum',
-                    '--no-video-title-show'
-                ]
-                instance = vlc.Instance(vlc_options)
+                # --- ↓↓↓ 核心修正：创建一个干净的VLC实例 ---
+                instance = vlc.Instance()
+                # --- ↑↑↑ 修正结束 ↑↑↑ ---
+
                 self.vlc_player = instance.media_player_new()
 
                 time.sleep(0.1) 
@@ -7997,6 +8057,13 @@ class TimedBroadcastApp:
                         break
                     
                     media = instance.media_new(audio_path)
+                    
+                    # --- ↓↓↓ 核心修正：将频谱参数作为选项添加到 Media 对象上 ---
+                    media.add_option(':vfilter=visual')
+                    media.add_option(':visual-type=spectrum')
+                    media.add_option(':no-video-title-show')
+                    # --- ↑↑↑ 修正结束 ↑↑↑ ---
+
                     self.vlc_player.set_media(media)
                     self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
                     self.vlc_player.play()
