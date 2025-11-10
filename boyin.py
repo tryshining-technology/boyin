@@ -250,6 +250,7 @@ class TimedBroadcastApp:
         self.video_stop_event = None
         self.is_muted = False
         self.last_bgm_volume = 1.0
+        self.spectrum_frame = None
         self.is_media_processing = False
         self.vlc_stream_instance = None
         self.vlc_stream_player = None
@@ -1641,7 +1642,7 @@ class TimedBroadcastApp:
             messagebox.showerror("依赖缺失", "未找到VLC核心库，无法启动串流功能。", parent=self.root)
             return
 
-        # 1. 验证输入
+        # 1. 验证输入 (这部分不变)
         source_type = self.stream_source_var.get()
         source_path = self.stream_file_entry.get().strip()
         port_str = self.stream_port_entry.get().strip()
@@ -1658,12 +1659,12 @@ class TimedBroadcastApp:
             messagebox.showerror("输入错误", "端口号必须是 1024 到 65535 之间的整数。", parent=self.root)
             return
 
-        # 2. 获取用于显示的局域网IP地址
+        # 2. 获取IP地址 (这部分不变)
         local_ip = self._get_local_ip()
         if local_ip == "127.0.0.1":
             messagebox.showwarning("网络警告", "未能获取到有效的局域网IP地址，串流可能仅本机可见。", parent=self.root)
 
-        # 3. 根据清晰度预设构建sout字符串
+        # 3. 构建sout字符串 (这部分不变)
         quality = self.stream_quality_combo.get()
         presets = {
             "流畅 (480p, 800kbps)": {"vcodec": "h264", "vb": "800", "height": "480", "acodec": "mp3", "ab": "128"},
@@ -1679,15 +1680,20 @@ class TimedBroadcastApp:
         try:
             self.log(f"正在准备串流... 参数: {sout_string}")
             
-            # --- ↓↓↓ 核心修改：添加 "--vout=dummy" 参数以禁用本地视频输出 ↓↓↓ ---
-            self.vlc_stream_instance = vlc.Instance(f"--sout={sout_string}", "--vout=dummy")
-            # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
+            # --- ↓↓↓ 核心修正：创建一个“干净”的VLC实例，不再包含 --sout 参数 ---
+            self.vlc_stream_instance = vlc.Instance("--vout=dummy")
+            # --- ↑↑↑ 修正结束 ↑↑↑ ---
             
             if source_type == 'file':
                 media = self.vlc_stream_instance.media_new(source_path)
             else: # desktop
                 media = self.vlc_stream_instance.media_new("screen://")
             
+            # --- ↓↓↓ 核心修正：将 sout 字符串作为选项，直接添加到 media 对象上 ---
+            # 注意：这里的 sout 前面必须有一个冒号 ":"
+            media.add_option(f":sout={sout_string}")
+            # --- ↑↑↑ 修正结束 ↑↑↑ ---
+
             self.vlc_stream_player = self.vlc_stream_instance.media_player_new()
             self.vlc_stream_player.set_media(media)
 
@@ -1695,18 +1701,16 @@ class TimedBroadcastApp:
             self.vlc_stream_player.play()
             self.log("串流已启动！")
 
-            # 6. 更新UI状态
+            # 6. 更新UI状态 (这部分不变)
             self.is_streaming = True
             self.stream_start_stop_button.config(text="■ 停止串流", bootstyle="danger")
             self.stream_status_label.config(text="串流中...", bootstyle="success")
             stream_url = f"http://{local_ip}:{port}/stream"
             self.stream_url_label.config(text=stream_url)
             
-            # 禁用所有设置控件
             for widget in [self.stream_file_entry, self.stream_file_browse_btn, self.stream_quality_combo, self.stream_port_entry]:
                 widget.config(state=DISABLED)
             
-            # 禁用单选按钮
             for child in self.stream_file_browse_btn.master.winfo_children():
                 if isinstance(child, (ttk.Radiobutton)):
                     child.config(state=DISABLED)
@@ -1714,7 +1718,7 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"!!! 启动串流失败: {e}")
             messagebox.showerror("启动失败", f"无法启动串流服务：\n{e}", parent=self.root)
-            self._stop_streaming() # 确保清理资源
+            self._stop_streaming()
 
     def _stop_streaming(self):
         """停止VLC串流"""
@@ -3772,11 +3776,9 @@ class TimedBroadcastApp:
         stats_frame = ttk.Frame(page_frame, padding=(10, 5))
         stats_frame.pack(side=TOP, fill=X)
         
-        # “节目单”标签，靠左显示
         self.stats_label = ttk.Label(stats_frame, text="节目单：0", font=self.font_11, bootstyle="secondary")
         self.stats_label.pack(side=LEFT)
 
-# 新增的可点击天气标签，靠右显示
         self.main_weather_label = ttk.Label(stats_frame, text="天气: 正在获取...", font=self.font_11, bootstyle="info", cursor="hand2")
         self.main_weather_label.pack(side=RIGHT, padx=10)
         self.main_weather_label.bind("<Button-1>", self.on_weather_label_click)
@@ -3824,6 +3826,14 @@ class TimedBroadcastApp:
         self.clear_log_btn = ttk.Button(log_header_frame, text="清除日志", command=self.clear_log,
                                         bootstyle="secondary-outline")
         self.clear_log_btn.pack(side=LEFT, padx=10)
+
+        # --- ↓↓↓ 核心修改：在这里添加频谱窗口 ↓↓↓ ---
+        style = ttk.Style.get_instance()
+        style.configure('Black.TFrame', background='black')
+        self.spectrum_frame = ttk.Frame(log_header_frame, style='Black.TFrame', width=200, height=35)
+        self.spectrum_frame.pack(side=LEFT, padx=20, fill=Y)
+        self.spectrum_frame.pack_forget() # 默认隐藏
+        # --- ↑↑↑ 修改结束 ↑↑↑ ---
 
         self.log_text = ScrolledText(log_frame, height=6, font=self.font_11,
                                                   wrap=WORD, state='disabled')
@@ -7904,6 +7914,11 @@ class TimedBroadcastApp:
                 self.vlc_player.stop()
                 self.vlc_player = None
             
+            # --- ↓↓↓ 新增/修改代码：确保频谱视图被隐藏 ↓↓↓ ---
+            if hasattr(self, 'spectrum_frame') and self.spectrum_frame:
+                self.root.after(0, self.spectrum_frame.pack_forget)
+            # --- ↑↑↑ 修改结束 ↑↑↑ ---
+            
             if self.video_stop_event:
                 self.video_stop_event = None
 
@@ -7928,14 +7943,12 @@ class TimedBroadcastApp:
         playlist = []
         repeat_count = int(task.get('interval_first', 1))
 
-        # 1. 构建播放列表
         if task.get('audio_type') == 'single':
             if os.path.exists(task['content']):
                 playlist = [task['content']] * repeat_count
         else:
             folder_path = task['content']
             if os.path.isdir(folder_path):
-                # 扩展支持的音频格式列表
                 supported_extensions = ('.mp3', '.wav', '.ogg', '.flac', '.m4a', '.wma', '.ape')
                 all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(supported_extensions)]
                 if task.get('play_order') == 'random':
@@ -7943,22 +7956,28 @@ class TimedBroadcastApp:
                 
                 if task.get('interval_type', 'first') == 'first':
                     playlist = all_files[:repeat_count]
-                else: # 如果是按秒播放，则需要整个文件夹列表
+                else:
                     playlist = all_files
 
         if not playlist:
             self.log(f"错误: 音频列表为空或文件/文件夹不存在，任务 '{task['name']}' 无法播放。")
             return
 
-        # 2. 智能选择播放引擎
         if VLC_AVAILABLE:
-            # --- 使用 VLC 播放 ---
             self.log(f"检测到VLC，使用VLC引擎播放任务 '{task['name']}'。")
             try:
-                instance = vlc.Instance()
-                # <--- 核心修复 1：将 player 赋值给 self.vlc_player ---
-                self.vlc_player = instance.media_player_new()
+                # --- ↓↓↓ 核心修改：启用频谱并绑定窗口 ↓↓↓ ---
+                self.root.after(0, lambda: self.spectrum_frame.pack(side=LEFT, padx=20, fill=Y))
                 
+                vlc_options = ['--no-xlib', '--audio-visual=spectrum', '--effect-list=spectrum']
+                instance = vlc.Instance(vlc_options)
+                self.vlc_player = instance.media_player_new()
+
+                time.sleep(0.1) 
+                if self.spectrum_frame and self.spectrum_frame.winfo_exists():
+                    self.vlc_player.set_hwnd(self.spectrum_frame.winfo_id())
+                # --- ↑↑↑ 修改结束 ↑↑↑ ---
+
                 if self.is_muted:
                     self.vlc_player.audio_set_mute(True)
                 else:
@@ -7976,7 +7995,7 @@ class TimedBroadcastApp:
                     self.vlc_player.set_media(media)
                     self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
                     self.vlc_player.play()
-                    time.sleep(0.2) # 等待播放开始
+                    time.sleep(0.2)
 
                     last_text_update_time = 0
                     while self.vlc_player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
@@ -8010,14 +8029,18 @@ class TimedBroadcastApp:
             except Exception as e:
                 self.log(f"使用VLC播放音频失败: {e}")
             finally:
-                # <--- 核心修复 2：确保播放结束后清理 self.vlc_player ---
                 if self.vlc_player:
                     self.vlc_player.stop()
                     self.vlc_player = None
-                # --- 修复结束 ---
+                # --- ↓↓↓ 核心修改：播放结束后，隐藏频谱窗口 ↓↓↓ ---
+                self.root.after(0, self.spectrum_frame.pack_forget)
+                # --- ↑↑↑ 修改结束 ↑↑↑ ---
 
         else:
-            # --- 回退到 Pygame 播放 (这部分逻辑不变) ---
+            # --- ↓↓↓ 核心修改：确保在Pygame播放时，频谱是隐藏的 ↓↓↓ ---
+            self.root.after(0, self.spectrum_frame.pack_forget)
+            # --- ↑↑↑ 修改结束 ↑↑↑ ---
+            
             if not AUDIO_AVAILABLE:
                 self.log("错误: Pygame未初始化，无法播放音频。")
                 return
