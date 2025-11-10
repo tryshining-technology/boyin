@@ -1642,7 +1642,7 @@ class TimedBroadcastApp:
             messagebox.showerror("依赖缺失", "未找到VLC核心库，无法启动串流功能。", parent=self.root)
             return
 
-        # 1. 验证输入 (这部分不变)
+        # 1. 验证输入 (不变)
         source_type = self.stream_source_var.get()
         source_path = self.stream_file_entry.get().strip()
         port_str = self.stream_port_entry.get().strip()
@@ -1659,12 +1659,12 @@ class TimedBroadcastApp:
             messagebox.showerror("输入错误", "端口号必须是 1024 到 65535 之间的整数。", parent=self.root)
             return
 
-        # 2. 获取IP地址 (这部分不变)
+        # 2. 获取IP地址 (不变)
         local_ip = self._get_local_ip()
         if local_ip == "127.0.0.1":
             messagebox.showwarning("网络警告", "未能获取到有效的局域网IP地址，串流可能仅本机可见。", parent=self.root)
 
-        # 3. 构建sout字符串 (这部分不变)
+        # 3. 构建sout字符串
         quality = self.stream_quality_combo.get()
         presets = {
             "流畅 (480p, 800kbps)": {"vcodec": "h264", "vb": "800", "height": "480", "acodec": "mp3", "ab": "128"},
@@ -1674,34 +1674,36 @@ class TimedBroadcastApp:
         p = presets[quality]
         
         transcode_settings = f"vcodec={p['vcodec']},vb={p['vb']},height={p['height']},acodec={p['acodec']},ab={p['ab']}"
-        sout_string = f"#transcode{{{transcode_settings}}}:http{{mux=ffmpeg{{mux=flv}},dst=:{port}/stream}}"
+        
+        # --- ↓↓↓ 核心修正：使用最稳定、最明确的 sout 语法链 ---
+        sout_string = f":sout=#transcode{{{transcode_settings}}}:duplicate{{dst=std{{access=http,mux=ts,dst=:{port}/stream}}}}"
+        # --- ↑↑↑ 修正结束 ↑↑↑ ---
 
         # 4. 准备VLC实例和媒体
         try:
             self.log(f"正在准备串流... 参数: {sout_string}")
             
-            # --- ↓↓↓ 核心修正：创建一个“干净”的VLC实例，不再包含 --sout 参数 ---
+            # --- ↓↓↓ 核心修正：创建一个“干净”的VLC实例，并将sout作为media的选项 ---
             self.vlc_stream_instance = vlc.Instance("--vout=dummy")
-            # --- ↑↑↑ 修正结束 ↑↑↑ ---
             
             if source_type == 'file':
-                media = self.vlc_stream_instance.media_new(source_path)
+                media = self.vlc_stream_instance.media_new(source_path, sout_string)
             else: # desktop
-                media = self.vlc_stream_instance.media_new("screen://")
+                media = self.vlc_stream_instance.media_new("screen://", sout_string)
             
-            # --- ↓↓↓ 核心修正：将 sout 字符串作为选项，直接添加到 media 对象上 ---
-            # 注意：这里的 sout 前面必须有一个冒号 ":"
-            media.add_option(f":sout={sout_string}")
+            media.add_option(":no-sout-rtp-sap")
+            media.add_option(":no-sout-standard-sap")
+            media.add_option(":sout-keep")
             # --- ↑↑↑ 修正结束 ↑↑↑ ---
 
             self.vlc_stream_player = self.vlc_stream_instance.media_player_new()
             self.vlc_stream_player.set_media(media)
 
-            # 5. 启动播放（即开始串流）
+            # 5. 启动播放
             self.vlc_stream_player.play()
             self.log("串流已启动！")
 
-            # 6. 更新UI状态 (这部分不变)
+            # 6. 更新UI状态 (不变)
             self.is_streaming = True
             self.stream_start_stop_button.config(text="■ 停止串流", bootstyle="danger")
             self.stream_status_label.config(text="串流中...", bootstyle="success")
@@ -7966,17 +7968,20 @@ class TimedBroadcastApp:
         if VLC_AVAILABLE:
             self.log(f"检测到VLC，使用VLC引擎播放任务 '{task['name']}'。")
             try:
-                # --- ↓↓↓ 核心修改：启用频谱并绑定窗口 ↓↓↓ ---
                 self.root.after(0, lambda: self.spectrum_frame.pack(side=LEFT, padx=20, fill=Y))
                 
-                vlc_options = ['--no-xlib', '--audio-visual=spectrum', '--effect-list=spectrum']
+                vlc_options = [
+                    '--no-xlib',
+                    '--vfilter=visual',
+                    '--visual-type=spectrum',
+                    '--no-video-title-show'
+                ]
                 instance = vlc.Instance(vlc_options)
                 self.vlc_player = instance.media_player_new()
 
                 time.sleep(0.1) 
                 if self.spectrum_frame and self.spectrum_frame.winfo_exists():
                     self.vlc_player.set_hwnd(self.spectrum_frame.winfo_id())
-                # --- ↑↑↑ 修改结束 ↑↑↑ ---
 
                 if self.is_muted:
                     self.vlc_player.audio_set_mute(True)
@@ -8032,14 +8037,10 @@ class TimedBroadcastApp:
                 if self.vlc_player:
                     self.vlc_player.stop()
                     self.vlc_player = None
-                # --- ↓↓↓ 核心修改：播放结束后，隐藏频谱窗口 ↓↓↓ ---
                 self.root.after(0, self.spectrum_frame.pack_forget)
-                # --- ↑↑↑ 修改结束 ↑↑↑ ---
 
         else:
-            # --- ↓↓↓ 核心修改：确保在Pygame播放时，频谱是隐藏的 ↓↓↓ ---
             self.root.after(0, self.spectrum_frame.pack_forget)
-            # --- ↑↑↑ 修改结束 ↑↑↑ ---
             
             if not AUDIO_AVAILABLE:
                 self.log("错误: Pygame未初始化，无法播放音频。")
