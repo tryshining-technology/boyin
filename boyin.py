@@ -655,22 +655,26 @@ class TimedBroadcastApp:
         execute_tab = ttk.Frame(notebook, padding=10)
         print_tab = ttk.Frame(notebook, padding=10)
         backup_tab = ttk.Frame(notebook, padding=10)
+        # --- ↓↓↓ 新增代码 ↓↓↓ ---
         media_tab = ttk.Frame(notebook, padding=10)
-        streaming_tab = ttk.Frame(notebook, padding=10)
+        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
 
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
         notebook.add(print_tab, text=' 定时打印 ')
         notebook.add(backup_tab, text=' 定时备份 ')
+        # --- ↓↓↓ 新增代码 ↓↓↓ ---
         notebook.add(media_tab, text=' 媒体处理 ')
-        notebook.add(streaming_tab, text=' 串流模式 ')
+        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+
 
         self._build_screenshot_ui(screenshot_tab)
         self._build_execute_ui(execute_tab)
         self._build_print_ui(print_tab)
         self._build_backup_ui(backup_tab)
+        # --- ↓↓↓ 新增代码 ↓↓↓ ---
         self._build_media_processing_ui(media_tab)
-        self._build_streaming_ui(streaming_tab)
+        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
 
         return page_frame
 
@@ -2102,7 +2106,7 @@ class TimedBroadcastApp:
         container = scrolled_frame.container # 在这个 container 内部构建UI
 
         # 顶部说明文字
-        desc_text = "此页面功能依赖于软件根目录下的 ffmpeg.exe，用于即时处理音视频文件。注意：同一时间只能执行一个媒体处理任务。"
+        desc_text = "此功能依赖于软件根目录下的 ffmpeg.exe，用于即时处理音视频文件。注意：同一时间只能执行一个媒体处理任务。"
         ttk.Label(container, text=desc_text, bootstyle="info").pack(fill=X, pady=(0, 15))
 
         # --- 功能1: 提取音频 ---
@@ -2440,228 +2444,6 @@ class TimedBroadcastApp:
             self.root.after(100, self._toggle_media_buttons, 'normal')
 
     # --- [新增] 媒体处理功能模块结束 ---
-
-    def _build_streaming_ui(self, parent_frame):
-        parent_frame.columnconfigure(0, weight=1)
-        parent_frame.rowconfigure(2, weight=1) # 为日志区域设置权重
-
-        ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
-        if not os.path.exists(ffmpeg_path):
-            ttk.Label(parent_frame, text="错误：串流功能依赖于 ffmpeg.exe。", font=self.font_12_bold, bootstyle="danger").pack(pady=50)
-            return
-
-        # --- ↓↓↓ 核心修改：在这里初始化状态变量 ↓↓↓ ---
-        self.streaming_process = None
-        self.is_streaming_active = False # 控制守护线程的开关
-        # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
-
-        # 1. 设置与说明
-        settings_lf = ttk.LabelFrame(parent_frame, text="1. 设置与说明", padding=15)
-        settings_lf.grid(row=0, column=0, sticky='ew')
-        settings_lf.columnconfigure(1, weight=1)
-
-        desc_text = "此功能可将本电脑的实时音频输出串流到局域网，任何设备通过浏览器即可收听。\n" \
-                    "【重要】使用前，请务必在系统声音的“录制”选项卡中启用“立体声混音 (Stereo Mix)”设备。"
-        ttk.Label(settings_lf, text=desc_text, bootstyle="info").grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 10))
-
-        ttk.Label(settings_lf, text="选择音频设备:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
-        self.stream_device_var = tk.StringVar()
-        self.stream_device_combo = ttk.Combobox(settings_lf, textvariable=self.stream_device_var, state='readonly')
-        self.stream_device_combo.grid(row=1, column=1, sticky='ew', padx=5)
-        
-        refresh_btn = ttk.Button(settings_lf, text="刷新设备列表", bootstyle="outline", command=self._discover_audio_devices)
-        refresh_btn.grid(row=1, column=2, padx=5)
-        
-        ttk.Label(settings_lf, text="串流端口:").grid(row=2, column=0, sticky='e', padx=5, pady=5)
-        self.stream_port_var = tk.StringVar(value="8080")
-        self.stream_port_entry = ttk.Entry(settings_lf, textvariable=self.stream_port_var, width=10)
-        self.stream_port_entry.grid(row=2, column=1, sticky='w', padx=5)
-
-        # 2. 控制与状态
-        control_lf = ttk.LabelFrame(parent_frame, text="2. 控制与状态", padding=15)
-        control_lf.grid(row=1, column=0, sticky='ew', pady=10)
-        
-        # --- ↓↓↓ 核心修改：使用一个切换按钮替换原来的两个按钮 ↓↓↓ ---
-        self.stream_toggle_btn = ttk.Button(control_lf, text="开始串流", bootstyle="success", command=self._toggle_streaming)
-        self.stream_toggle_btn.pack(side=LEFT, ipady=5, ipadx=10, padx=5)
-        # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
-        
-        self.stream_status_label = ttk.Label(control_lf, text="状态: 已停止", font=self.font_11_bold, bootstyle="secondary")
-        self.stream_status_label.pack(side=LEFT, padx=20)
-
-        # 3. 日志
-        log_lf = ttk.LabelFrame(parent_frame, text="FFmpeg 日志", padding=10)
-        log_lf.grid(row=2, column=0, sticky='nsew', pady=10)
-        log_lf.rowconfigure(0, weight=1)
-        log_lf.columnconfigure(0, weight=1)
-        
-        self.stream_log_text = ScrolledText(log_lf, height=8, font=self.font_9, wrap=WORD, state='disabled')
-        self.stream_log_text.pack(fill=BOTH, expand=True)
-
-        self.root.after(500, self._discover_audio_devices)
-
-    # --- ↓↓↓ [重构] 串流模式功能模块逻辑 - V5 最终整合版 ↓↓↓ ---
-
-    def _stream_log(self, message):
-        """线程安全地向串流日志窗口添加日志"""
-        self.root.after(0, self._stream_log_threadsafe, message)
-
-    def _stream_log_threadsafe(self, message):
-        """在主线程中更新串流日志UI"""
-        if hasattr(self, 'stream_log_text') and self.stream_log_text.winfo_exists():
-            widget = self.stream_log_text.text
-            widget.config(state='normal')
-            widget.insert(END, message)
-            widget.see(END)
-            widget.config(state='disabled')
-        
-    def _discover_audio_devices(self):
-        """使用ffmpeg发现可用的dshow音频设备"""
-        self._stream_log("正在刷新音频设备列表...\n")
-        ffmpeg_exe = os.path.join(application_path, "ffmpeg.exe")
-        command = [ffmpeg_exe, "-list_devices", "true", "-f", "dshow", "-i", "dummy"]
-        
-        try:
-            process = subprocess.Popen(command, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
-            stdout, stderr = process.communicate(timeout=5)
-            output = stderr
-            
-            devices = []
-            for line in output.splitlines():
-                if "立体声混音" in line or "Stereo Mix" in line or "CABLE Output" in line:
-                    match = re.search(r'"([^"]+)"', line)
-                    if match:
-                        devices.append(match.group(1))
-            
-            if devices:
-                self.stream_device_combo['values'] = devices
-                if not self.stream_device_var.get() in devices:
-                    self.stream_device_var.set(devices[0])
-                self._stream_log("设备列表刷新成功。\n")
-            else:
-                self.stream_device_combo['values'] = []
-                self.stream_device_var.set("")
-                self._stream_log("警告: 未找到'立体声混音'或'CABLE Output'等可用设备。\n请检查系统声音设置，在“录制”选项卡中启用它。\n")
-
-        except Exception as e:
-            self._stream_log(f"刷新设备失败: {e}\n")
-
-    def _get_local_ip(self):
-        """获取本机在局域网中的IP地址"""
-        try:
-            import socket
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "127.0.0.1"
-
-    def _toggle_streaming(self):
-        """一个按钮处理开始和停止的切换逻辑"""
-        if self.is_streaming_active:
-            self._stop_streaming()
-        else:
-            self._start_streaming()
-
-    def _start_streaming(self):
-        """启动串流守护线程"""
-        device_name = self.stream_device_var.get()
-        if not device_name:
-            messagebox.showerror("错误", "请先选择一个有效的音频设备。")
-            return
-            
-        try:
-            port = int(self.stream_port_var.get())
-            if not (1024 <= port <= 65535): raise ValueError
-        except ValueError:
-            messagebox.showerror("错误", "端口号必须是 1024 到 65535 之间的数字。")
-            return
-            
-        self.is_streaming_active = True
-        
-        self.stream_toggle_btn.config(text="停止串流", bootstyle="danger")
-        self.stream_device_combo.config(state=DISABLED)
-        self.stream_port_entry.config(state=DISABLED)
-        
-        ip = self._get_local_ip()
-        stream_url = f"http://{ip}:{port}/"
-        self.stream_status_label.config(text=f"串流中: {stream_url}", bootstyle="success")
-        
-        self._stream_log("="*50 + "\n")
-        self._stream_log(f"用户请求启动串流服务...\n串流地址: {stream_url}\n")
-        
-        threading.Thread(target=self._streaming_worker, args=(device_name, port), daemon=True).start()
-
-    def _stop_streaming(self):
-        """停止串流守护线程"""
-        self.is_streaming_active = False 
-        
-        if self.streaming_process and self.streaming_process.poll() is None:
-            try:
-                self.streaming_process.terminate()
-                self._stream_log("已发送终止信号到FFmpeg进程。\n")
-            except Exception as e:
-                self._stream_log(f"尝试终止FFmpeg进程时出错: {e}\n")
-
-        self.stream_toggle_btn.config(text="开始串流", bootstyle="success")
-        self.stream_status_label.config(text="状态: 已停止", bootstyle="secondary")
-        self.stream_device_combo.config(state="readonly")
-        self.stream_port_entry.config(state=NORMAL)
-        self._stream_log("用户请求停止串流服务。\n")
-
-    def _streaming_worker(self, device_name, port):
-        """守护线程 (V5 - 低延迟优化)"""
-        ffmpeg_exe = os.path.join(application_path, "ffmpeg.exe")
-        
-        command = [
-            ffmpeg_exe, 
-            "-re",
-            "-probesize", "32",
-            "-analyzeduration", "0",
-            "-rtbufsize", "10M",
-            "-f", "dshow", 
-            "-i", f"audio={device_name}",
-            "-flush_packets", "1",
-            "-c:a", "libmp3lame", 
-            "-b:a", "96k",
-            "-ar", "44100",
-            "-content_type", "audio/mpeg",
-            "-f", "mp3",
-            "-listen", "1",
-            f"icecast://source:hackme@0.0.0.0:{port}/"
-        ]
-
-        while self.is_streaming_active:
-            self._stream_log(f"启动FFmpeg Icecast服务 (端口: {port})... 等待客户端连接...\n")
-            try:
-                self.streaming_process = subprocess.Popen(
-                    command,
-                    stderr=subprocess.PIPE,
-                    stdout=subprocess.DEVNULL,
-                    text=True, encoding='utf-8', errors='replace'
-                )
-                
-                for line in iter(self.streaming_process.stderr.readline, ''):
-                    if not self.is_streaming_active: break
-                    if "too full" not in line: self._stream_log(line)
-                
-                self.streaming_process.wait()
-                
-                if self.is_streaming_active:
-                    self._stream_log("\n--- FFmpeg进程结束（可能因客户端断开），准备在2秒后重启服务 ---\n")
-                    time.sleep(2)
-
-            except Exception as e:
-                self._stream_log(f"!!! FFmpeg进程启动或运行时出错: {e} !!!\n")
-                if self.is_streaming_active:
-                    self._stream_log("--- 准备在5秒后尝试重启 ---\n")
-                    time.sleep(5)
-        
-        self._stream_log("--- 串流守护线程已正常退出 ---\n")
-
-# --- [重构] 串流模式功能模块逻辑结束 ---
 
 # --- 动态语音功能的全套方法 ---
 
