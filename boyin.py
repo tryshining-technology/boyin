@@ -2617,14 +2617,20 @@ class TimedBroadcastApp:
         self._stream_log("用户请求停止串流服务。\n")
 
     def _streaming_worker(self, device_name, port):
-        """守护线程，负责循环启动和监控ffmpeg进程"""
+        """守护线程，负责循环启动和监控ffmpeg进程 (V2 - 增加 -re 参数修复缓冲问题)"""
         ffmpeg_exe = os.path.join(application_path, "ffmpeg.exe")
+        
+        # --- ↓↓↓ 核心修正：在 -f dshow 之前加入 -re 参数 ↓↓↓ ---
         command = [
-            ffmpeg_exe, "-f", "dshow", "-i", f"audio={device_name}",
+            ffmpeg_exe, 
+            "-re",  # 以实时速率读取输入源
+            "-f", "dshow", 
+            "-i", f"audio={device_name}",
             "-c:a", "libmp3lame", "-b:a", "128k", "-ar", "44100",
             "-content_type", "audio/mpeg", "-f", "mp3",
             "-listen", "1", f"http://0.0.0.0:{port}"
         ]
+        # --- ↑↑↑ 核心修正结束 ↑↑↑ ---
 
         while self.is_streaming_active:
             self._stream_log(f"启动FFmpeg进程 (端口: {port})... 等待客户端连接...\n")
@@ -2641,11 +2647,12 @@ class TimedBroadcastApp:
                     # 如果中途用户点击了停止，也要能及时退出日志读取
                     if not self.is_streaming_active:
                         break
-                    self._stream_log(line)
+                    # 我们不再打印烦人的 buffer full 警告，只关注关键信息
+                    if "too full" not in line:
+                        self._stream_log(line)
                 
                 self.streaming_process.wait() # 确保进程已完全结束
                 
-                # 如果循环开关仍然是开着，说明是意外退出（例如客户端断开），准备重启
                 if self.is_streaming_active:
                     self._stream_log("\n--- FFmpeg进程结束（可能因客户端断开），准备在2秒后重启服务 ---\n")
                     time.sleep(2)
