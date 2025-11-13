@@ -136,7 +136,6 @@ TIMESTAMP_FILE = os.path.join(application_path, ".timestamp.dat")
 
 PROMPT_FOLDER = os.path.join(application_path, "提示音")
 AUDIO_FOLDER = os.path.join(application_path, "音频文件")
-DYNAMIC_VOICE_FOLDER = os.path.join(AUDIO_FOLDER, "动态语音")
 BGM_FOLDER = os.path.join(application_path, "文稿背景")
 VOICE_SCRIPT_FOLDER = os.path.join(application_path, "语音文稿")
 SCREENSHOT_FOLDER = os.path.join(application_path, "截屏")
@@ -250,11 +249,6 @@ class TimedBroadcastApp:
         self.video_stop_event = None
         self.is_muted = False
         self.last_bgm_volume = 1.0
-        self.spectrum_frame = None
-        self.is_media_processing = False
-        self.vlc_stream_instance = None
-        self.vlc_stream_player = None
-        self.is_streaming = False
 
         self.create_folder_structure()
         self.load_settings()
@@ -295,7 +289,6 @@ class TimedBroadcastApp:
             self.root.after(100, self.perform_lockdown)
         if self.auth_info['status'] == 'Trial':
             self.root.after(500, self.show_trial_nag_screen)
-        self._cleanup_stale_dynamic_voice_files()
 
     def _apply_global_font(self):
         font_name = self.settings.get("app_font", "Microsoft YaHei")
@@ -363,43 +356,11 @@ class TimedBroadcastApp:
     def create_folder_structure(self):
         folders_to_create = [
             PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER, 
-            VOICE_SCRIPT_FOLDER, SCREENSHOT_FOLDER,
-            DYNAMIC_VOICE_FOLDER
+            VOICE_SCRIPT_FOLDER, SCREENSHOT_FOLDER
         ]
         for folder in folders_to_create:
             if not os.path.exists(folder):
                 os.makedirs(folder)
-
-    def _cleanup_stale_dynamic_voice_files(self):
-        """启动时清理超过24小时未被使用的预生成文件"""
-        if not os.path.isdir(DYNAMIC_VOICE_FOLDER):
-            return
-        
-        self.log("正在检查并清理过期的动态语音临时文件...")
-        now = time.time()
-        count = 0
-        for filename in os.listdir(DYNAMIC_VOICE_FOLDER):
-            try:
-                # 文件名格式: taskhash_YYYYMMDD_HHMMSS.wav
-                # 使用更稳健的方式解析文件名，防止文件名中包含下划线导致错误
-                base_name, _ = os.path.splitext(filename)
-                parts = base_name.split('_')
-                if len(parts) < 3: # 至少需要 hash_date_time 三部分
-                    continue
-                
-                file_time_str = parts[-2] + parts[-1] # 取最后两部分拼接成 YYYYMMDDHHMMSS
-                file_time = datetime.strptime(file_time_str, '%Y%m%d%H%M%S').timestamp()
-                
-                # 如果文件的预定播放时间在24小时之前，则删除
-                if now - file_time > 86400: # 86400秒 = 24小时
-                    file_path = os.path.join(DYNAMIC_VOICE_FOLDER, filename)
-                    os.remove(file_path)
-                    count += 1
-            except (IndexError, ValueError):
-                # 文件名格式不符，或者是非我们生成的文件，忽略
-                continue
-        if count > 0:
-            self.log(f"已清理 {count} 个过期的动态语音文件。")
 
     def create_widgets(self):
         self.status_frame = ttk.Frame(self.root, style='secondary.TFrame')
@@ -496,7 +457,7 @@ class TimedBroadcastApp:
         self.status_labels = []
         status_texts = ["当前时间", "系统状态", "播放状态", "任务数量", "待办事项"]
 
-        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251109", font=self.font_11,
+        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251105", font=self.font_11,
                                     bootstyle=(SECONDARY, INVERSE), padding=(15, 0))
         copyright_label.pack(side=RIGHT, padx=2)
 
@@ -694,21 +655,26 @@ class TimedBroadcastApp:
         execute_tab = ttk.Frame(notebook, padding=10)
         print_tab = ttk.Frame(notebook, padding=10)
         backup_tab = ttk.Frame(notebook, padding=10)
-        media_processing_tab = ttk.Frame(notebook, padding=10)
-        streaming_tab = ttk.Frame(notebook, padding=10)
+        # --- ↓↓↓ 新增代码 ↓↓↓ ---
+        media_tab = ttk.Frame(notebook, padding=10)
+        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
         notebook.add(print_tab, text=' 定时打印 ')
         notebook.add(backup_tab, text=' 定时备份 ')
-        notebook.add(media_processing_tab, text=' 媒体处理 ')
-        notebook.add(streaming_tab, text=' 串流模式 ')
+        # --- ↓↓↓ 新增代码 ↓↓↓ ---
+        notebook.add(media_tab, text=' 媒体处理 ')
+        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+
 
         self._build_screenshot_ui(screenshot_tab)
         self._build_execute_ui(execute_tab)
         self._build_print_ui(print_tab)
         self._build_backup_ui(backup_tab)
-        self._build_media_processing_ui(media_processing_tab)
-        self._build_streaming_ui(streaming_tab)
+        # --- ↓↓↓ 新增代码 ↓↓↓ ---
+        self._build_media_processing_ui(media_tab)
+        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
 
         return page_frame
 
@@ -1248,560 +1214,6 @@ class TimedBroadcastApp:
             ttk.Button(action_frame, text=text, command=cmd, bootstyle=style).pack(pady=5, fill=X)
             
         self.update_backup_list()
-
-    def _build_media_processing_ui(self, parent_frame):
-        """构建“媒体处理”选项卡的UI界面"""
-        parent_frame.columnconfigure(0, weight=1)
-
-        # --- 顶部说明 ---
-        desc_label = ttk.Label(parent_frame, 
-                               text="此页面功能依赖于软件根目录下的 ffmpeg.exe，用于即时处理音视频文件。\n注意：同一时间只能执行一个媒体处理任务。",
-                               font=self.font_10, bootstyle="info", wraplength=700)
-        desc_label.pack(fill=X, pady=(0, 15))
-
-        # --- 1. 提取音频功能区 ---
-        extract_lf = ttk.LabelFrame(parent_frame, text="1. 从视频中提取音频", padding=15)
-        extract_lf.pack(fill=X, pady=10)
-        extract_lf.columnconfigure(1, weight=1)
-
-        ttk.Label(extract_lf, text="源视频文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
-        self.extract_source_entry = ttk.Entry(extract_lf, font=self.font_11)
-        self.extract_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
-
-        ttk.Label(extract_lf, text="输出音频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
-        self.extract_output_entry = ttk.Entry(extract_lf, font=self.font_11)
-        self.extract_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
-
-        # --- ↓↓↓ 核心修正：lambda不再使用默认参数，而是直接引用已创建的控件 ---
-        ttk.Button(extract_lf, text="浏览...", bootstyle="outline", 
-                   command=lambda: self._select_media_source_file(self.extract_source_entry, self.extract_output_entry, ".mp3")).grid(row=0, column=2, padx=5)
-        ttk.Button(extract_lf, text="浏览...", bootstyle="outline", 
-                   command=lambda: self._select_media_output_file(self.extract_output_entry, ".mp3", [("MP3 音频文件", "*.mp3")])).grid(row=1, column=2, padx=5)
-        # --- ↑↑↑ 修正结束 ↑↑↑ ---
-
-        extract_action_frame = ttk.Frame(extract_lf)
-        extract_action_frame.grid(row=2, column=1, sticky='w', pady=10)
-        self.extract_button = ttk.Button(extract_action_frame, text="开始提取", bootstyle="success", command=lambda: self.start_media_processing('extract'))
-        self.extract_button.pack(side=LEFT)
-        self.extract_progress = ttk.Progressbar(extract_action_frame, length=300, mode='determinate')
-        self.extract_progress.pack(side=LEFT, padx=15, fill=X, expand=True)
-        self.extract_status_label = ttk.Label(extract_action_frame, text="准备就绪", font=self.font_9, bootstyle="secondary")
-        self.extract_status_label.pack(side=LEFT, padx=10)
-
-        # --- 2. 转换视频格式功能区 ---
-        convert_lf = ttk.LabelFrame(parent_frame, text="2. 转换视频格式为通用MP4", padding=15)
-        convert_lf.pack(fill=X, pady=10)
-        convert_lf.columnconfigure(1, weight=1)
-
-        ttk.Label(convert_lf, text="源视频文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
-        self.convert_source_entry = ttk.Entry(convert_lf, font=self.font_11)
-        self.convert_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
-
-        ttk.Label(convert_lf, text="输出视频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
-        self.convert_output_entry = ttk.Entry(convert_lf, font=self.font_11)
-        self.convert_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
-
-        # --- ↓↓↓ 核心修正：同样修改这里的 lambda ---
-        ttk.Button(convert_lf, text="浏览...", bootstyle="outline", 
-                   command=lambda: self._select_media_source_file(self.convert_source_entry, self.convert_output_entry, ".mp4")).grid(row=0, column=2, padx=5)
-        ttk.Button(convert_lf, text="浏览...", bootstyle="outline", 
-                   command=lambda: self._select_media_output_file(self.convert_output_entry, ".mp4", [("MP4 视频文件", "*.mp4")])).grid(row=1, column=2, padx=5)
-        # --- ↑↑↑ 修正结束 ↑↑↑ ---
-
-        convert_action_frame = ttk.Frame(convert_lf)
-        convert_action_frame.grid(row=2, column=1, sticky='w', pady=10)
-        self.convert_button = ttk.Button(convert_action_frame, text="开始转换", bootstyle="success", command=lambda: self.start_media_processing('convert'))
-        self.convert_button.pack(side=LEFT)
-        self.convert_progress = ttk.Progressbar(convert_action_frame, length=300, mode='determinate')
-        self.convert_progress.pack(side=LEFT, padx=15, fill=X, expand=True)
-        self.convert_status_label = ttk.Label(convert_action_frame, text="准备就绪", font=self.font_9, bootstyle="secondary")
-        self.convert_status_label.pack(side=LEFT, padx=10)
-
-        # --- 3. 剪辑音/视频功能区 ---
-        clip_lf = ttk.LabelFrame(parent_frame, text="3. 剪辑音视频片段", padding=15)
-        clip_lf.pack(fill=X, pady=10)
-        clip_lf.columnconfigure(1, weight=1)
-
-        ttk.Label(clip_lf, text="源文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
-        self.clip_source_entry = ttk.Entry(clip_lf, font=self.font_11)
-        self.clip_source_entry.grid(row=0, column=1, sticky='ew', padx=5)
-
-        ttk.Label(clip_lf, text="输出文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
-        self.clip_output_entry = ttk.Entry(clip_lf, font=self.font_11)
-        self.clip_output_entry.grid(row=1, column=1, sticky='ew', padx=5)
-
-        # --- ↓↓↓ 核心修正：同样修改这里的 lambda ---
-        ttk.Button(clip_lf, text="浏览...", bootstyle="outline", 
-                   command=lambda: self._select_media_source_file(self.clip_source_entry, self.clip_output_entry, "_clipped.mp4")).grid(row=0, column=2, padx=5)
-        ttk.Button(clip_lf, text="浏览...", bootstyle="outline", 
-                   command=lambda: self._select_media_output_file(self.clip_output_entry, ".mp4", [("媒体文件", "*.mp4 *.mp3")])).grid(row=1, column=2, padx=5)
-        # --- ↑↑↑ 修正结束 ↑↑↑ ---
-
-        time_frame = ttk.Frame(clip_lf)
-        time_frame.grid(row=2, column=1, sticky='w', pady=5)
-        ttk.Label(time_frame, text="开始时间:").pack(side=LEFT, padx=(0, 5))
-        self.clip_start_entry = ttk.Entry(time_frame, font=self.font_11, width=12)
-        self.clip_start_entry.pack(side=LEFT)
-        ttk.Label(time_frame, text="结束时间:").pack(side=LEFT, padx=(15, 5))
-        self.clip_end_entry = ttk.Entry(time_frame, font=self.font_11, width=12)
-        self.clip_end_entry.pack(side=LEFT)
-        ttk.Label(time_frame, text="(格式: HH:MM:SS)", font=self.font_9, bootstyle="secondary").pack(side=LEFT, padx=10)
-
-        clip_action_frame = ttk.Frame(clip_lf)
-        clip_action_frame.grid(row=3, column=1, sticky='w', pady=10)
-        self.clip_button = ttk.Button(clip_action_frame, text="开始剪辑", bootstyle="success", command=lambda: self.start_media_processing('clip'))
-        self.clip_button.pack(side=LEFT)
-        self.clip_progress = ttk.Progressbar(clip_action_frame, length=300, mode='determinate')
-        self.clip_progress.pack(side=LEFT, padx=15, fill=X, expand=True)
-        self.clip_status_label = ttk.Label(clip_action_frame, text="准备就绪", font=self.font_9, bootstyle="secondary")
-        self.clip_status_label.pack(side=LEFT, padx=10)
-
-    def _select_media_source_file(self, entry_widget, output_entry_widget, output_extension):
-        """通用函数：选择源媒体文件，并智能填充输出路径"""
-        filetypes = [("所有支持的媒体文件", "*.mp4 *.mkv *.avi *.mov *.mp3 *.wav *.flac"), ("所有文件", "*.*")]
-        filepath = filedialog.askopenfilename(title="选择源文件", filetypes=filetypes)
-        
-        if not filepath:
-            return
-
-        entry_widget.delete(0, END)
-        entry_widget.insert(0, filepath)
-
-        # 智能填充输出路径
-        if output_entry_widget:
-            source_dir = os.path.dirname(filepath)
-            source_basename, _ = os.path.splitext(os.path.basename(filepath))
-            output_path = os.path.join(source_dir, f"{source_basename}{output_extension}")
-            output_entry_widget.delete(0, END)
-            output_entry_widget.insert(0, output_path)
-
-    def _select_media_output_file(self, entry_widget, default_extension, filetypes):
-        """通用函数：选择输出文件的保存路径"""
-        filepath = filedialog.asksaveasfilename(title="指定输出文件", defaultextension=default_extension, filetypes=filetypes)
-        
-        if not filepath:
-            return
-            
-        entry_widget.delete(0, END)
-        entry_widget.insert(0, filepath)
-
-    def start_media_processing(self, task_type):
-        """所有媒体处理任务的统一入口/调度函数"""
-        if self.is_media_processing:
-            messagebox.showwarning("正在处理中", "请等待当前媒体处理任务完成后再开始新的任务。", parent=self.root)
-            return
-
-        # --- 根据任务类型，获取输入、输出和UI控件 ---
-        if task_type == 'extract':
-            source_file = self.extract_source_entry.get().strip()
-            output_file = self.extract_output_entry.get().strip()
-            ui_controls = {'button': self.extract_button, 'progress': self.extract_progress, 'status': self.extract_status_label}
-            command = ['ffmpeg', '-i', source_file, '-vn', '-acodec', 'libmp3lame', '-q:a', '2', output_file, '-y']
-        elif task_type == 'convert':
-            source_file = self.convert_source_entry.get().strip()
-            output_file = self.convert_output_entry.get().strip()
-            ui_controls = {'button': self.convert_button, 'progress': self.convert_progress, 'status': self.convert_status_label}
-            command = ['ffmpeg', '-i', source_file, '-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-c:a', 'aac', '-b:a', '192k', output_file, '-y']
-        elif task_type == 'clip':
-            source_file = self.clip_source_entry.get().strip()
-            output_file = self.clip_output_entry.get().strip()
-            start_time = self.clip_start_entry.get().strip()
-            end_time = self.clip_end_entry.get().strip()
-            ui_controls = {'button': self.clip_button, 'progress': self.clip_progress, 'status': self.clip_status_label}
-            if not start_time or not end_time:
-                messagebox.showerror("输入错误", "剪辑任务必须填写开始时间和结束时间。", parent=self.root)
-                return
-            command = ['ffmpeg', '-i', source_file, '-ss', start_time, '-to', end_time, '-c', 'copy', output_file, '-y']
-        else:
-            return
-
-        if not source_file or not output_file:
-            messagebox.showerror("输入错误", "源文件和输出文件路径不能为空。", parent=self.root)
-            return
-
-        # --- 上锁并更新UI，准备开始 ---
-        self.is_media_processing = True
-        for btn in [self.extract_button, self.convert_button, self.clip_button]:
-            btn.config(state=DISABLED)
-        
-        ui_controls['progress']['value'] = 0
-        ui_controls['status'].config(text="正在准备...")
-
-        # --- 启动后台线程执行任务 ---
-        threading.Thread(target=self._run_ffmpeg_task, args=(command, source_file, ui_controls), daemon=True).start()
-
-    def _get_media_duration(self, filepath):
-        """使用ffmpeg快速获取媒体文件的总时长（秒）"""
-        command = ['ffmpeg', '-i', filepath]
-        try:
-            # --- ↓↓↓ 核心修正：彻底删除 startupinfo 参数 ↓↓↓ ---
-            # 您顶部的全局代码会自动帮我们处理好窗口隐藏，所以这里我们什么都不用加。
-            process = subprocess.Popen(command, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
-            # --- ↑↑↑ 修正结束 ↑↑↑ ---
-
-            _, stderr = process.communicate(timeout=5)
-            
-            duration_match = re.search(r"Duration: (\d{2}):(\d{2}):(\d{2})\.(\d{2})", stderr)
-            if duration_match:
-                hours = int(duration_match.group(1))
-                minutes = int(duration_match.group(2))
-                seconds = int(duration_match.group(3))
-                milliseconds = int(duration_match.group(4))
-                return hours * 3600 + minutes * 60 + seconds + milliseconds / 100.0
-        except Exception as e:
-            self.log(f"获取媒体时长失败: {e}")
-        return None
-
-    def _run_ffmpeg_task(self, command, source_file, ui_controls):
-        """在后台线程中执行ffmpeg命令，并实时更新UI"""
-        try:
-            # 1. 获取总时长用于计算进度
-            total_duration = self._get_media_duration(source_file)
-            if total_duration is None and "-c:v" in command: # 仅在需要转码时才强求时长
-                raise ValueError("无法获取源文件总时长，无法计算进度。")
-
-            # 2. 启动主处理进程
-            creation_flags = 0
-            if sys.platform == "win32":
-                creation_flags = subprocess.CREATE_NO_WINDOW
-
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', creationflags=creation_flags)
-
-            # 3. 实时读取输出并解析进度
-            while True:
-                line = process.stdout.readline()
-                if not line:
-                    break
-                
-                if total_duration:
-                    time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})", line)
-                    if time_match:
-                        hours = int(time_match.group(1))
-                        minutes = int(time_match.group(2))
-                        seconds = int(time_match.group(3))
-                        milliseconds = int(time_match.group(4))
-                        current_time = hours * 3600 + minutes * 60 + seconds + milliseconds / 100.0
-                        progress_percent = (current_time / total_duration) * 100
-                        
-                        def update_ui(p, t):
-                            ui_controls['progress']['value'] = p
-                            ui_controls['status'].config(text=f"正在处理... {int(p)}%")
-                        
-                        self.root.after(0, update_ui, progress_percent, current_time)
-
-            process.wait()
-
-            # 4. 检查结果
-            if process.returncode == 0:
-                self.root.after(0, lambda: ui_controls['progress'].config(value=100))
-                self.root.after(0, lambda: ui_controls['status'].config(text="处理完成！", bootstyle="success"))
-                self.root.after(100, lambda: messagebox.showinfo("成功", "媒体处理任务已成功完成！", parent=self.root))
-            else:
-                raise Exception(f"FFmpeg处理失败，返回码: {process.returncode}")
-
-        except Exception as e:
-            self.log(f"媒体处理任务失败: {e}")
-            self.root.after(0, lambda: ui_controls['status'].config(text="处理失败！", bootstyle="danger"))
-            self.root.after(100, lambda: messagebox.showerror("失败", f"媒体处理任务失败：\n{e}", parent=self.root))
-
-        finally:
-            # 5. 解锁并恢复UI状态
-            self.is_media_processing = False
-            def restore_buttons():
-                for btn in [self.extract_button, self.convert_button, self.clip_button]:
-                    btn.config(state=NORMAL)
-            self.root.after(0, restore_buttons)
-
-    def _get_local_ip(self):
-        """获取本机的局域网IP地址"""
-        try:
-            import socket
-            # 创建一个套接字连接到一个公共DNS服务器（不实际发送数据）
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "127.0.0.1" # 获取失败则返回本地回环地址
-
-    def _build_streaming_ui(self, parent_frame):
-        """构建“串流模式”选项卡的UI界面"""
-        parent_frame.columnconfigure(0, weight=1)
-
-        # --- 顶部说明 ---
-        desc_label = ttk.Label(parent_frame, 
-                               text="将本机作为流媒体服务器，向局域网广播音视频。其他设备可通过VLC等播放器访问串流地址。\n注意：串流会消耗大量CPU资源，且可能需要您手动配置Windows防火墙以允许其他设备访问。",
-                               font=self.font_10, bootstyle="info", wraplength=700)
-        desc_label.pack(fill=X, pady=(0, 15))
-
-        # --- 1. 选择串流源 ---
-        source_lf = ttk.LabelFrame(parent_frame, text="1. 选择串流源", padding=15)
-        source_lf.pack(fill=X, pady=10)
-        source_lf.columnconfigure(1, weight=1)
-
-        self.stream_source_var = tk.StringVar(value="file")
-        # ！！！注意：trace_add 已从这里移除 ！！！
-
-        # 文件源
-        file_rb = ttk.Radiobutton(source_lf, text="视频文件:", variable=self.stream_source_var, value="file")
-        file_rb.grid(row=0, column=0, sticky='e', padx=5, pady=5)
-        self.stream_file_entry = ttk.Entry(source_lf, font=self.font_11)
-        self.stream_file_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        self.stream_file_browse_btn = ttk.Button(source_lf, text="浏览...", bootstyle="outline", command=self._select_stream_source_file)
-        self.stream_file_browse_btn.grid(row=0, column=2, padx=5)
-
-        # 桌面源
-        desktop_rb = ttk.Radiobutton(source_lf, text="桌面屏幕:", variable=self.stream_source_var, value="desktop")
-        desktop_rb.grid(row=1, column=0, sticky='e', padx=5, pady=5)
-        self.stream_desktop_label = ttk.Label(source_lf, text="主屏幕 (自动检测)", font=self.font_11, bootstyle="secondary")
-        self.stream_desktop_label.grid(row=1, column=1, sticky='w', padx=5)
-
-        # --- 2. 设置串流参数 ---
-        params_lf = ttk.LabelFrame(parent_frame, text="2. 设置串流参数", padding=15)
-        params_lf.pack(fill=X, pady=10)
-        
-        quality_frame = ttk.Frame(params_lf)
-        quality_frame.pack(fill=X, pady=5)
-        ttk.Label(quality_frame, text="清晰度预设:").pack(side=LEFT, padx=(0, 10))
-        qualities = ["流畅 (480p, 800kbps)", "标清 (720p, 1.5Mbps)", "高清 (1080p, 4Mbps)"]
-        self.stream_quality_combo = ttk.Combobox(quality_frame, values=qualities, font=self.font_11, state='readonly')
-        self.stream_quality_combo.pack(side=LEFT)
-        self.stream_quality_combo.set(qualities[1]) # 默认选择“标清”
-
-        port_frame = ttk.Frame(params_lf)
-        port_frame.pack(fill=X, pady=5)
-        ttk.Label(port_frame, text="串流端口:").pack(side=LEFT, padx=(0, 28))
-        self.stream_port_entry = ttk.Entry(port_frame, font=self.font_11, width=10)
-        self.stream_port_entry.pack(side=LEFT)
-        self.stream_port_entry.insert(0, "8554")
-        ttk.Label(port_frame, text="(高级用户可修改，范围 1024-65535)", font=self.font_9, bootstyle="secondary").pack(side=LEFT, padx=10)
-
-        # --- 3. 开始/停止串流 ---
-        control_lf = ttk.LabelFrame(parent_frame, text="3. 控制与状态", padding=15)
-        control_lf.pack(fill=X, pady=10)
-        control_lf.columnconfigure(0, weight=1)
-
-        self.stream_start_stop_button = ttk.Button(control_lf, text="▶ 开始串流", bootstyle="success-outline", style="lg.TButton", command=self._toggle_streaming)
-        self.stream_start_stop_button.grid(row=0, column=0, columnspan=2, sticky='ew', ipady=8, pady=10)
-
-        status_frame = ttk.Frame(control_lf)
-        status_frame.grid(row=1, column=0, columnspan=2, sticky='ew', pady=5)
-        ttk.Label(status_frame, text="当前状态:").pack(side=LEFT)
-        self.stream_status_label = ttk.Label(status_frame, text="已停止", font=self.font_11_bold, bootstyle="danger")
-        self.stream_status_label.pack(side=LEFT, padx=5)
-
-        url_frame = ttk.Frame(control_lf)
-        url_frame.grid(row=2, column=0, columnspan=2, sticky='ew', pady=5)
-        ttk.Label(url_frame, text="串流地址:").pack(side=LEFT)
-        self.stream_url_label = ttk.Label(url_frame, text="(串流开始后此处将显示地址)", font=self.font_11, bootstyle="info")
-        self.stream_url_label.pack(side=LEFT, padx=5)
-        
-        ip_frame = ttk.Frame(control_lf)
-        ip_frame.grid(row=3, column=0, columnspan=2, sticky='ew', pady=(10, 0))
-        ttk.Label(ip_frame, text=f"(本机IP地址: {self._get_local_ip()})", font=self.font_9, bootstyle="secondary").pack(side=LEFT)
-
-        # --- ↓↓↓ 关键修正：将 trace_add 移动到所有控件创建之后 ↓↓↓ ---
-        self.stream_source_var.trace_add("write", self._toggle_stream_source_controls)
-        # --- ↑↑↑ 关键修正结束 ↑↑↑ ---
-
-        # --- 初始化UI状态 ---
-        self._toggle_stream_source_controls()
-
-    def _select_stream_source_file(self):
-        """为串流功能选择源视频文件"""
-        filetypes = [("所有支持的视频文件", "*.mp4 *.mkv *.avi *.mov"), ("所有文件", "*.*")]
-        filepath = filedialog.askopenfilename(title="选择要串流的视频文件", filetypes=filetypes)
-        
-        if not filepath:
-            return
-
-        self.stream_file_entry.delete(0, END)
-        self.stream_file_entry.insert(0, filepath)
-
-    def _toggle_stream_source_controls(self, *args):
-        """根据选择的串流源，切换UI控件的可用状态"""
-        source = self.stream_source_var.get()
-        if source == 'file':
-            self.stream_file_entry.config(state=NORMAL)
-            self.stream_file_browse_btn.config(state=NORMAL)
-        elif source == 'desktop':
-            self.stream_file_entry.config(state=DISABLED)
-            self.stream_file_browse_btn.config(state=DISABLED)
-
-    def _toggle_streaming(self):
-        """切换串流状态的總控函数"""
-        if self.is_streaming:
-            self._stop_streaming()
-        else:
-            self._start_streaming()
-
-    def _start_streaming(self):
-        """开始VLC串流 - 最终修复版"""
-        if not VLC_AVAILABLE:
-            messagebox.showerror("依赖缺失", "未找到VLC核心库，无法启动串流功能。", parent=self.root)
-            return
-
-        # 1. 验证输入 (来自您的代码，保持不变)
-        source_type = self.stream_source_var.get()
-        source_path = self.stream_file_entry.get().strip()
-        port_str = self.stream_port_entry.get().strip()
-
-        if source_type == 'file' and (not source_path or not os.path.exists(source_path)):
-            messagebox.showerror("输入错误", "请选择一个有效的视频文件作为串流源。", parent=self.root)
-            return
-        
-        try:
-            port = int(port_str)
-            if not (1024 <= port <= 65535):
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("输入错误", "端口号必须是 1024 到 65535 之间的整数。", parent=self.root)
-            return
-
-        # 2. 检查端口是否已被占用 (来自您的代码，保持不变)
-        import socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result = sock.connect_ex(('127.0.0.1', port))
-        sock.close()
-        if result == 0:
-            messagebox.showerror("端口冲突", f"端口 {port} 已被占用，请更换端口号。", parent=self.root)
-            return
-        
-        # 3. 获取IP地址 (来自您的代码，保持不变)
-        local_ip = self._get_local_ip()
-        if local_ip == "127.0.0.1":
-            messagebox.showwarning("网络警告", "未能获取到有效的局域网IP地址，串流可能仅本机可见。", parent=self.root)
-
-        # 4. 构建sout字符串 (来自您的代码，保持不变)
-        quality = self.stream_quality_combo.get()
-        presets = {
-            "流畅 (480p, 800kbps)": {"vcodec": "h264", "vb": "800", "height": "480", "acodec": "mp3", "ab": "128"},
-            "标清 (720p, 1.5Mbps)": {"vcodec": "h264", "vb": "1500", "height": "720", "acodec": "mp3", "ab": "128"},
-            "高清 (1080p, 4Mbps)": {"vcodec": "h264", "vb": "4000", "height": "1080", "acodec": "mp3", "ab": "192"}
-        }
-        p = presets[quality]
-        transcode_settings = f"vcodec={p['vcodec']},vb={p['vb']},height={p['height']},acodec={p['acodec']},ab={p['ab']},channels=2,samplerate=44100"
-        sout_string = f"#transcode{{{transcode_settings}}}:standard{{access=http,mux=ts,dst=:{port}/stream}}"
-        self.log(f"串流配置: {sout_string}")
-
-        # 5. 准备VLC实例和媒体
-        try:
-            # --- ↓↓↓ 核心修正：创建一个“干净”的VLC实例，只保留必要的参数 ---
-            vlc_args = [
-                "--vout=dummy",           # 禁用视频输出窗口
-                "--verbose=0",            # 在这里可以先关闭啰嗦的日志
-            ]
-            self.vlc_stream_instance = vlc.Instance(vlc_args)
-            # --- ↑↑↑ 修正结束 ↑↑↑ ---
-            
-            if source_type == 'file':
-                self.log(f"准备串流文件: {source_path}")
-                media = self.vlc_stream_instance.media_new(source_path)
-            else: # desktop
-                self.log("准备串流桌面...")
-                media = self.vlc_stream_instance.media_new("screen://")
-                media.add_option(":screen-fps=15")
-                media.add_option(":screen-caching=300")
-            
-            # --- ↓↓↓ 核心修正：将sout指令作为选项，直接绑定到media对象上 ---
-            media.add_option(f":sout={sout_string}")
-            media.add_option(":sout-keep")
-            # --- ↑↑↑ 修正结束 ↑↑↑ ---
-
-            self.vlc_stream_player = self.vlc_stream_instance.media_player_new()
-            self.vlc_stream_player.set_media(media)
-
-            # 6. 启动播放
-            ret = self.vlc_stream_player.play()
-            if ret == -1:
-                raise Exception("VLC播放器启动失败（返回-1）")
-            self.log("VLC播放指令已发送，等待串流启动...")
-            
-            import time
-            time.sleep(2) # 等待HTTP服务器启动
-            
-            # 7. 检查串流是否真的启动了 (来自您的代码，保持不变)
-            state = self.vlc_stream_player.get_state()
-            self.log(f"VLC播放器状态: {state}")
-            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            test_sock.settimeout(3)
-            test_result = test_sock.connect_ex(('127.0.0.1', port))
-            test_sock.close()
-            if test_result != 0:
-                self.log(f"!!! 警告: 无法连接到串流端口 {port}，串流未成功启动")
-                raise Exception(f"串流服务未能启动，端口 {port} 无法连接。请检查防火墙或更换端口。")
-            else:
-                self.log(f"✓ 串流端口 {port} 已开放，串流正在运行")
-
-            # 8. 更新UI状态 (来自您的代码，保持不变)
-            self.is_streaming = True
-            self.stream_start_stop_button.config(text="■ 停止串流", bootstyle="danger")
-            self.stream_status_label.config(text="串流中...", bootstyle="success")
-            stream_url = f"http://{local_ip}:{port}/stream"
-            self.stream_url_label.config(text=stream_url)
-            
-            self.log("=" * 50)
-            self.log(f"串流地址: {stream_url}")
-            self.log(f"本机测试: http://127.0.0.1:{port}/stream")
-            self.log("=" * 50)
-            
-            for widget in [self.stream_file_entry, self.stream_file_browse_btn, 
-                          self.stream_quality_combo, self.stream_port_entry]:
-                widget.config(state=DISABLED)
-            
-            for child in self.stream_file_browse_btn.master.winfo_children():
-                if isinstance(child, (ttk.Radiobutton)):
-                    child.config(state=DISABLED)
-
-        except Exception as e:
-            self.log(f"!!! 启动串流失败: {e}")
-            import traceback
-            error_detail = traceback.format_exc()
-            self.log(error_detail)
-            messagebox.showerror("启动失败", 
-                f"无法启动串流服务：\n{e}", 
-                parent=self.root)
-            self._stop_streaming()
-
-    def _stop_streaming(self):
-        """停止VLC串流"""
-        if not self.is_streaming and not self.vlc_stream_player:
-            return
-
-        self.log("正在停止串流...")
-        try:
-            if self.vlc_stream_player:
-                self.vlc_stream_player.stop()
-                self.vlc_stream_player.release()
-            if self.vlc_stream_instance:
-                self.vlc_stream_instance.release()
-        except Exception as e:
-            self.log(f"停止串流时发生错误: {e}")
-        finally:
-            self.vlc_stream_player = None
-            self.vlc_stream_instance = None
-            self.is_streaming = False
-
-            # 恢复UI状态
-            self.stream_start_stop_button.config(text="▶ 开始串流", bootstyle="success-outline")
-            self.stream_status_label.config(text="已停止", bootstyle="danger")
-            self.stream_url_label.config(text="(串流开始后此处将显示地址)")
-
-            # 启用所有设置控件
-            for widget in [self.stream_file_entry, self.stream_file_browse_btn, self.stream_quality_combo, self.stream_port_entry]:
-                widget.config(state=NORMAL)
-            
-            # 启用单选按钮
-            for child in self.stream_file_browse_btn.master.winfo_children():
-                if isinstance(child, (ttk.Radiobutton)):
-                    child.config(state=NORMAL)
-            
-            # 重新应用一次控件状态，确保文件/桌面切换的禁用状态正确
-            self._toggle_stream_source_controls()
-            self.log("串流已停止。")
-
-    
 
     # --- 定时运行功能的全套方法 ---
     
@@ -2675,6 +2087,314 @@ class TimedBroadcastApp:
             self.save_backup_tasks()
             items = self.backup_tree.get_children()
             if items: self.backup_tree.selection_set(items[-1]); self.backup_tree.focus(items[-1])
+
+    def _build_media_processing_ui(self, parent_frame):
+        # 检查ffmpeg是否存在
+        ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
+        if not os.path.exists(ffmpeg_path):
+            warning_label = ttk.Label(parent_frame,
+                                      text="错误：媒体处理功能依赖于 FFmpeg。\n\n请下载 FFmpeg，并将其中的 ffmpeg.exe 文件放置到本软件所在的文件夹内，然后重启软件。",
+                                      font=self.font_12_bold, bootstyle="danger", justify="center")
+            warning_label.pack(pady=50, fill=X, expand=True)
+            return
+
+        # 使用可滚动框架，防止窗口过小时内容溢出
+        scrolled_frame = ScrolledFrame(parent_frame, autohide=True)
+        scrolled_frame.pack(fill=BOTH, expand=True)
+        container = scrolled_frame.container # 在这个 container 内部构建UI
+
+        # 顶部说明文字
+        desc_text = "此页面功能依赖于软件根目录下的 ffmpeg.exe，用于即时处理音视频文件。注意：同一时间只能执行一个媒体处理任务。"
+        ttk.Label(container, text=desc_text, bootstyle="info").pack(fill=X, pady=(0, 15))
+
+        # --- 功能1: 提取音频 ---
+        extract_lf = ttk.LabelFrame(container, text=" 1. 从视频中提取音频 ", padding=15)
+        extract_lf.pack(fill=X, pady=10)
+        extract_lf.columnconfigure(1, weight=1)
+
+        self.extract_input_var = tk.StringVar()
+        self.extract_output_var = tk.StringVar()
+        
+        ttk.Label(extract_lf, text="源视频文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        ttk.Entry(extract_lf, textvariable=self.extract_input_var).grid(row=0, column=1, sticky='ew')
+        ttk.Button(extract_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_file(self.extract_input_var, "选择视频文件")).grid(row=0, column=2, padx=5)
+
+        ttk.Label(extract_lf, text="输出音频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        ttk.Entry(extract_lf, textvariable=self.extract_output_var).grid(row=1, column=1, sticky='ew')
+        ttk.Button(extract_lf, text="浏览...", bootstyle="outline", command=self._select_extract_output_file).grid(row=1, column=2, padx=5)
+        
+        extract_action_frame = ttk.Frame(extract_lf)
+        extract_action_frame.grid(row=2, column=1, sticky='ew', pady=(10,0))
+        extract_action_frame.columnconfigure(1, weight=1)
+        self.extract_start_btn = ttk.Button(extract_action_frame, text="开始提取", bootstyle="success", width=12, command=self._start_extraction)
+        self.extract_start_btn.grid(row=0, column=0, ipady=4)
+        self.extract_progress = ttk.Progressbar(extract_action_frame, mode='determinate')
+        self.extract_progress.grid(row=0, column=1, sticky='ew', padx=10)
+        self.extract_status_label = ttk.Label(extract_action_frame, text="准备就绪", bootstyle="secondary")
+        self.extract_status_label.grid(row=0, column=2)
+
+        # --- 功能2: 转换视频格式 ---
+        convert_lf = ttk.LabelFrame(container, text=" 2. 转换视频格式为通用MP4 ", padding=15)
+        convert_lf.pack(fill=X, pady=10)
+        convert_lf.columnconfigure(1, weight=1)
+
+        self.convert_input_var = tk.StringVar()
+        self.convert_output_var = tk.StringVar()
+
+        ttk.Label(convert_lf, text="源视频文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        ttk.Entry(convert_lf, textvariable=self.convert_input_var).grid(row=0, column=1, sticky='ew')
+        ttk.Button(convert_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_file(self.convert_input_var, "选择视频文件")).grid(row=0, column=2, padx=5)
+
+        ttk.Label(convert_lf, text="输出视频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        ttk.Entry(convert_lf, textvariable=self.convert_output_var).grid(row=1, column=1, sticky='ew')
+        ttk.Button(convert_lf, text="浏览...", bootstyle="outline", command=self._select_convert_output_file).grid(row=1, column=2, padx=5)
+
+        convert_action_frame = ttk.Frame(convert_lf)
+        convert_action_frame.grid(row=2, column=1, sticky='ew', pady=(10,0))
+        convert_action_frame.columnconfigure(1, weight=1)
+        self.convert_start_btn = ttk.Button(convert_action_frame, text="开始转换", bootstyle="success", width=12, command=self._start_conversion)
+        self.convert_start_btn.grid(row=0, column=0, ipady=4)
+        self.convert_progress = ttk.Progressbar(convert_action_frame, mode='determinate')
+        self.convert_progress.grid(row=0, column=1, sticky='ew', padx=10)
+        self.convert_status_label = ttk.Label(convert_action_frame, text="准备就绪", bootstyle="secondary")
+        self.convert_status_label.grid(row=0, column=2)
+        
+        # --- 功能3: 剪辑片段 ---
+        trim_lf = ttk.LabelFrame(container, text=" 3. 剪辑音视频片段 ", padding=15)
+        trim_lf.pack(fill=X, pady=10)
+        trim_lf.columnconfigure(1, weight=1)
+        
+        self.trim_input_var = tk.StringVar()
+        self.trim_output_var = tk.StringVar()
+        self.trim_start_time_var = tk.StringVar(value="00:00:00")
+        self.trim_end_time_var = tk.StringVar()
+
+        ttk.Label(trim_lf, text="源文件:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        ttk.Entry(trim_lf, textvariable=self.trim_input_var).grid(row=0, column=1, sticky='ew')
+        ttk.Button(trim_lf, text="浏览...", bootstyle="outline", command=lambda: self._select_media_file(self.trim_input_var, "选择音视频文件")).grid(row=0, column=2, padx=5)
+
+        ttk.Label(trim_lf, text="输出文件:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        ttk.Entry(trim_lf, textvariable=self.trim_output_var).grid(row=1, column=1, sticky='ew')
+        ttk.Button(trim_lf, text="浏览...", bootstyle="outline", command=self._select_trim_output_file).grid(row=1, column=2, padx=5)
+
+        time_frame = ttk.Frame(trim_lf)
+        time_frame.grid(row=2, column=1, sticky='w', pady=5)
+        ttk.Label(time_frame, text="开始时间:").pack(side=LEFT)
+        ttk.Entry(time_frame, textvariable=self.trim_start_time_var, width=12).pack(side=LEFT, padx=5)
+        ttk.Label(time_frame, text="结束时间:").pack(side=LEFT, padx=(10,0))
+        ttk.Entry(time_frame, textvariable=self.trim_end_time_var, width=12).pack(side=LEFT, padx=5)
+        ttk.Label(time_frame, text="(格式: HH:MM:SS 或 秒)", bootstyle="secondary").pack(side=LEFT)
+        
+        trim_action_frame = ttk.Frame(trim_lf)
+        trim_action_frame.grid(row=3, column=1, sticky='ew', pady=(10,0))
+        trim_action_frame.columnconfigure(1, weight=1)
+        self.trim_start_btn = ttk.Button(trim_action_frame, text="开始剪辑", bootstyle="success", width=12, command=self._start_trimming)
+        self.trim_start_btn.grid(row=0, column=0, ipady=4)
+        self.trim_progress = ttk.Progressbar(trim_action_frame, mode='determinate')
+        self.trim_progress.grid(row=0, column=1, sticky='ew', padx=10)
+        self.trim_status_label = ttk.Label(trim_action_frame, text="准备就绪", bootstyle="secondary")
+        self.trim_status_label.grid(row=0, column=2)
+
+    def _select_media_file(self, string_var, title):
+        filetypes = [("媒体文件", "*.mp4 *.mkv *.avi *.mov *.mp3 *.wav *.flac *.ts"), ("所有文件", "*.*")]
+        filename = filedialog.askopenfilename(title=title, filetypes=filetypes)
+        if filename:
+            string_var.set(filename)
+
+    def _select_extract_output_file(self):
+        input_file = self.extract_input_var.get()
+        if not input_file:
+            messagebox.showwarning("提示", "请先选择一个源视频文件。")
+            return
+        
+        base_name = os.path.splitext(os.path.basename(input_file))[0]
+        def_name = f"{base_name}_audio.mp3"
+        
+        filetypes = [("MP3 Audio", "*.mp3"), ("WAV Audio", "*.wav"), ("AAC Audio", "*.aac"), ("FLAC Audio", "*.flac")]
+        filename = filedialog.asksaveasfilename(title="保存提取的音频", initialfile=def_name, filetypes=filetypes, defaultextension=".mp3")
+        if filename:
+            self.extract_output_var.set(filename)
+
+    def _select_convert_output_file(self):
+        input_file = self.convert_input_var.get()
+        if not input_file:
+            messagebox.showwarning("提示", "请先选择一个源视频文件。")
+            return
+        base_name = os.path.splitext(os.path.basename(input_file))[0]
+        def_name = f"{base_name}_converted.mp4"
+        filetypes = [("MP4 Video", "*.mp4")]
+        filename = filedialog.asksaveasfilename(title="保存转换后的视频", initialfile=def_name, filetypes=filetypes, defaultextension=".mp4")
+        if filename:
+            self.convert_output_var.set(filename)
+
+    def _select_trim_output_file(self):
+        input_file = self.trim_input_var.get()
+        if not input_file:
+            messagebox.showwarning("提示", "请先选择一个源文件。")
+            return
+        base_name, ext = os.path.splitext(os.path.basename(input_file))
+        def_name = f"{base_name}_trimmed{ext}"
+        filetypes = [(f"{ext.upper()} File", f"*{ext}"), ("All Files", "*.*")]
+        filename = filedialog.asksaveasfilename(title="保存剪辑后的文件", initialfile=def_name, filetypes=filetypes, defaultextension=ext)
+        if filename:
+            self.trim_output_var.set(filename)
+
+    def _toggle_media_buttons(self, state):
+        """统一控制所有媒体处理按钮的状态"""
+        self.extract_start_btn.config(state=state)
+        self.convert_start_btn.config(state=state)
+        self.trim_start_btn.config(state=state)
+
+    def _start_extraction(self):
+        input_file = self.extract_input_var.get()
+        output_file = self.extract_output_var.get()
+        
+        if not all([input_file, output_file]):
+            messagebox.showerror("错误", "输入和输出文件路径都不能为空。")
+            return
+            
+        ffmpeg_exe = os.path.join(application_path, "ffmpeg.exe")
+        ext = os.path.splitext(output_file)[1].lower()
+        
+        command = [ffmpeg_exe, "-hide_banner", "-i", input_file, "-vn"] # -vn = No Video
+        
+        codec_map = {'.mp3': 'libmp3lame', '.aac': 'aac', '.wav': 'pcm_s16le', '.flac': 'flac'}
+        if ext in codec_map:
+            command.extend(["-c:a", codec_map[ext]])
+        else:
+            messagebox.showerror("错误", f"不支持的输出音频格式: {ext}")
+            return
+        
+        command.extend(["-y", output_file])
+
+        self._toggle_media_buttons(DISABLED)
+        self.extract_progress['value'] = 0
+        self.extract_status_label.config(text="正在处理...")
+        
+        threading.Thread(
+            target=self._media_processing_worker,
+            args=(command, input_file, self.extract_progress, self.extract_status_label, "提取音频"),
+            daemon=True
+        ).start()
+
+    def _start_conversion(self):
+        input_file = self.convert_input_var.get()
+        output_file = self.convert_output_var.get()
+
+        if not all([input_file, output_file]):
+            messagebox.showerror("错误", "输入和输出文件路径都不能为空。")
+            return
+
+        ffmpeg_exe = os.path.join(application_path, "ffmpeg.exe")
+        command = [
+            ffmpeg_exe, "-hide_banner", "-i", input_file,
+            "-c:v", "libx264",      # 使用通用性最好的 H.264 编码
+            "-preset", "fast",     # 在速度和质量之间取得良好平衡
+            "-pix_fmt", "yuv420p", # 确保最大的播放器兼容性
+            "-c:a", "aac",          # 使用通用的 AAC 音频编码
+            "-b:a", "192k",         # 合理的音频码率
+            "-y", output_file
+        ]
+        
+        self._toggle_media_buttons(DISABLED)
+        self.convert_progress['value'] = 0
+        self.convert_status_label.config(text="正在处理...")
+
+        threading.Thread(
+            target=self._media_processing_worker,
+            args=(command, input_file, self.convert_progress, self.convert_status_label, "转换视频"),
+            daemon=True
+        ).start()
+
+    def _start_trimming(self):
+        input_file = self.trim_input_var.get()
+        output_file = self.trim_output_var.get()
+        start_time = self.trim_start_time_var.get()
+        end_time = self.trim_end_time_var.get()
+
+        if not all([input_file, output_file, start_time]):
+            messagebox.showerror("错误", "输入、输出和开始时间都不能为空。")
+            return
+        
+        ffmpeg_exe = os.path.join(application_path, "ffmpeg.exe")
+        command = [ffmpeg_exe, "-hide_banner", "-i", input_file, "-ss", start_time]
+
+        if end_time:
+            command.extend(["-to", end_time])
+        
+        # 为了保证成功率，默认重新编码，而不是使用 "-c", "copy"
+        command.extend(["-c:v", "libx264", "-c:a", "aac", "-preset", "fast", "-y", output_file])
+
+        self._toggle_media_buttons(DISABLED)
+        self.trim_progress['value'] = 0
+        self.trim_status_label.config(text="正在处理...")
+
+        threading.Thread(
+            target=self._media_processing_worker,
+            args=(command, input_file, self.trim_progress, self.trim_status_label, "剪辑片段"),
+            daemon=True
+        ).start()
+
+    def _media_processing_worker(self, command, input_file, progress_widget, status_widget, operation_name):
+        """通用媒体处理后台工作线程"""
+        
+        def update_ui(key, value):
+            if key == 'progress':
+                progress_widget.config(value=value)
+            elif key == 'status':
+                status_widget.config(text=value)
+
+        total_duration_sec = 0.0
+        try:
+            # 1. 获取总时长
+            ffprobe_exe = os.path.join(application_path, "ffmpeg.exe").replace("ffmpeg", "ffprobe")
+            ffprobe_cmd = [ffprobe_exe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", input_file]
+            duration_proc = subprocess.run(ffprobe_cmd, capture_output=True, text=True, startupinfo=startupinfo)
+            if duration_proc.returncode == 0 and duration_proc.stdout.strip():
+                total_duration_sec = float(duration_proc.stdout.strip())
+            
+            # 如果是剪辑，则总时长应该是剪辑的时长
+            if operation_name == "剪辑片段":
+                try:
+                    start_sec = sum(x * int(t) for x, t in zip([3600, 60, 1], command[command.index("-ss")+1].split(':')))
+                    end_sec = sum(x * int(t) for x, t in zip([3600, 60, 1], command[command.index("-to")+1].split(':')))
+                    if end_sec > start_sec:
+                        total_duration_sec = end_sec - start_sec
+                except (ValueError, IndexError): # 如果没有-to或者格式不对，则使用完整时长
+                    if total_duration_sec > 0:
+                        total_duration_sec -= start_sec
+
+            # 2. 执行主命令并解析进度
+            progress_command = command[:2] + ["-progress", "pipe:1"] + command[2:]
+            
+            process = subprocess.Popen(progress_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', startupinfo=startupinfo)
+
+            while True:
+                line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
+                if total_duration_sec > 0 and 'out_time_us' in line:
+                    parts = line.strip().split('=')
+                    if len(parts) == 2:
+                        try:
+                            current_us = int(parts[1])
+                            progress = min(100, (current_us / (total_duration_sec * 1_000_000)) * 100)
+                            self.root.after(0, update_ui, 'progress', progress)
+                        except (ValueError, ZeroDivisionError):
+                            pass
+            
+            stderr_output = process.communicate()[1]
+            if process.returncode != 0:
+                raise Exception(f"FFmpeg 返回错误 (代码: {process.returncode})\n\n{stderr_output[-1000:]}") # 只显示最后一部分错误信息
+
+            self.root.after(0, update_ui, 'progress', 100)
+            self.root.after(0, update_ui, 'status', "处理成功!")
+        except Exception as e:
+            self.root.after(0, update_ui, 'progress', 0)
+            self.root.after(0, update_ui, 'status', "失败!")
+            messagebox.showerror("处理失败", f"执行“{operation_name}”操作时发生错误:\n\n{e}")
+        finally:
+            self.root.after(100, self._toggle_media_buttons, 'normal')
 
 # --- 动态语音功能的全套方法 ---
 
@@ -3820,9 +3540,11 @@ class TimedBroadcastApp:
         stats_frame = ttk.Frame(page_frame, padding=(10, 5))
         stats_frame.pack(side=TOP, fill=X)
         
+        # “节目单”标签，靠左显示
         self.stats_label = ttk.Label(stats_frame, text="节目单：0", font=self.font_11, bootstyle="secondary")
         self.stats_label.pack(side=LEFT)
 
+# 新增的可点击天气标签，靠右显示
         self.main_weather_label = ttk.Label(stats_frame, text="天气: 正在获取...", font=self.font_11, bootstyle="info", cursor="hand2")
         self.main_weather_label.pack(side=RIGHT, padx=10)
         self.main_weather_label.bind("<Button-1>", self.on_weather_label_click)
@@ -3870,14 +3592,6 @@ class TimedBroadcastApp:
         self.clear_log_btn = ttk.Button(log_header_frame, text="清除日志", command=self.clear_log,
                                         bootstyle="secondary-outline")
         self.clear_log_btn.pack(side=LEFT, padx=10)
-
-        # --- ↓↓↓ 核心修改：在这里添加频谱窗口 ↓↓↓ ---
-        style = ttk.Style.get_instance()
-        style.configure('Black.TFrame', background='black')
-        self.spectrum_frame = ttk.Frame(log_header_frame, style='Black.TFrame', width=200, height=35)
-        self.spectrum_frame.pack(side=LEFT, padx=20, fill=Y)
-        self.spectrum_frame.pack_forget() # 默认隐藏
-        # --- ↑↑↑ 修改结束 ↑↑↑ ---
 
         self.log_text = ScrolledText(log_frame, height=6, font=self.font_11,
                                                   wrap=WORD, state='disabled')
@@ -7314,57 +7028,10 @@ class TimedBroadcastApp:
         tasks_to_play = []
         current_date_str = now.strftime("%Y-%m-%d")
         current_time_str = now.strftime("%H:%M:%S")
-        
-        # --- ↓↓↓ 新增：获取预生成提前时间 ↓↓↓ ---
-        pregen_minutes = self.settings.get("dynamic_voice_pregen_minutes", 2)
-        pregen_delta = timedelta(minutes=pregen_minutes)
-        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
 
         for task in self.tasks:
-            if task.get('status') != '启用': continue
-
             task_type = task.get('type')
-
-            # --- ↓↓↓ 核心修改：分离动态语音的特殊处理逻辑 ↓↓↓ ---
-            if task_type == 'dynamic_voice':
-                # 检查是否需要预生成
-                try:
-                    start, end = [d.strip() for d in task.get('date_range', '').split('~')]
-                    if not (datetime.strptime(start, "%Y-%m-%d").date() <= now.date() <= datetime.strptime(end, "%Y-%m-%d").date()):
-                        continue
-                except (ValueError, IndexError): pass
-
-                schedule = task.get('weekday', '每周:1234567')
-                run_today = (schedule.startswith("每周:") and str(now.isoweekday()) in schedule[3:]) or \
-                            (schedule.startswith("每月:") and f"{now.day:02d}" in schedule[3:].split(','))
-                if not run_today: continue
-
-                for trigger_time_str in [t.strip() for t in task.get('time', '').split(',')]:
-                    try:
-                        trigger_time_obj = datetime.strptime(f"{current_date_str} {trigger_time_str}", '%Y-%m-%d %H:%M:%S')
-                        
-                        # 1. 检查是否到达播放时间
-                        if trigger_time_obj.strftime('%H:%M:%S') == current_time_str and task.get('last_run', {}).get(trigger_time_str) != current_date_str:
-                            tasks_to_play.append((task, trigger_time_str))
-
-                        # 2. 检查是否到达预生成时间
-                        pregen_start_time = trigger_time_obj - pregen_delta
-                        if pregen_start_time.strftime('%H:%M:%S') == current_time_str:
-                            # 使用一个唯一的键来标记此任务的此时间点已经开始预生成
-                            pregen_log_key = f"pregen_{trigger_time_str}"
-                            if task.get('last_run', {}).get(pregen_log_key) != current_date_str:
-                                self.log(f"任务 '{task['name']}' 已到达预生成时间，开始在后台合成语音...")
-                                # 启动一个后台线程去生成文件，不阻塞主调度器
-                                threading.Thread(target=self._pregenerate_dynamic_voice_task, args=(task, trigger_time_obj), daemon=True).start()
-                                task.setdefault('last_run', {})[pregen_log_key] = current_date_str
-                                self.save_tasks()
-
-                    except ValueError:
-                        continue # 时间格式错误，跳过
-                
-                continue # 处理完动态语音后，继续下一个任务
-            # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
-
+            
             if task_type == 'bell_schedule':
                 if task.get('status') != '启用': continue
                 
@@ -7413,128 +7080,6 @@ class TimedBroadcastApp:
         for task, trigger_time in delay_tasks:
             self.log(f"延时任务 '{task['name']}' 已到时间，加入播放队列。")
             self.playback_command_queue.put(('PLAY', (task, trigger_time)))
-
-    def _pregenerate_dynamic_voice_task(self, task, trigger_datetime):
-        """在后台预生成动态语音文件，但不播放。"""
-        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
-        try:
-            # 使用任务内容（文本、语音、速度等）的哈希值来确保任务修改后会生成新文件
-            task_details_str = f"{task.get('source_text', '')}{task.get('speed', '0')}{task.get('pitch', '0')}"
-            task_hash = hashlib.md5(task_details_str.encode('utf-8')).hexdigest()[:8]
-            
-            # 创建可预测的文件名
-            filename = f"{task_hash}_{trigger_datetime.strftime('%Y%m%d_%H%M%S')}.wav"
-            output_path = os.path.join(DYNAMIC_VOICE_FOLDER, filename)
-
-            # 如果文件已存在，说明之前可能生成过，无需重复操作
-            if os.path.exists(output_path):
-                self.log(f"预生成文件 '{filename}' 已存在，跳过。")
-                return
-
-            # --- 复用 _execute_dynamic_voice_task 中的核心生成逻辑 ---
-            source_text = task.get('source_text', '')
-            if not source_text: return
-
-            segments = self._parse_dynamic_script(source_text)
-            if not segments: return
-
-            from pydub import AudioSegment
-            ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
-            if os.path.exists(ffmpeg_path): AudioSegment.converter = ffmpeg_path
-
-            temp_files = []
-            final_audio = None
-            
-            for i, segment in enumerate(segments):
-                processed_text = self._replace_dynamic_tags(segment['text'], trigger_datetime)
-                actor = segment['actor']
-                voice_name = '在线-云扬 (男)' if actor == '男' else '在线-晓晓 (女)'
-                voice_params = {'voice': voice_name, 'speed': task.get('speed', '0'), 'pitch': task.get('pitch', '0')}
-                
-                temp_filename = f"pregen_temp_{int(time.time())}_{i}.mp3"
-                temp_output_path = os.path.join(DYNAMIC_VOICE_FOLDER, temp_filename)
-                temp_files.append(temp_output_path)
-
-                synthesis_success = threading.Event()
-                error_message = ""
-                def online_callback(result):
-                    nonlocal error_message
-                    if not result['success']: error_message = result.get('error', '未知在线合成错误')
-                    synthesis_success.set()
-                
-                s_thread = threading.Thread(target=self._synthesis_worker_edge, args=(processed_text, voice_params, temp_output_path, online_callback))
-                s_thread.start()
-                s_thread.join()
-
-                if error_message: raise Exception(f"生成片段时失败: {error_message}")
-
-            for file_path in temp_files:
-                segment_audio = AudioSegment.from_mp3(file_path)
-                if final_audio is None: final_audio = segment_audio
-                else: final_audio += segment_audio
-            
-            if final_audio is None: raise Exception("未能生成任何有效的音频片段。")
-
-            final_audio.export(output_path, format="wav")
-            self.log(f"成功预生成动态语音文件: {filename}")
-
-        except Exception as e:
-            self.log(f"!!! 预生成动态语音任务 '{task['name']}' 失败: {e}")
-        finally:
-            # 清理用于拼接的临时mp3文件
-            if 'temp_files' in locals():
-                for f in temp_files:
-                    if os.path.exists(f):
-                        try: os.remove(f)
-                        except: pass
-            pythoncom.CoUninitialize()
-
-
-    def _play_dynamic_voice_task(self, task, trigger_time):
-        """播放动态语音任务，优先使用预生成的文件。"""
-        try:
-            pregen_file_path = None
-            # 1. 尝试定位预生成的文件
-            if trigger_time != "manual_play":
-                task_details_str = f"{task.get('source_text', '')}{task.get('speed', '0')}{task.get('pitch', '0')}"
-                task_hash = hashlib.md5(task_details_str.encode('utf-8')).hexdigest()[:8]
-                trigger_datetime = datetime.strptime(f"{datetime.now().strftime('%Y-%m-%d')} {trigger_time}", '%Y-%m-%d %H:%M:%S')
-                filename = f"{task_hash}_{trigger_datetime.strftime('%Y%m%d_%H%M%S')}.wav"
-                pregen_file_path = os.path.join(DYNAMIC_VOICE_FOLDER, filename)
-
-            # 2. 检查文件是否存在并播放
-            if pregen_file_path and os.path.exists(pregen_file_path):
-                # --- ↓↓↓ 核心修改：从调用音频播放器改为调用语音播放器 ↓↓↓ ---
-                self.log(f"找到预生成的语音文件 '{os.path.basename(pregen_file_path)}'，将附加提示音和背景音乐后播放。")
-                
-                # 构建一个临时的“语音任务”来播放这个文件
-                # 这样可以复用 _play_voice_task_internal 的完整逻辑（提示音+BGM+语音）
-                playback_task = task.copy()
-                playback_task['type'] = 'voice'  # 关键：保持任务类型为 'voice'
-                playback_task['content'] = pregen_file_path  # 将内容指向我们预生成的文件
-                playback_task['repeat'] = '1'  # 动态语音只播一遍
-                
-                # 调用正确的、功能齐全的语音播放函数
-                self._play_voice_task_internal(playback_task)
-                # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
-                
-                # 播放完毕后删除文件
-                try:
-                    os.remove(pregen_file_path)
-                    self.log(f"已删除使用过的预生成文件: {os.path.basename(pregen_file_path)}")
-                except Exception as e:
-                    self.log(f"删除预生成文件失败: {e}")
-
-            # 3. 如果文件不存在，则降级为实时生成
-            else:
-                if trigger_time != "manual_play":
-                    self.log(f"警告：未找到预生成的动态语音文件，将进行实时合成。这可能会有延迟。")
-                self._execute_dynamic_voice_task(task)
-        except Exception as e:
-            self.log(f"!!! 播放动态语音任务 '{task['name']}' 时发生严重错误: {e}")
-            # 再次尝试降级，以防万一
-            self.log("尝试降级到实时生成模式...")
-            self._execute_dynamic_voice_task(task)
 
     def _check_power_tasks(self, now):
         current_date_str = now.strftime("%Y-%m-%d")
@@ -7936,7 +7481,7 @@ class TimedBroadcastApp:
                 self._play_voice_task_internal(task)
             elif task_type == 'dynamic_voice':
                 self.log(f"开始动态语音任务: {task['name']}")
-                self._play_dynamic_voice_task(task, trigger_time)
+                self._execute_dynamic_voice_task(task)
             elif task_type == 'video':
                 self.log(f"开始视频任务: {task['name']}")
                 self._play_video_task_internal(task, self.video_stop_event)
@@ -7957,11 +7502,6 @@ class TimedBroadcastApp:
             if VLC_AVAILABLE and self.vlc_player:
                 self.vlc_player.stop()
                 self.vlc_player = None
-            
-            # --- ↓↓↓ 新增/修改代码：确保频谱视图被隐藏 ↓↓↓ ---
-            if hasattr(self, 'spectrum_frame') and self.spectrum_frame:
-                self.root.after(0, self.spectrum_frame.pack_forget)
-            # --- ↑↑↑ 修改结束 ↑↑↑ ---
             
             if self.video_stop_event:
                 self.video_stop_event = None
@@ -7987,44 +7527,37 @@ class TimedBroadcastApp:
         playlist = []
         repeat_count = int(task.get('interval_first', 1))
 
+        # 1. 构建播放列表
         if task.get('audio_type') == 'single':
             if os.path.exists(task['content']):
                 playlist = [task['content']] * repeat_count
         else:
             folder_path = task['content']
             if os.path.isdir(folder_path):
+                # 扩展支持的音频格式列表
                 supported_extensions = ('.mp3', '.wav', '.ogg', '.flac', '.m4a', '.wma', '.ape')
-                all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) 
-                            if f.lower().endswith(supported_extensions)]
+                all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(supported_extensions)]
                 if task.get('play_order') == 'random':
                     random.shuffle(all_files)
                 
                 if task.get('interval_type', 'first') == 'first':
                     playlist = all_files[:repeat_count]
-                else:
+                else: # 如果是按秒播放，则需要整个文件夹列表
                     playlist = all_files
 
         if not playlist:
             self.log(f"错误: 音频列表为空或文件/文件夹不存在，任务 '{task['name']}' 无法播放。")
             return
 
+        # 2. 智能选择播放引擎
         if VLC_AVAILABLE:
+            # --- 使用 VLC 播放 ---
             self.log(f"检测到VLC，使用VLC引擎播放任务 '{task['name']}'。")
             try:
-                self.root.after(0, lambda: self.spectrum_frame.pack(side=LEFT, padx=20, fill=Y))
-                
-                # --- ↓↓↓ 核心修正 #1：创建一个“干净”的VLC实例 ---
-                instance = vlc.Instance(['--no-xlib'])
-                # --- ↑↑↑ 修正结束 ↑↑↑ ---
-
+                instance = vlc.Instance()
+                # <--- 核心修复 1：将 player 赋值给 self.vlc_player ---
                 self.vlc_player = instance.media_player_new()
-
-                time.sleep(0.1) 
-                if self.spectrum_frame and self.spectrum_frame.winfo_exists():
-                    hwnd = self.spectrum_frame.winfo_id()
-                    self.log(f"将VLC绑定到窗口 ID: {hwnd}")
-                    self.vlc_player.set_hwnd(hwnd)
-
+                
                 if self.is_muted:
                     self.vlc_player.audio_set_mute(True)
                 else:
@@ -8039,22 +7572,10 @@ class TimedBroadcastApp:
                         break
                     
                     media = instance.media_new(audio_path)
-                    
-                    # --- ↓↓↓ 核心修正 #2：将所有可视化参数作为选项，添加到 Media 对象上 ---
-                    media.add_option(':vout=directx')
-                    media.add_option(':audio-visual=visual')
-                    media.add_option(':vfilter=spectrometer')
-                    media.add_option(':spect-3d')
-                    media.add_option(':no-video-title-show')
-                    # --- ↑↑↑ 修正结束 ↑↑↑ ---
-                    
                     self.vlc_player.set_media(media)
                     self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
                     self.vlc_player.play()
-                    
-                    time.sleep(0.3)
-                    
-                    self.log(f"播放状态: {self.vlc_player.get_state()}")
+                    time.sleep(0.2) # 等待播放开始
 
                     last_text_update_time = 0
                     while self.vlc_player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
@@ -8087,18 +7608,15 @@ class TimedBroadcastApp:
 
             except Exception as e:
                 self.log(f"使用VLC播放音频失败: {e}")
-                import traceback
-                self.log(traceback.format_exc())
             finally:
+                # <--- 核心修复 2：确保播放结束后清理 self.vlc_player ---
                 if self.vlc_player:
                     self.vlc_player.stop()
                     self.vlc_player = None
-                self.root.after(0, self.spectrum_frame.pack_forget)
+                # --- 修复结束 ---
 
         else:
-            # Pygame播放逻辑 (保持不变)
-            self.root.after(0, self.spectrum_frame.pack_forget)
-            
+            # --- 回退到 Pygame 播放 (这部分逻辑不变) ---
             if not AUDIO_AVAILABLE:
                 self.log("错误: Pygame未初始化，无法播放音频。")
                 return
@@ -8163,6 +7681,7 @@ class TimedBroadcastApp:
                 except Exception as e:
                     self.log(f"播放音频文件 {os.path.basename(audio_path)} 失败: {e}")
                     continue
+
     def _play_voice_task_internal(self, task):
         if not AUDIO_AVAILABLE:
             self.log("错误: Pygame未初始化，无法播放语音。")
@@ -8268,8 +7787,8 @@ class TimedBroadcastApp:
         # 实例选项保持干净，不包含任何UA设置
         vlc_instance_options = [
             '--no-xlib', 
-            '--network-caching=8000'
-            '--live-caching=5000'
+            '--network-caching=5000'
+            '--live-caching=3000'
             '--avcodec-hw=auto'
             '--hls-segment-threads=2'
         ]
@@ -8716,8 +8235,7 @@ class TimedBroadcastApp:
             "last_power_action_date": "",
             "time_chime_speed": "0", "time_chime_pitch": "0",
             "bg_image_interval": 6,
-            "weather_city": "",
-            "dynamic_voice_pregen_minutes": 2
+            "weather_city": ""    # <--- 新增此行
         }
         if os.path.exists(SETTINGS_FILE):
             try:
@@ -8759,8 +8277,7 @@ class TimedBroadcastApp:
                 "time_chime_pitch": self.time_chime_pitch_var.get(),
                 "bg_image_interval": interval,
                 "weather_city": self.settings.get("weather_city", ""),
-                "intercut_text": self.settings.get("intercut_text", ""),
-                "dynamic_voice_pregen_minutes": self.settings.get("dynamic_voice_pregen_minutes", 2)
+                "intercut_text": self.settings.get("intercut_text", "") # 新增：确保插播文本也被保存
             })
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(self.settings, f, ensure_ascii=False, indent=2)
