@@ -2349,25 +2349,30 @@ class TimedBroadcastApp:
             # 1. 获取总时长
             ffprobe_exe = os.path.join(application_path, "ffmpeg.exe").replace("ffmpeg", "ffprobe")
             ffprobe_cmd = [ffprobe_exe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", input_file]
-            duration_proc = subprocess.run(ffprobe_cmd, capture_output=True, text=True, startupinfo=startupinfo)
+            # --- ↓↓↓ 修正点 1：删除此处的 startupinfo=startupinfo ↓↓↓ ---
+            duration_proc = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
             if duration_proc.returncode == 0 and duration_proc.stdout.strip():
                 total_duration_sec = float(duration_proc.stdout.strip())
             
-            # 如果是剪辑，则总时长应该是剪辑的时长
             if operation_name == "剪辑片段":
                 try:
                     start_sec = sum(x * int(t) for x, t in zip([3600, 60, 1], command[command.index("-ss")+1].split(':')))
                     end_sec = sum(x * int(t) for x, t in zip([3600, 60, 1], command[command.index("-to")+1].split(':')))
                     if end_sec > start_sec:
                         total_duration_sec = end_sec - start_sec
-                except (ValueError, IndexError): # 如果没有-to或者格式不对，则使用完整时长
+                except (ValueError, IndexError):
                     if total_duration_sec > 0:
-                        total_duration_sec -= start_sec
+                        try:
+                            start_sec = sum(x * int(t) for x, t in zip([3600, 60, 1], command[command.index("-ss")+1].split(':')))
+                            total_duration_sec -= start_sec
+                        except (ValueError, IndexError):
+                            pass
 
             # 2. 执行主命令并解析进度
             progress_command = command[:2] + ["-progress", "pipe:1"] + command[2:]
             
-            process = subprocess.Popen(progress_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', startupinfo=startupinfo)
+            # --- ↓↓↓ 修正点 2：删除此处的 startupinfo=startupinfo ↓↓↓ ---
+            process = subprocess.Popen(progress_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
 
             while True:
                 line = process.stdout.readline()
@@ -2385,7 +2390,7 @@ class TimedBroadcastApp:
             
             stderr_output = process.communicate()[1]
             if process.returncode != 0:
-                raise Exception(f"FFmpeg 返回错误 (代码: {process.returncode})\n\n{stderr_output[-1000:]}") # 只显示最后一部分错误信息
+                raise Exception(f"FFmpeg 返回错误 (代码: {process.returncode})\n\n{stderr_output[-1000:]}")
 
             self.root.after(0, update_ui, 'progress', 100)
             self.root.after(0, update_ui, 'status', "处理成功!")
