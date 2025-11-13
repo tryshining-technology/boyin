@@ -2443,15 +2443,17 @@ class TimedBroadcastApp:
 
     def _build_streaming_ui(self, parent_frame):
         parent_frame.columnconfigure(0, weight=1)
-        parent_frame.rowconfigure(2, weight=1)
+        parent_frame.rowconfigure(2, weight=1) # 为日志区域设置权重
 
         ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
         if not os.path.exists(ffmpeg_path):
             ttk.Label(parent_frame, text="错误：串流功能依赖于 ffmpeg.exe。", font=self.font_12_bold, bootstyle="danger").pack(pady=50)
             return
 
+        # --- ↓↓↓ 核心修改：在这里初始化状态变量 ↓↓↓ ---
         self.streaming_process = None
         self.is_streaming_active = False # 控制守护线程的开关
+        # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
 
         # 1. 设置与说明
         settings_lf = ttk.LabelFrame(parent_frame, text="1. 设置与说明", padding=15)
@@ -2472,15 +2474,17 @@ class TimedBroadcastApp:
         
         ttk.Label(settings_lf, text="串流端口:").grid(row=2, column=0, sticky='e', padx=5, pady=5)
         self.stream_port_var = tk.StringVar(value="8080")
-        self.stream_port_entry = ttk.Entry(settings_lf, textvariable=self.stream_port_var, width=10) # 给它一个名字
+        self.stream_port_entry = ttk.Entry(settings_lf, textvariable=self.stream_port_var, width=10)
         self.stream_port_entry.grid(row=2, column=1, sticky='w', padx=5)
 
         # 2. 控制与状态
         control_lf = ttk.LabelFrame(parent_frame, text="2. 控制与状态", padding=15)
         control_lf.grid(row=1, column=0, sticky='ew', pady=10)
         
-        self.stream_toggle_btn = ttk.Button(control_lf, text="开始串流", bootstyle="success", command=self._toggle_streaming) # 改用一个切换按钮
+        # --- ↓↓↓ 核心修改：使用一个切换按钮替换原来的两个按钮 ↓↓↓ ---
+        self.stream_toggle_btn = ttk.Button(control_lf, text="开始串流", bootstyle="success", command=self._toggle_streaming)
         self.stream_toggle_btn.pack(side=LEFT, ipady=5, ipadx=10, padx=5)
+        # --- ↑↑↑ 核心修改结束 ↑↑↑ ---
         
         self.stream_status_label = ttk.Label(control_lf, text="状态: 已停止", font=self.font_11_bold, bootstyle="secondary")
         self.stream_status_label.pack(side=LEFT, padx=20)
@@ -2496,6 +2500,8 @@ class TimedBroadcastApp:
 
         self.root.after(500, self._discover_audio_devices)
 
+    # --- ↓↓↓ [重构] 串流模式功能模块逻辑 - V5 最终整合版 ↓↓↓ ---
+
     def _stream_log(self, message):
         """线程安全地向串流日志窗口添加日志"""
         self.root.after(0, self._stream_log_threadsafe, message)
@@ -2505,7 +2511,7 @@ class TimedBroadcastApp:
         if hasattr(self, 'stream_log_text') and self.stream_log_text.winfo_exists():
             widget = self.stream_log_text.text
             widget.config(state='normal')
-            widget.insert(END, message) # ffmpeg的日志通常不带换行，所以这里直接插入
+            widget.insert(END, message)
             widget.see(END)
             widget.config(state='disabled')
         
@@ -2516,14 +2522,12 @@ class TimedBroadcastApp:
         command = [ffmpeg_exe, "-list_devices", "true", "-f", "dshow", "-i", "dummy"]
         
         try:
-            # 使用 Popen 以避免窗口闪烁，并更好地控制输出
             process = subprocess.Popen(command, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
             stdout, stderr = process.communicate(timeout=5)
-            output = stderr # dshow设备列表在stderr中
+            output = stderr
             
             devices = []
             for line in output.splitlines():
-                # 匹配关键词，覆盖更多虚拟音频设备
                 if "立体声混音" in line or "Stereo Mix" in line or "CABLE Output" in line:
                     match = re.search(r'"([^"]+)"', line)
                     if match:
@@ -2546,16 +2550,13 @@ class TimedBroadcastApp:
         """获取本机在局域网中的IP地址"""
         try:
             import socket
-            # 创建一个UDP套接字（不需要实际连接）
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            # 连接到一个公共DNS服务器的IP地址，这不会发送任何数据
             s.connect(("8.8.8.8", 80))
-            # 获取套接字的本地地址
             ip = s.getsockname()[0]
             s.close()
             return ip
         except Exception:
-            return "127.0.0.1" # 如果失败，返回本地回环地址
+            return "127.0.0.1"
 
     def _toggle_streaming(self):
         """一个按钮处理开始和停止的切换逻辑"""
@@ -2573,35 +2574,30 @@ class TimedBroadcastApp:
             
         try:
             port = int(self.stream_port_var.get())
-            if not (1024 <= port <= 65535):
-                raise ValueError
+            if not (1024 <= port <= 65535): raise ValueError
         except ValueError:
             messagebox.showerror("错误", "端口号必须是 1024 到 65535 之间的数字。")
             return
             
-        # 1. 设置状态标志为True，这将启动守护线程的循环
         self.is_streaming_active = True
         
-        # 2. 更新UI状态
         self.stream_toggle_btn.config(text="停止串流", bootstyle="danger")
         self.stream_device_combo.config(state=DISABLED)
         self.stream_port_entry.config(state=DISABLED)
         
         ip = self._get_local_ip()
-        stream_url = f"http://{ip}:{port}"
+        stream_url = f"http://{ip}:{port}/"
         self.stream_status_label.config(text=f"串流中: {stream_url}", bootstyle="success")
+        
         self._stream_log("="*50 + "\n")
         self._stream_log(f"用户请求启动串流服务...\n串流地址: {stream_url}\n")
         
-        # 3. 启动守护线程
         threading.Thread(target=self._streaming_worker, args=(device_name, port), daemon=True).start()
 
     def _stop_streaming(self):
         """停止串流守护线程"""
-        # 1. 设置状态标志为False，守护线程的循环将在下一次结束后安全退出
         self.is_streaming_active = False 
         
-        # 2. 尝试终止当前正在运行的ffmpeg进程（如果有的话）
         if self.streaming_process and self.streaming_process.poll() is None:
             try:
                 self.streaming_process.terminate()
@@ -2609,7 +2605,6 @@ class TimedBroadcastApp:
             except Exception as e:
                 self._stream_log(f"尝试终止FFmpeg进程时出错: {e}\n")
 
-        # 3. 恢复UI控件
         self.stream_toggle_btn.config(text="开始串流", bootstyle="success")
         self.stream_status_label.config(text="状态: 已停止", bootstyle="secondary")
         self.stream_device_combo.config(state="readonly")
@@ -2617,41 +2612,42 @@ class TimedBroadcastApp:
         self._stream_log("用户请求停止串流服务。\n")
 
     def _streaming_worker(self, device_name, port):
-        """守护线程，负责循环启动和监控ffmpeg进程 (V2 - 增加 -re 参数修复缓冲问题)"""
+        """守护线程 (V5 - 低延迟优化)"""
         ffmpeg_exe = os.path.join(application_path, "ffmpeg.exe")
         
-        # --- ↓↓↓ 核心修正：在 -f dshow 之前加入 -re 参数 ↓↓↓ ---
         command = [
             ffmpeg_exe, 
-            "-re",  # 以实时速率读取输入源
+            "-re",
+            "-probesize", "32",
+            "-analyzeduration", "0",
+            "-rtbufsize", "10M",
             "-f", "dshow", 
             "-i", f"audio={device_name}",
-            "-c:a", "libmp3lame", "-b:a", "128k", "-ar", "44100",
-            "-content_type", "audio/mpeg", "-f", "mp3",
-            "-listen", "1", f"http://0.0.0.0:{port}"
+            "-flush_packets", "1",
+            "-c:a", "libmp3lame", 
+            "-b:a", "96k",
+            "-ar", "44100",
+            "-content_type", "audio/mpeg",
+            "-f", "mp3",
+            "-listen", "1",
+            f"icecast://source:hackme@0.0.0.0:{port}/"
         ]
-        # --- ↑↑↑ 核心修正结束 ↑↑↑ ---
 
         while self.is_streaming_active:
-            self._stream_log(f"启动FFmpeg进程 (端口: {port})... 等待客户端连接...\n")
+            self._stream_log(f"启动FFmpeg Icecast服务 (端口: {port})... 等待客户端连接...\n")
             try:
                 self.streaming_process = subprocess.Popen(
                     command,
                     stderr=subprocess.PIPE,
-                    stdout=subprocess.DEVNULL, # 我们不关心stdout
+                    stdout=subprocess.DEVNULL,
                     text=True, encoding='utf-8', errors='replace'
                 )
                 
-                # 实时读取stderr日志直到进程结束
                 for line in iter(self.streaming_process.stderr.readline, ''):
-                    # 如果中途用户点击了停止，也要能及时退出日志读取
-                    if not self.is_streaming_active:
-                        break
-                    # 我们不再打印烦人的 buffer full 警告，只关注关键信息
-                    if "too full" not in line:
-                        self._stream_log(line)
+                    if not self.is_streaming_active: break
+                    if "too full" not in line: self._stream_log(line)
                 
-                self.streaming_process.wait() # 确保进程已完全结束
+                self.streaming_process.wait()
                 
                 if self.is_streaming_active:
                     self._stream_log("\n--- FFmpeg进程结束（可能因客户端断开），准备在2秒后重启服务 ---\n")
@@ -2664,6 +2660,8 @@ class TimedBroadcastApp:
                     time.sleep(5)
         
         self._stream_log("--- 串流守护线程已正常退出 ---\n")
+
+# --- [重构] 串流模式功能模块逻辑结束 ---
 
 # --- 动态语音功能的全套方法 ---
 
