@@ -457,7 +457,7 @@ class TimedBroadcastApp:
         self.status_labels = []
         status_texts = ["当前时间", "系统状态", "播放状态", "任务数量", "待办事项"]
 
-        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251105", font=self.font_11,
+        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251113", font=self.font_11,
                                     bootstyle=(SECONDARY, INVERSE), padding=(15, 0))
         copyright_label.pack(side=RIGHT, padx=2)
 
@@ -2088,6 +2088,8 @@ class TimedBroadcastApp:
             items = self.backup_tree.get_children()
             if items: self.backup_tree.selection_set(items[-1]); self.backup_tree.focus(items[-1])
 
+    # --- ↓↓↓ [新增] 媒体处理功能模块 (FFmpeg) - V3 最终整合版 ↓↓↓ ---
+
     def _build_media_processing_ui(self, parent_frame):
         # 检查ffmpeg是否存在
         ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
@@ -2104,7 +2106,7 @@ class TimedBroadcastApp:
         container = scrolled_frame.container # 在这个 container 内部构建UI
 
         # 顶部说明文字
-        desc_text = "此页面功能依赖于软件根目录下的 ffmpeg.exe，用于即时处理音视频文件。注意：同一时间只能执行一个媒体处理任务。"
+        desc_text = "此页面功能依赖于软件根目录下的 ffmpeg.exe，用于即时处理音视频文件。\n注意：同一时间只能执行一个媒体处理任务。"
         ttk.Label(container, text=desc_text, bootstyle="info").pack(fill=X, pady=(0, 15))
 
         # --- 功能1: 提取音频 ---
@@ -2317,13 +2319,19 @@ class TimedBroadcastApp:
             return
         
         ffmpeg_exe = os.path.join(application_path, "ffmpeg.exe")
-        command = [ffmpeg_exe, "-hide_banner", "-i", input_file, "-ss", start_time]
+        
+        command = [
+            ffmpeg_exe, 
+            "-hide_banner", 
+            "-i", input_file, 
+            "-ss", start_time
+        ]
 
         if end_time:
             command.extend(["-to", end_time])
         
-        # 为了保证成功率，默认重新编码，而不是使用 "-c", "copy"
-        command.extend(["-c:v", "libx264", "-c:a", "aac", "-preset", "fast", "-y", output_file])
+        # 不再强制指定编码器，让ffmpeg自动选择，并强制重新编码以确保精度
+        command.extend(["-y", output_file])
 
         self._toggle_media_buttons(DISABLED)
         self.trim_progress['value'] = 0
@@ -2334,9 +2342,26 @@ class TimedBroadcastApp:
             args=(command, input_file, self.trim_progress, self.trim_status_label, "剪辑片段"),
             daemon=True
         ).start()
+    
+    def _parse_time_to_seconds(self, time_str):
+        """将 HH:MM:SS 或纯秒数的字符串安全地转换为总秒数"""
+        if not time_str:
+            return None
+        try:
+            if ':' in time_str:
+                parts = time_str.split(':')
+                seconds = 0
+                # 从秒开始反向计算，支持 HH:MM:SS, MM:SS, SS 等格式
+                for i, part in enumerate(reversed(parts)):
+                    seconds += float(part) * (60**i)
+                return seconds
+            else:
+                return float(time_str)
+        except (ValueError, TypeError):
+            return None
 
     def _media_processing_worker(self, command, input_file, progress_widget, status_widget, operation_name):
-        """通用媒体处理后台工作线程"""
+        """通用媒体处理后台工作线程 (V3 - 修复剪辑和死锁问题)"""
         
         def update_ui(key, value):
             if key == 'progress':
@@ -2349,30 +2374,44 @@ class TimedBroadcastApp:
             # 1. 获取总时长
             ffprobe_exe = os.path.join(application_path, "ffmpeg.exe").replace("ffmpeg", "ffprobe")
             ffprobe_cmd = [ffprobe_exe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", input_file]
-            # --- ↓↓↓ 修正点 1：删除此处的 startupinfo=startupinfo ↓↓↓ ---
             duration_proc = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
             if duration_proc.returncode == 0 and duration_proc.stdout.strip():
                 total_duration_sec = float(duration_proc.stdout.strip())
             
+            # 修正剪辑操作的进度条总时长
             if operation_name == "剪辑片段":
+                start_sec, end_sec = None, None
+                
                 try:
-                    start_sec = sum(x * int(t) for x, t in zip([3600, 60, 1], command[command.index("-ss")+1].split(':')))
-                    end_sec = sum(x * int(t) for x, t in zip([3600, 60, 1], command[command.index("-to")+1].split(':')))
-                    if end_sec > start_sec:
-                        total_duration_sec = end_sec - start_sec
-                except (ValueError, IndexError):
-                    if total_duration_sec > 0:
-                        try:
-                            start_sec = sum(x * int(t) for x, t in zip([3600, 60, 1], command[command.index("-ss")+1].split(':')))
-                            total_duration_sec -= start_sec
-                        except (ValueError, IndexError):
-                            pass
+                    start_sec_str = command[command.index("-ss") + 1]
+                    start_sec = self._parse_time_to_seconds(start_sec_str)
+                except (ValueError, IndexError): pass
+                
+                try:
+                    if "-to" in command:
+                        end_sec_str = command[command.index("-to") + 1]
+                        end_sec = self._parse_time_to_seconds(end_sec_str)
+                except (ValueError, IndexError): pass
+
+                if start_sec is not None and end_sec is not None and end_sec > start_sec:
+                    total_duration_sec = end_sec - start_sec
+                elif start_sec is not None and total_duration_sec > 0:
+                    total_duration_sec = max(0, total_duration_sec - start_sec)
 
             # 2. 执行主命令并解析进度
             progress_command = command[:2] + ["-progress", "pipe:1"] + command[2:]
             
-            # --- ↓↓↓ 修正点 2：删除此处的 startupinfo=startupinfo ↓↓↓ ---
             process = subprocess.Popen(progress_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
+
+            stderr_output = []
+            def log_stderr(pipe):
+                for line in iter(pipe.readline, ''):
+                    stderr_output.append(line)
+                pipe.close()
+
+            stderr_thread = threading.Thread(target=log_stderr, args=(process.stderr,))
+            stderr_thread.daemon = True
+            stderr_thread.start()
 
             while True:
                 line = process.stdout.readline()
@@ -2388,9 +2427,12 @@ class TimedBroadcastApp:
                         except (ValueError, ZeroDivisionError):
                             pass
             
-            stderr_output = process.communicate()[1]
+            process.wait()
+            stderr_thread.join()
+            
             if process.returncode != 0:
-                raise Exception(f"FFmpeg 返回错误 (代码: {process.returncode})\n\n{stderr_output[-1000:]}")
+                full_stderr = "".join(stderr_output)
+                raise Exception(f"FFmpeg 返回错误 (代码: {process.returncode})\n\n{full_stderr[-1000:]}")
 
             self.root.after(0, update_ui, 'progress', 100)
             self.root.after(0, update_ui, 'status', "处理成功!")
@@ -2400,6 +2442,8 @@ class TimedBroadcastApp:
             messagebox.showerror("处理失败", f"执行“{operation_name}”操作时发生错误:\n\n{e}")
         finally:
             self.root.after(100, self._toggle_media_buttons, 'normal')
+
+    # --- [新增] 媒体处理功能模块结束 ---
 
 # --- 动态语音功能的全套方法 ---
 
