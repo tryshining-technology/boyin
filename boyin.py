@@ -123,6 +123,7 @@ if getattr(sys, 'frozen', False):
 else:
     application_path = os.path.dirname(os.path.abspath(__file__))
 
+WALLPAPER_CACHE_FOLDER = os.path.join(application_path, "每日壁纸")
 TASK_FILE = os.path.join(application_path, "broadcast_tasks.json")
 SETTINGS_FILE = os.path.join(application_path, "settings.json")
 HOLIDAY_FILE = os.path.join(application_path, "holidays.json")
@@ -206,6 +207,10 @@ class TimedBroadcastApp:
         self.dynamic_voice_tasks = []
         
         self.settings = {}
+        self.wallpaper_enabled_var = tk.BooleanVar()
+        self.wallpaper_interval_days_var = tk.StringVar(value="1")
+        self.wallpaper_change_time_var = tk.StringVar(value="08:00:00")
+        self.wallpaper_cache_days_var = tk.StringVar(value="7")
         self.running = True
         self.tray_icon = None
         self.is_locked = False
@@ -356,7 +361,8 @@ class TimedBroadcastApp:
     def create_folder_structure(self):
         folders_to_create = [
             PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER, 
-            VOICE_SCRIPT_FOLDER, SCREENSHOT_FOLDER
+            VOICE_SCRIPT_FOLDER, SCREENSHOT_FOLDER,
+            WALLPAPER_CACHE_FOLDER
         ]
         for folder in folders_to_create:
             if not os.path.exists(folder):
@@ -520,6 +526,8 @@ class TimedBroadcastApp:
 
         if page_name == "设置":
             self._refresh_settings_ui()
+        if page_name == "高级功能":
+            self._refresh_wallpaper_ui()
 
         selected_btn = self.nav_buttons.get(page_name)
         if selected_btn:
@@ -655,26 +663,23 @@ class TimedBroadcastApp:
         execute_tab = ttk.Frame(notebook, padding=10)
         print_tab = ttk.Frame(notebook, padding=10)
         backup_tab = ttk.Frame(notebook, padding=10)
-        # --- ↓↓↓ 新增代码 ↓↓↓ ---
         media_tab = ttk.Frame(notebook, padding=10)
-        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+        wallpaper_tab = ttk.Frame(notebook, padding=10)
 
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
         notebook.add(print_tab, text=' 定时打印 ')
         notebook.add(backup_tab, text=' 定时备份 ')
-        # --- ↓↓↓ 新增代码 ↓↓↓ ---
         notebook.add(media_tab, text=' 媒体处理 ')
-        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+        notebook.add(wallpaper_tab, text=' 网络壁纸 ')
 
 
         self._build_screenshot_ui(screenshot_tab)
         self._build_execute_ui(execute_tab)
         self._build_print_ui(print_tab)
         self._build_backup_ui(backup_tab)
-        # --- ↓↓↓ 新增代码 ↓↓↓ ---
         self._build_media_processing_ui(media_tab)
-        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+        self._build_wallpaper_ui(wallpaper_tab)
 
         return page_frame
 
@@ -2443,7 +2448,243 @@ class TimedBroadcastApp:
         finally:
             self.root.after(100, self._toggle_media_buttons, 'normal')
 
-    # --- [新增] 媒体处理功能模块结束 ---
+    #↑ --- [新增] 媒体处理功能模块结束 ---
+    #↓以下是全套更换壁纸的功能
+
+    def _build_wallpaper_ui(self, parent_frame):
+        scrolled_frame = ScrolledFrame(parent_frame, autohide=True)
+        scrolled_frame.pack(fill=BOTH, expand=True)
+        container = scrolled_frame.container
+
+        # --- 描述区 ---
+        title_label = ttk.Label(container, text="网络壁纸自动更换", font=self.font_14_bold, bootstyle="primary")
+        title_label.pack(anchor="w", pady=(0, 5))
+        
+        desc_text = "此功能会自动从网络获取高质量壁纸（必应每日壁纸），并定时为您更换桌面。\n下载的壁纸将保存在软件根目录下的“每日壁纸”文件夹内。"
+        desc_label = ttk.Label(container, text=desc_text, bootstyle="secondary")
+        desc_label.pack(anchor="w", pady=(0, 15), fill=X)
+        
+        ttk.Separator(container, orient=HORIZONTAL).pack(fill=X, pady=5)
+
+        # --- 总开关 ---
+        enable_check = ttk.Checkbutton(container, text="启用网络壁纸自动更换功能", variable=self.wallpaper_enabled_var, bootstyle="round-toggle")
+        enable_check.pack(anchor="w", pady=10)
+
+        # --- 更换规则 ---
+        rule_lf = ttk.LabelFrame(container, text="更换规则", padding=15)
+        rule_lf.pack(fill=X, pady=5)
+        
+        rule_frame = ttk.Frame(rule_lf)
+        rule_frame.pack(fill=X)
+        ttk.Label(rule_frame, text="每隔").pack(side=LEFT, padx=(0, 5))
+        interval_entry = ttk.Entry(rule_frame, textvariable=self.wallpaper_interval_days_var, width=5, font=self.font_11)
+        interval_entry.pack(side=LEFT)
+        ttk.Label(rule_frame, text="天，在").pack(side=LEFT, padx=5)
+        time_entry = ttk.Entry(rule_frame, textvariable=self.wallpaper_change_time_var, width=12, font=self.font_11)
+        time_entry.pack(side=LEFT)
+        self._bind_mousewheel_to_entry(time_entry, self._handle_time_scroll) # 复用时间滚动功能
+        ttk.Label(rule_frame, text="时自动更换壁纸。").pack(side=LEFT, padx=5)
+
+        # --- 缓存管理 ---
+        cache_lf = ttk.LabelFrame(container, text="缓存管理", padding=15)
+        cache_lf.pack(fill=X, pady=5)
+        
+        cache_frame = ttk.Frame(cache_lf)
+        cache_frame.pack(fill=X)
+        ttk.Label(cache_frame, text="自动清理").pack(side=LEFT, padx=(0, 5))
+        cache_entry = ttk.Entry(cache_frame, textvariable=self.wallpaper_cache_days_var, width=5, font=self.font_11)
+        cache_entry.pack(side=LEFT)
+        ttk.Label(cache_frame, text="天前的壁纸缓存文件。").pack(side=LEFT, padx=5)
+
+        # --- 手动操作 ---
+        manual_lf = ttk.LabelFrame(container, text="手动操作", padding=15)
+        manual_lf.pack(fill=X, pady=5)
+        
+        manual_frame = ttk.Frame(manual_lf)
+        manual_frame.pack(fill=X)
+        
+        ttk.Button(manual_frame, text="立即获取并更换", command=self._trigger_wallpaper_change_now, bootstyle="info").pack(side=LEFT, padx=5, ipady=4)
+        ttk.Button(manual_frame, text="打开壁纸文件夹", command=self._open_wallpaper_folder, bootstyle="secondary-outline").pack(side=LEFT, padx=5, ipady=4)
+        ttk.Button(manual_frame, text="清理所有壁纸缓存", command=self._clear_wallpaper_cache, bootstyle="danger-outline").pack(side=LEFT, padx=5, ipady=4)
+
+        # --- 保存按钮 ---
+        save_btn = ttk.Button(container, text="保存设置", command=self._save_wallpaper_settings, bootstyle="success")
+        save_btn.pack(pady=20, ipady=5)
+
+    # --- ↓↓↓ 新增代码：所有网络壁纸功能的后台逻辑方法 ↓↓↓ ---
+    
+    def _save_wallpaper_settings(self):
+        """保存网络壁纸页面的所有设置到 settings.json"""
+        try:
+            # 输入验证
+            interval = int(self.wallpaper_interval_days_var.get())
+            cache_days = int(self.wallpaper_cache_days_var.get())
+            if interval < 1 or cache_days < 1:
+                raise ValueError("天数必须大于0")
+            if not self._normalize_time_string(self.wallpaper_change_time_var.get()):
+                raise ValueError("时间格式不正确")
+                
+            self.settings['wallpaper_enabled'] = self.wallpaper_enabled_var.get()
+            self.settings['wallpaper_interval_days'] = str(interval)
+            self.settings['wallpaper_change_time'] = self.wallpaper_change_time_var.get()
+            self.settings['wallpaper_cache_days'] = str(cache_days)
+            
+            self.save_settings() # 调用您已有的全局保存函数
+            self.log("网络壁纸设置已保存。")
+            messagebox.showinfo("成功", "网络壁纸设置已成功保存！", parent=self.root)
+
+        except (ValueError, TypeError) as e:
+            messagebox.showerror("输入错误", f"请检查输入内容是否为有效的数字和时间格式。\n\n错误: {e}", parent=self.root)
+
+    def _trigger_wallpaper_change_now(self):
+        """手动触发一次壁纸更换"""
+        self.log("用户手动触发“立即更换壁纸”。")
+        # 在后台线程中执行，避免UI卡顿
+        threading.Thread(target=self._execute_wallpaper_task, args=(True,), daemon=True).start()
+
+    def _open_wallpaper_folder(self):
+        """打开壁纸缓存文件夹"""
+        if os.path.exists(WALLPAPER_CACHE_FOLDER):
+            try:
+                os.startfile(WALLPAPER_CACHE_FOLDER)
+            except Exception as e:
+                self.log(f"打开壁纸文件夹失败: {e}")
+                messagebox.showerror("错误", f"无法打开文件夹:\n{e}", parent=self.root)
+        else:
+            messagebox.showwarning("提示", "壁纸文件夹尚不存在，请先获取一次壁纸。", parent=self.root)
+
+    def _clear_wallpaper_cache(self):
+        """清理所有壁纸缓存"""
+        if not os.path.exists(WALLPAPER_CACHE_FOLDER) or not os.listdir(WALLPAPER_CACHE_FOLDER):
+            messagebox.showinfo("提示", "壁纸缓存文件夹为空，无需清理。", parent=self.root)
+            return
+            
+        if messagebox.askyesno("确认操作", "您确定要删除“每日壁纸”文件夹下的所有图片吗？\n此操作不可恢复。", parent=self.root):
+            try:
+                for filename in os.listdir(WALLPAPER_CACHE_FOLDER):
+                    file_path = os.path.join(WALLPAPER_CACHE_FOLDER, filename)
+                    os.remove(file_path)
+                self.log("已手动清理所有壁纸缓存。")
+                messagebox.showinfo("成功", "所有壁纸缓存已成功清理！", parent=self.root)
+            except Exception as e:
+                self.log(f"清理壁纸缓存时发生错误: {e}")
+                messagebox.showerror("错误", f"清理失败:\n{e}", parent=self.root)
+
+    def _check_wallpaper_task(self, now):
+        if not self.settings.get('wallpaper_enabled', False):
+            return
+
+        change_time = self.settings.get('wallpaper_change_time', '08:00:00')
+        # 增加一个秒数容错，防止因微小延迟错过触发
+        if now.strftime('%H:%M:%S') == change_time:
+            interval_days = int(self.settings.get('wallpaper_interval_days', '1'))
+            last_change_date_str = self.settings.get('wallpaper_last_change_date', '')
+
+            should_change = False
+            if not last_change_date_str:
+                # 从未更换过，立即更换
+                should_change = True
+            else:
+                try:
+                    last_change_date = datetime.strptime(last_change_date_str, '%Y-%m-%d').date()
+                    # 检查今天是否已经换过，避免在同一秒内重复触发
+                    if now.date() > last_change_date and (now.date() - last_change_date).days >= interval_days:
+                        should_change = True
+                except (ValueError, TypeError):
+                    # 日期格式错误，也更换一次以纠正状态
+                    should_change = True
+
+            if should_change:
+                self.log("定时更换壁纸时间已到，开始执行...")
+                # 在后台线程中执行，避免UI卡顿
+                threading.Thread(target=self._execute_wallpaper_task, daemon=True).start()
+
+    # --- ↓↓↓ 新增代码：核心的壁纸获取与设置函数 ↓↓↓ ---
+    def _execute_wallpaper_task(self, is_manual_trigger=False):
+        if not WIN32_AVAILABLE:
+            self.log("错误：pywin32 库未安装，无法执行定时壁纸任务。")
+            return
+
+        try:
+            # --- 1. 清理旧壁纸 ---
+            # 只有在自动触发时，才检查是否需要清理
+            if not is_manual_trigger:
+                try:
+                    cache_days = int(self.settings.get('wallpaper_cache_days', '7'))
+                    # 为避免频繁清理，可以增加一个上次清理日期的判断，但目前简单实现也可以
+                    for filename in os.listdir(WALLPAPER_CACHE_FOLDER):
+                        file_path = os.path.join(WALLPAPER_CACHE_FOLDER, filename)
+                        file_mod_time = os.path.getmtime(file_path)
+                        if file_mod_time < (time.time() - cache_days * 24 * 3600):
+                            os.remove(file_path)
+                            self.log(f"已自动清理过期壁纸: {filename}")
+                except Exception as e:
+                    self.log(f"自动清理壁纸缓存时出错: {e}")
+
+            # --- 2. 获取壁纸信息 ---
+            self.log("正在从必应获取最新壁纸信息...")
+            api_url = "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=zh-CN"
+            response = requests.get(api_url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            image_info = data["images"][0]
+            image_url = f"https://www.bing.com{image_info['url']}"
+            
+            # --- 3. 下载壁纸 ---
+            # 使用 URL 中的 HASH 值作为唯一文件名，避免重复
+            try:
+                image_hash = image_info.get('hsh', str(int(time.time())))
+                image_filename = f"bing_{image_hash}.jpg"
+            except:
+                image_filename = f"bing_{datetime.now().strftime('%Y%m%d')}.jpg"
+
+            image_path = os.path.join(WALLPAPER_CACHE_FOLDER, image_filename)
+
+            if not os.path.exists(image_path):
+                self.log(f"正在下载新壁纸: {image_filename} ...")
+                image_response = requests.get(image_url, timeout=30, stream=True)
+                image_response.raise_for_status()
+                with open(image_path, 'wb') as f:
+                    for chunk in image_response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                self.log("下载完成。")
+            else:
+                self.log(f"壁纸 '{image_filename}' 已存在于本地缓存。")
+
+            # --- 4. 设置壁纸 ---
+            self.log(f"正在设置桌面壁纸...")
+            # 注意：路径必须是绝对路径
+            abs_image_path = os.path.abspath(image_path)
+            win32gui.SystemParametersInfo(win32con.SPI_SETDESKWALLPAPER, abs_image_path, 1 + 2)
+            self.log("桌面壁纸设置成功！")
+            
+            # --- 5. 更新记录 ---
+            # 只有在自动触发成功后，才更新上次更换日期
+            if not is_manual_trigger:
+                self.settings['wallpaper_last_change_date'] = datetime.now().strftime('%Y-%m-%d')
+                self.save_settings()
+
+        except requests.exceptions.RequestException as e:
+            self.log(f"获取网络壁纸失败（网络错误）: {e}")
+            if is_manual_trigger:
+                self.root.after(0, lambda: messagebox.showerror("错误", f"获取网络壁纸失败，请检查您的网络连接。\n\n{e}", parent=self.root))
+        except Exception as e:
+            self.log(f"执行壁纸任务时发生未知错误: {e}")
+            if is_manual_trigger:
+                self.root.after(0, lambda: messagebox.showerror("未知错误", f"执行时发生错误:\n{e}", parent=self.root))
+
+    def _refresh_wallpaper_ui(self):
+        # 刷新网络壁纸页面的UI状态，如果UI控件还未创建则直接返回
+        if not hasattr(self, 'wallpaper_enabled_var'):
+            return
+
+        self.wallpaper_enabled_var.set(self.settings.get("wallpaper_enabled", False))
+        self.wallpaper_interval_days_var.set(self.settings.get("wallpaper_interval_days", "1"))
+        self.wallpaper_change_time_var.set(self.settings.get("wallpaper_change_time", "08:00:00"))
+        self.wallpaper_cache_days_var.set(self.settings.get("wallpaper_cache_days", "7"))
+
+
+    # --- ↑↑↑ 壁纸功能代码结束 ↑↑↑ ---
 
 # --- 动态语音功能的全套方法 ---
 
@@ -6781,6 +7022,7 @@ class TimedBroadcastApp:
                 self._check_time_chime(now)
                 self._check_todo_tasks(now)
                 self._check_running_processes_for_termination(now)
+                self._check_wallpaper_task(now)
 
             self._check_power_tasks(now)
             time.sleep(1)
@@ -8284,7 +8526,12 @@ class TimedBroadcastApp:
             "last_power_action_date": "",
             "time_chime_speed": "0", "time_chime_pitch": "0",
             "bg_image_interval": 6,
-            "weather_city": ""    # <--- 新增此行
+            "weather_city": "",
+            "wallpaper_enabled": False,
+            "wallpaper_interval_days": "1",
+            "wallpaper_change_time": "08:00:00",
+            "wallpaper_cache_days": "7",
+            "wallpaper_last_change_date": ""
         }
         if os.path.exists(SETTINGS_FILE):
             try:
@@ -8326,7 +8573,12 @@ class TimedBroadcastApp:
                 "time_chime_pitch": self.time_chime_pitch_var.get(),
                 "bg_image_interval": interval,
                 "weather_city": self.settings.get("weather_city", ""),
-                "intercut_text": self.settings.get("intercut_text", "") # 新增：确保插播文本也被保存
+                "intercut_text": self.settings.get("intercut_text", ""),
+                "wallpaper_enabled": self.settings.get("wallpaper_enabled", False),
+                "wallpaper_interval_days": self.settings.get("wallpaper_interval_days", "1"),
+                "wallpaper_change_time": self.settings.get("wallpaper_change_time", "08:00:00"),
+                "wallpaper_cache_days": self.settings.get("wallpaper_cache_days", "7"),
+                "wallpaper_last_change_date": self.settings.get("wallpaper_last_change_date", "")
             })
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(self.settings, f, ensure_ascii=False, indent=2)
