@@ -2710,23 +2710,29 @@ class TimedBroadcastApp:
         self.timer_sound_file_var.set(self.settings.get("timer_sound_file", ""))
 
     def _build_timer_ui(self, parent_frame):
+        # --- 1. 核心修改：改变父框架的布局为Grid，以分离滚动区和按钮区 ---
+        parent_frame.rowconfigure(0, weight=1)  # 让第0行（滚动区）占据所有可用垂直空间
+        parent_frame.columnconfigure(0, weight=1)
+
+        # --- 2. 创建并放置可滚动框架 ---
         scrolled_frame = ScrolledFrame(parent_frame, autohide=True)
-        scrolled_frame.pack(fill=BOTH, expand=True)
+        scrolled_frame.grid(row=0, column=0, sticky="nsew") # 使用grid布局
         container = scrolled_frame.container
 
+        # --- 3. 所有配置项依然放置在 container 中 (这部分代码不变) ---
         # --- 描述区 ---
         title_label = ttk.Label(container, text="全屏正/倒计时工具", font=self.font_14_bold, bootstyle="primary")
-        title_label.pack(anchor="w", pady=(0, 5))
+        title_label.pack(anchor="w", pady=(0, 5), padx=10)
         
         desc_text = "启动一个独立的、总在最前的全屏计时器，适用于会议、考试、活动等场景。按 ESC 键可随时退出。"
         desc_label = ttk.Label(container, text=desc_text, bootstyle="secondary")
-        desc_label.pack(anchor="w", pady=(0, 15), fill=X)
+        desc_label.pack(anchor="w", pady=(0, 15), padx=10, fill=X)
         
-        ttk.Separator(container, orient=HORIZONTAL).pack(fill=X, pady=5)
+        ttk.Separator(container, orient=HORIZONTAL).pack(fill=X, pady=5, padx=10)
 
         # --- 计时设置 ---
         timer_lf = ttk.LabelFrame(container, text="计时设置", padding=15)
-        timer_lf.pack(fill=X, pady=10)
+        timer_lf.pack(fill=X, pady=10, padx=10)
 
         mode_frame = ttk.Frame(timer_lf)
         mode_frame.pack(fill=X, pady=5)
@@ -2741,7 +2747,7 @@ class TimedBroadcastApp:
         ttk.Label(duration_frame, text="目标时长:").pack(side=LEFT, padx=(0, 5))
         duration_entry = ttk.Entry(duration_frame, textvariable=self.timer_duration_var, font=self.font_11, width=12)
         duration_entry.pack(side=LEFT, padx=10)
-        self._bind_mousewheel_to_entry(duration_entry, self._handle_time_scroll) # 复用时间滚动
+        self._bind_mousewheel_to_entry(duration_entry, self._handle_time_scroll)
         ttk.Label(duration_frame, text="(HH:MM:SS)").pack(side=LEFT)
 
         infinite_check = ttk.Checkbutton(timer_lf, text="无限时长 (仅正计时可用)", variable=self.timer_infinite_var, bootstyle="round-toggle")
@@ -2749,7 +2755,7 @@ class TimedBroadcastApp:
 
         # --- 显示与提醒设置 ---
         options_lf = ttk.LabelFrame(container, text="附加选项", padding=15)
-        options_lf.pack(fill=X, pady=10)
+        options_lf.pack(fill=X, pady=10, padx=10)
 
         ttk.Checkbutton(options_lf, text="显示当前系统时间 (年月日星期)", variable=self.timer_show_clock_var, bootstyle="round-toggle").pack(anchor="w", pady=5)
 
@@ -2770,42 +2776,37 @@ class TimedBroadcastApp:
             )
             if filepath:
                 self.timer_sound_file_var.set(filepath)
+        
         ttk.Button(sound_frame, text="选取...", command=select_timer_sound, bootstyle="outline").pack(side=LEFT)
 
+        # --- 联动逻辑 (这部分代码不变) ---
         def update_timer_ui_states(*args):
             is_stopwatch = self.timer_mode_var.get() == 'stopwatch'
             is_infinite = self.timer_infinite_var.get()
             is_sound_enabled = self.timer_play_sound_var.get()
 
-            # 1. 控制“无限时长”复选框
             infinite_check.config(state="normal" if is_stopwatch else "disabled")
             if not is_stopwatch:
                 self.timer_infinite_var.set(False)
-                is_infinite = False # 立即更新内部状态，以供后续判断使用
+                is_infinite = False
 
-            # 2. 控制“目标时长”输入框
             duration_entry.config(state="disabled" if is_stopwatch and is_infinite else "normal")
-
-            # 3. 控制所有与提示音相关的控件
+            
             can_play_sound = not (is_stopwatch and is_infinite)
             sound_check.config(state="normal" if can_play_sound else "disabled")
             
-            # 安全地找到选取按钮
             sound_select_btn = None
             for child in sound_frame.winfo_children():
                 if isinstance(child, ttk.Button):
                     sound_select_btn = child
-                    break # 找到第一个即可
+                    break
 
             if can_play_sound and is_sound_enabled:
                 sound_file_entry.config(state="normal")
-                if sound_select_btn:
-                    sound_select_btn.config(state="normal")
+                if sound_select_btn: sound_select_btn.config(state="normal")
             else:
                 sound_file_entry.config(state="disabled")
-                if sound_select_btn:
-                    sound_select_btn.config(state="disabled")
-                # 如果是因为不能播放声音（无限正计时），则取消勾选
+                if sound_select_btn: sound_select_btn.config(state="disabled")
                 if not can_play_sound:
                     self.timer_play_sound_var.set(False)
 
@@ -2814,6 +2815,23 @@ class TimedBroadcastApp:
         self.timer_play_sound_var.trace_add("write", update_timer_ui_states)
         
         self.root.after(100, update_timer_ui_states)
+
+        # --- 4. 核心修改：创建独立的按钮框架，并放置在 parent_frame 的第1行 ---
+        button_container = ttk.Frame(parent_frame, padding=(0, 10, 0, 10))
+        button_container.grid(row=1, column=0, sticky="ew")
+        
+        # 为了让按钮居中，我们让容器的列可以扩展
+        button_container.columnconfigure(0, weight=1)
+
+        start_btn = ttk.Button(
+            button_container, 
+            text="启 动 全 屏 计 时 器", 
+            command=self._start_timer_window, 
+            bootstyle="success", 
+            style="lg.TButton"
+        )
+        # 使用 grid 替代 pack，并且不设置 sticky，让它自然居中
+        start_btn.grid(row=0, column=0, ipady=8, ipadx=50)
 
     def _start_timer_window(self):
         """
