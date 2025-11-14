@@ -211,6 +211,18 @@ class TimedBroadcastApp:
         self.wallpaper_interval_days_var = tk.StringVar(value="1")
         self.wallpaper_change_time_var = tk.StringVar(value="08:00:00")
         self.wallpaper_cache_days_var = tk.StringVar(value="7")
+        self.timer_mode_var = tk.StringVar(value="countdown") # 'countdown' 或 'stopwatch'
+        self.timer_duration_var = tk.StringVar(value="00:10:00")
+        self.timer_infinite_var = tk.BooleanVar(value=False)
+        self.timer_show_clock_var = tk.BooleanVar(value=True)
+        self.timer_play_sound_var = tk.BooleanVar(value=True)
+        self.timer_sound_file_var = tk.StringVar(value="")
+        
+        # 用于管理计时器窗口的状态
+        self.timer_window = None
+        self.is_fullscreen_exclusive = False
+        self.timer_after_id = None
+
         self.running = True
         self.tray_icon = None
         self.is_locked = False
@@ -528,6 +540,7 @@ class TimedBroadcastApp:
             self._refresh_settings_ui()
         if page_name == "高级功能":
             self._refresh_wallpaper_ui()
+            self._refresh_timer_ui()
 
         selected_btn = self.nav_buttons.get(page_name)
         if selected_btn:
@@ -665,6 +678,7 @@ class TimedBroadcastApp:
         backup_tab = ttk.Frame(notebook, padding=10)
         media_tab = ttk.Frame(notebook, padding=10)
         wallpaper_tab = ttk.Frame(notebook, padding=10)
+        timer_tab = ttk.Frame(notebook, padding=10)
 
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
@@ -672,7 +686,7 @@ class TimedBroadcastApp:
         notebook.add(backup_tab, text=' 定时备份 ')
         notebook.add(media_tab, text=' 媒体处理 ')
         notebook.add(wallpaper_tab, text=' 网络壁纸 ')
-
+        notebook.add(timer_tab, text=' 计时工具 ')
 
         self._build_screenshot_ui(screenshot_tab)
         self._build_execute_ui(execute_tab)
@@ -680,6 +694,7 @@ class TimedBroadcastApp:
         self._build_backup_ui(backup_tab)
         self._build_media_processing_ui(media_tab)
         self._build_wallpaper_ui(wallpaper_tab)
+        self._build_timer_ui(timer_tab)
 
         return page_frame
 
@@ -2683,8 +2698,296 @@ class TimedBroadcastApp:
         self.wallpaper_change_time_var.set(self.settings.get("wallpaper_change_time", "08:00:00"))
         self.wallpaper_cache_days_var.set(self.settings.get("wallpaper_cache_days", "7"))
 
-
     # --- ↑↑↑ 壁纸功能代码结束 ↑↑↑ ---
+
+#↓以下是计时功能的全套代码
+    def _refresh_timer_ui(self):
+        if not hasattr(self, 'timer_mode_var'): return
+    
+        self.timer_duration_var.set(self.settings.get("timer_duration", "00:10:00"))
+        self.timer_show_clock_var.set(self.settings.get("timer_show_clock", True))
+        self.timer_play_sound_var.set(self.settings.get("timer_play_sound", True))
+        self.timer_sound_file_var.set(self.settings.get("timer_sound_file", ""))
+
+    def _build_timer_ui(self, parent_frame):
+        scrolled_frame = ScrolledFrame(parent_frame, autohide=True)
+        scrolled_frame.pack(fill=BOTH, expand=True)
+        container = scrolled_frame.container
+
+        # --- 描述区 ---
+        title_label = ttk.Label(container, text="全屏正/倒计时工具", font=self.font_14_bold, bootstyle="primary")
+        title_label.pack(anchor="w", pady=(0, 5))
+        
+        desc_text = "启动一个独立的、总在最前的全屏计时器，适用于会议、考试、活动等场景。按 ESC 键可随时退出。"
+        desc_label = ttk.Label(container, text=desc_text, bootstyle="secondary")
+        desc_label.pack(anchor="w", pady=(0, 15), fill=X)
+        
+        ttk.Separator(container, orient=HORIZONTAL).pack(fill=X, pady=5)
+
+        # --- 计时设置 ---
+        timer_lf = ttk.LabelFrame(container, text="计时设置", padding=15)
+        timer_lf.pack(fill=X, pady=10)
+
+        mode_frame = ttk.Frame(timer_lf)
+        mode_frame.pack(fill=X, pady=5)
+        ttk.Label(mode_frame, text="模式:").pack(side=LEFT, padx=(0, 20))
+        countdown_rb = ttk.Radiobutton(mode_frame, text="倒计时", variable=self.timer_mode_var, value="countdown")
+        countdown_rb.pack(side=LEFT, padx=10)
+        stopwatch_rb = ttk.Radiobutton(mode_frame, text="正计时", variable=self.timer_mode_var, value="stopwatch")
+        stopwatch_rb.pack(side=LEFT, padx=10)
+
+        duration_frame = ttk.Frame(timer_lf)
+        duration_frame.pack(fill=X, pady=5)
+        ttk.Label(duration_frame, text="目标时长:").pack(side=LEFT, padx=(0, 5))
+        duration_entry = ttk.Entry(duration_frame, textvariable=self.timer_duration_var, font=self.font_11, width=12)
+        duration_entry.pack(side=LEFT, padx=10)
+        self._bind_mousewheel_to_entry(duration_entry, self._handle_time_scroll) # 复用时间滚动
+        ttk.Label(duration_frame, text="(HH:MM:SS)").pack(side=LEFT)
+
+        infinite_check = ttk.Checkbutton(timer_lf, text="无限时长 (仅正计时可用)", variable=self.timer_infinite_var, bootstyle="round-toggle")
+        infinite_check.pack(anchor="w", pady=5, padx=5)
+
+        # --- 显示与提醒设置 ---
+        options_lf = ttk.LabelFrame(container, text="附加选项", padding=15)
+        options_lf.pack(fill=X, pady=10)
+
+        ttk.Checkbutton(options_lf, text="显示当前系统时间 (年月日星期)", variable=self.timer_show_clock_var, bootstyle="round-toggle").pack(anchor="w", pady=5)
+
+        sound_frame = ttk.Frame(options_lf)
+        sound_frame.pack(fill=X, pady=5)
+        sound_check = ttk.Checkbutton(sound_frame, text="到达目标时长后播放提示音", variable=self.timer_play_sound_var, bootstyle="round-toggle")
+        sound_check.pack(side=LEFT, anchor="w")
+        
+        sound_file_entry = ttk.Entry(sound_frame, textvariable=self.timer_sound_file_var, font=self.font_11)
+        sound_file_entry.pack(side=LEFT, padx=10, expand=True, fill=X)
+        
+        def select_timer_sound():
+            filepath = filedialog.askopenfilename(
+                title="选择提示音文件",
+                initialdir=PROMPT_FOLDER,
+                filetypes=[("音频文件", "*.wav *.mp3"), ("所有文件", "*.*")],
+                parent=self.root
+            )
+            if filepath:
+                self.timer_sound_file_var.set(filepath)
+        ttk.Button(sound_frame, text="选取...", command=select_timer_sound, bootstyle="outline").pack(side=LEFT)
+
+        def update_timer_ui_states(*args):
+            is_stopwatch = self.timer_mode_var.get() == 'stopwatch'
+            is_infinite = self.timer_infinite_var.get()
+            is_sound_enabled = self.timer_play_sound_var.get()
+
+            # 1. 控制“无限时长”复选框
+            infinite_check.config(state="normal" if is_stopwatch else "disabled")
+            if not is_stopwatch:
+                self.timer_infinite_var.set(False)
+                is_infinite = False # 立即更新内部状态，以供后续判断使用
+
+            # 2. 控制“目标时长”输入框
+            duration_entry.config(state="disabled" if is_stopwatch and is_infinite else "normal")
+
+            # 3. 控制所有与提示音相关的控件
+            can_play_sound = not (is_stopwatch and is_infinite)
+            sound_check.config(state="normal" if can_play_sound else "disabled")
+            
+            # 安全地找到选取按钮
+            sound_select_btn = None
+            for child in sound_frame.winfo_children():
+                if isinstance(child, ttk.Button):
+                    sound_select_btn = child
+                    break # 找到第一个即可
+
+            if can_play_sound and is_sound_enabled:
+                sound_file_entry.config(state="normal")
+                if sound_select_btn:
+                    sound_select_btn.config(state="normal")
+            else:
+                sound_file_entry.config(state="disabled")
+                if sound_select_btn:
+                    sound_select_btn.config(state="disabled")
+                # 如果是因为不能播放声音（无限正计时），则取消勾选
+                if not can_play_sound:
+                    self.timer_play_sound_var.set(False)
+
+        self.timer_mode_var.trace_add("write", update_timer_ui_states)
+        self.timer_infinite_var.trace_add("write", update_timer_ui_states)
+        self.timer_play_sound_var.trace_add("write", update_timer_ui_states)
+        
+        self.root.after(100, update_timer_ui_states)
+
+    def _start_timer_window(self):
+        """
+        读取UI设置，验证输入，并创建和启动计时器窗口。
+        """
+        # 0. 防止重复打开
+        if self.timer_window and self.timer_window.winfo_exists():
+            self.log("错误：计时器窗口已在运行中。")
+            messagebox.showwarning("提示", "计时器已在运行中，请先关闭。", parent=self.root)
+            return
+
+        # 1. 读取并验证所有设置
+        settings = {
+            "mode": self.timer_mode_var.get(),
+            "is_infinite": self.timer_infinite_var.get(),
+            "show_clock": self.timer_show_clock_var.get(),
+            "play_sound": self.timer_play_sound_var.get(),
+            "sound_file": self.timer_sound_file_var.get().strip() or self.settings.get('reminder_sound', REMINDER_SOUND_FILE)
+        }
+
+        total_seconds = 0
+        if not (settings["mode"] == "stopwatch" and settings["is_infinite"]):
+            try:
+                h, m, s = map(int, self.timer_duration_var.get().split(':'))
+                total_seconds = h * 3600 + m * 60 + s
+                if total_seconds <= 0:
+                    raise ValueError("时长必须大于0")
+            except Exception:
+                messagebox.showerror("输入错误", "目标时长格式不正确或必须大于0秒。\n\n请使用 HH:MM:SS 格式。", parent=self.root)
+                return
+        
+        settings["total_seconds"] = total_seconds
+
+        # 2. 创建窗口并设置属性
+        self.timer_window = ttk.Toplevel(self.root)
+        self.timer_window.title("计时器")
+        self.timer_window.configure(bg='black')
+        self.timer_window.attributes('-fullscreen', True)
+        self.timer_window.attributes('-topmost', True)
+
+        self.root.attributes('-disabled', True) # 禁用主窗口
+        self.is_fullscreen_exclusive = True # 设置“绝对霸权”标志
+        self.log("全屏计时器已启动，其他全屏任务将被跳过。")
+
+        # 绑定退出事件
+        self.timer_window.bind('<Escape>', lambda e: self._close_timer_window())
+        self.timer_window.protocol("WM_DELETE_WINDOW", self._close_timer_window)
+
+        # 3. 动态计算字体大小并创建UI元素
+        self.timer_window.update_idletasks()
+        window_height = self.timer_window.winfo_height()
+        window_width = self.timer_window.winfo_width()
+        font_family = self.settings.get("app_font", "Microsoft YaHei")
+
+        # 动态计算主计时器字体
+        font_size = int(window_height * 0.5) # 从一个较大的估算值开始
+        temp_font = font.Font(family=font_family, size=font_size, weight='bold')
+        while temp_font.measure("00:00:00") > window_width * 0.9:
+            font_size -= 5
+            temp_font.config(size=font_size)
+        
+        main_font = (font_family, font_size, 'bold')
+        small_font = (font_family, max(12, int(font_size / 8)), 'normal') # 底部时钟字体
+
+        # 创建Label
+        timer_label = ttk.Label(self.timer_window, font=main_font, foreground='white', background='black')
+        timer_label.pack(expand=True)
+        
+        clock_label = None
+        if settings['show_clock']:
+            clock_label = ttk.Label(self.timer_window, font=small_font, foreground='lightgray', background='black')
+            clock_label.pack(side="bottom", pady=20)
+        
+        # 4. 启动计时循环
+        self._update_timer(timer_label, clock_label, settings)
+
+
+    def _update_timer(self, timer_label, clock_label, settings):
+        """
+        每秒执行一次的计时器更新函数。
+        """
+        now = datetime.now()
+        
+        # 更新底部时钟（如果存在）
+        if clock_label and clock_label.winfo_exists():
+            week_map = {"1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "日"}
+            day_of_week = week_map.get(str(now.isoweekday()), '')
+            clock_str = now.strftime(f'%Y年%m月%d日  星期{day_of_week}  %H:%M:%S')
+            clock_label.config(text=clock_str)
+
+        # --- 计算主计时器时间 ---
+        if 'start_time' not in settings: # 首次运行时记录起始时间
+            settings['start_time'] = now
+
+        elapsed = now - settings['start_time']
+        
+        time_is_up = False
+        display_str = ""
+
+        if settings['mode'] == 'countdown':
+            remaining = timedelta(seconds=settings['total_seconds']) - elapsed
+            if remaining.total_seconds() <= 0:
+                time_is_up = True
+                remaining = timedelta(seconds=0)
+            
+            # 格式化为 HH:MM:SS
+            hours, rem = divmod(remaining.seconds, 3600)
+            minutes, seconds = divmod(rem, 60)
+            display_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+        else: # stopwatch
+            # 格式化为 HH:MM:SS
+            hours, rem = divmod(int(elapsed.total_seconds()), 3600)
+            minutes, seconds = divmod(rem, 60)
+            display_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+            if not settings['is_infinite'] and elapsed.total_seconds() >= settings['total_seconds']:
+                time_is_up = True
+        
+        # 更新主计时器标签
+        if timer_label.winfo_exists():
+            timer_label.config(text=display_str)
+        
+        # --- 检查结束条件 ---
+        if time_is_up:
+            if timer_label.winfo_exists():
+                timer_label.config(foreground='red') # 时间到，变红
+            if settings['play_sound']:
+                self._play_timer_end_sound(settings['sound_file'])
+            
+            # 时间到后，等待3秒自动关闭
+            self.timer_after_id = self.root.after(3000, self._close_timer_window)
+        else:
+            # 预约下一次更新
+            self.timer_after_id = self.root.after(1000, self._update_timer, timer_label, clock_label, settings)
+
+
+    def _play_timer_end_sound(self, sound_file):
+        """播放计时结束提示音"""
+        if not AUDIO_AVAILABLE:
+            self.log("警告：pygame未安装，无法播放计时结束提示音。")
+            # 回退到系统蜂鸣声
+            if WIN32_AVAILABLE: ctypes.windll.user32.MessageBeep(win32con.MB_OK)
+            return
+
+        try:
+            if os.path.exists(sound_file):
+                sound = pygame.mixer.Sound(sound_file)
+                channel = pygame.mixer.find_channel(True) # 找一个空闲通道
+                channel.set_volume(0.8) # 设置一个默认音量
+                channel.play(sound)
+                self.log(f"已播放计时结束提示音: {os.path.basename(sound_file)}")
+            else:
+                self.log(f"警告：计时结束提示音文件不存在: {sound_file}")
+                if WIN32_AVAILABLE: ctypes.windll.user32.MessageBeep(win32con.MB_OK)
+        except Exception as e:
+            self.log(f"播放计时结束提示音失败: {e}")
+
+
+    def _close_timer_window(self):
+        """安全地关闭计时器窗口和相关资源"""
+        if self.timer_after_id:
+            self.root.after_cancel(self.timer_after_id)
+            self.timer_after_id = None
+        
+        if self.timer_window and self.timer_window.winfo_exists():
+            self.timer_window.destroy()
+            self.timer_window = None
+        
+        self.root.attributes('-disabled', False) # 恢复主窗口
+        self.root.focus_force()
+        self.is_fullscreen_exclusive = False # 解除“绝对霸权”标志
+        self.log("全屏计时器已关闭。")
+#↑全套计时功能代码结束
 
 # --- 动态语音功能的全套方法 ---
 
@@ -7736,6 +8039,33 @@ class TimedBroadcastApp:
 
 #第10部分
     def _execute_broadcast(self, task, trigger_time):
+        # --- ↓↓↓ 新增代码：全屏冲突检查逻辑 ↓↓↓ ---
+        # 1. 判断当前任务是否需要占用全屏
+        task_requires_fullscreen = (
+            task.get('type') == 'video' or 
+            (task.get('bg_image_enabled') and task.get('bg_image_path') and os.path.isdir(task.get('bg_image_path')))
+        )
+
+        # 2. 如果计时器正在以独占模式运行，并且当前任务也需要全屏，则跳过任务
+        if self.is_fullscreen_exclusive and task_requires_fullscreen:
+            self.log(f"跳过任务 '{task['name']}'，因为全屏计时器正在运行中。")
+            
+            # 虽然跳过了，但仍然需要更新任务的“最后运行时间”，防止它在下一秒重复触发
+            if trigger_time != "manual_play":
+                task.setdefault('last_run', {})[trigger_time] = datetime.now().strftime("%Y-%m-%d")
+                # 根据任务类型，调用对应的保存函数
+                task_type_map = {
+                    'audio': self.save_tasks,
+                    'voice': self.save_tasks,
+                    'video': self.save_tasks,
+                    # 如果未来有其他全屏任务类型，在这里补充
+                }
+                save_function = task_type_map.get(task.get('type'))
+                if save_function:
+                    save_function()
+
+            return # 直接返回，终止本次播放
+        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
         self.update_playing_text(f"[{task['name']}] 正在准备播放...")
         self.status_labels[2].config(text="播放状态: 播放中")
 
@@ -8531,7 +8861,11 @@ class TimedBroadcastApp:
             "wallpaper_interval_days": "1",
             "wallpaper_change_time": "08:00:00",
             "wallpaper_cache_days": "7",
-            "wallpaper_last_change_date": ""
+            "wallpaper_last_change_date": "",
+            "timer_duration": "00:10:00",
+            "timer_show_clock": True,
+            "timer_play_sound": True,
+            "timer_sound_file": ""
         }
         if os.path.exists(SETTINGS_FILE):
             try:
@@ -8578,7 +8912,11 @@ class TimedBroadcastApp:
                 "wallpaper_interval_days": self.settings.get("wallpaper_interval_days", "1"),
                 "wallpaper_change_time": self.settings.get("wallpaper_change_time", "08:00:00"),
                 "wallpaper_cache_days": self.settings.get("wallpaper_cache_days", "7"),
-                "wallpaper_last_change_date": self.settings.get("wallpaper_last_change_date", "")
+                "wallpaper_last_change_date": self.settings.get("wallpaper_last_change_date", ""),
+                "timer_duration": self.timer_duration_var.get(),
+                "timer_show_clock": self.timer_show_clock_var.get(),
+                "timer_play_sound": self.timer_play_sound_var.get(),
+                "timer_sound_file": self.timer_sound_file_var.get()
             })
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(self.settings, f, ensure_ascii=False, indent=2)
