@@ -23,6 +23,10 @@ import hashlib
 import requests
 import edge_tts
 import asyncio
+#下面新增3个用于实现串流模式
+import socket
+import http.server
+import socketserver
 
 # --- ↓↓↓ 新增代码：全局隐藏 subprocess 调用的控制台窗口 ↓↓↓ ---
 
@@ -219,6 +223,15 @@ class TimedBroadcastApp:
         self.timer_show_clock_var = tk.BooleanVar(value=True)
         self.timer_play_sound_var = tk.BooleanVar(value=True)
         self.timer_sound_file_var = tk.StringVar(value="")
+
+        #用于串流模式
+        self.streaming_status_var = tk.StringVar(value="空闲")
+        self.streaming_port_var = tk.StringVar(value="8000")
+        self.streaming_device_var = tk.StringVar()
+        self.streaming_url_var = tk.StringVar(value="串流停止时生成")
+        self.streaming_process = None
+        self.http_server = None
+        self.http_server_thread = None
         
         # 用于管理计时器窗口的状态
         self.timer_window = None
@@ -682,6 +695,8 @@ class TimedBroadcastApp:
         media_tab = ttk.Frame(notebook, padding=10)
         wallpaper_tab = ttk.Frame(notebook, padding=10)
         timer_tab = ttk.Frame(notebook, padding=10)
+        streaming_tab = ttk.Frame(notebook, padding=10)
+
 
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
@@ -690,6 +705,7 @@ class TimedBroadcastApp:
         notebook.add(media_tab, text=' 媒体处理 ')
         notebook.add(wallpaper_tab, text=' 网络壁纸 ')
         notebook.add(timer_tab, text=' 计时工具 ')
+        notebook.add(streaming_tab, text=' 串流模式 ')
 
         self._build_screenshot_ui(screenshot_tab)
         self._build_execute_ui(execute_tab)
@@ -3010,7 +3026,267 @@ class TimedBroadcastApp:
         self.log("全屏计时器已关闭。")
 #↑全套计时功能代码结束
 
-# --- 动态语音功能的全套方法 ---
+#↓串流模式全套代码
+    def _build_streaming_ui(self, parent_frame):
+        # 检查ffmpeg是否存在
+        ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
+        if not os.path.exists(ffmpeg_path):
+                warning_label = ttk.Label(parent_frame,
+                                      text="错误：串流功能依赖于 FFmpeg。\n\n请将 ffmpeg.exe 文件放置到本软件所在的文件夹内，然后重启软件。",
+                                      font=self.font_12_bold, bootstyle="danger", justify="center")
+                warning_label.pack(pady=50, fill=X, expand=True)
+                return
+
+        scrolled_frame = ScrolledFrame(parent_frame, autohide=True)
+        scrolled_frame.pack(fill=BOTH, expand=True)
+        container = scrolled_frame.container
+
+        # --- 描述区 ---
+        title_label = ttk.Label(container, text="桌面音频串流 (HLS)", font=self.font_14_bold, bootstyle="primary")
+        title_label.pack(anchor="w", pady=(0, 5))
+        
+        desc_text = ("此功能会捕获您电脑的全部声音输出（如音乐、视频声音），并将其转换为HLS流。\n"
+                     "局域网内的任何设备（手机、电脑）只需通过浏览器访问指定地址即可收听，无需安装任何软件。")
+        desc_label = ttk.Label(container, text=desc_text, bootstyle="secondary")
+        desc_label.pack(anchor="w", pady=(0, 15), fill=X)
+        
+        # --- 设置区 ---
+        settings_lf = ttk.LabelFrame(container, text="串流设置", padding=15)
+        settings_lf.pack(fill=X, pady=10)
+        settings_lf.columnconfigure(1, weight=1)
+
+        ttk.Label(settings_lf, text="音频源:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        self.streaming_device_combo = ttk.Combobox(settings_lf, textvariable=self.streaming_device_var, state='readonly', font=self.font_11)
+        self.streaming_device_combo.grid(row=0, column=1, sticky='ew')
+        
+        refresh_btn = ttk.Button(settings_lf, text="刷新设备", bootstyle="outline", command=self._populate_audio_devices)
+        refresh_btn.grid(row=0, column=2, padx=5)
+
+        ttk.Label(settings_lf, text="端口号:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        port_frame = ttk.Frame(settings_lf)
+        port_frame.grid(row=1, column=1, sticky='w')
+        port_entry = ttk.Entry(port_frame, textvariable=self.streaming_port_var, width=10, font=self.font_11)
+        port_entry.pack(side=LEFT)
+        ttk.Label(port_frame, text="(推荐范围: 1024-65535)", bootstyle="secondary").pack(side=LEFT, padx=10)
+
+        # --- 控制与状态区 ---
+        status_lf = ttk.LabelFrame(container, text="控制与状态", padding=15)
+        status_lf.pack(fill=X, pady=10)
+        status_lf.columnconfigure(0, weight=1)
+
+        self.stream_toggle_button = ttk.Button(status_lf, text="▶  开 始 串 流", style="lg.success.TButton", command=self._toggle_streaming_state)
+        self.stream_toggle_button.grid(row=0, column=0, columnspan=2, sticky='ew', ipady=8, pady=(0, 15))
+
+        status_frame = ttk.Frame(status_lf)
+        status_frame.grid(row=1, column=0, columnspan=2, sticky='ew', pady=5)
+        ttk.Label(status_frame, text="当前状态:").pack(side=LEFT)
+        ttk.Label(status_frame, textvariable=self.streaming_status_var).pack(side=LEFT, padx=5)
+
+        url_frame = ttk.Frame(status_lf)
+        url_frame.grid(row=2, column=0, columnspan=2, sticky='ew', pady=5)
+        url_frame.columnconfigure(1, weight=1)
+        ttk.Label(url_frame, text="播放地址:").grid(row=0, column=0, sticky='w')
+        url_entry = ttk.Entry(url_frame, textvariable=self.streaming_url_var, state='readonly', font=self.font_11)
+        url_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        
+        copy_btn = ttk.Button(url_frame, text="复制", bootstyle="outline", command=self._copy_stream_url)
+        copy_btn.grid(row=0, column=2)
+
+        # 当用户切换到这个页面时，自动填充一次设备列表
+        parent_frame.bind("<Visibility>", lambda event: self._populate_audio_devices())
+
+    def _get_local_ip(self):
+        """获取本机的局-域网IP地址"""
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+                # 这不会真的发送数据，只是用来获取连接的本地IP
+                s.connect(('10.255.255.255', 1))
+                IP = s.getsockname()[0]
+        except Exception:
+                IP = '127.0.0.1'
+        finally:
+                s.close()
+        return IP
+
+    def _populate_audio_devices(self):
+        """在后台线程中运行ffmpeg以获取音频设备列表，并更新UI"""
+        def worker():
+                self.log("正在检测可用的音频录制设备...")
+                try:
+                        ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
+                        command = [
+                                ffmpeg_path,
+                                "-list_devices", "true",
+                                "-f", "dshow",
+                                "-i", "dummy"
+                        ]
+                        
+                        # 使用您全局的startupinfo来隐藏窗口
+                        process = subprocess.Popen(command, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
+                        stdout, stderr = process.communicate(timeout=10)
+                        
+                        output = stderr  # dshow设备列表通常在stderr中
+                        
+                        devices = []
+                        in_audio_devices_section = False
+                        for line in output.splitlines():
+                                if "DirectShow audio devices" in line:
+                                        in_audio_devices_section = True
+                                elif in_audio_devices_section:
+                                        if ']' in line and '"' in line:
+                                                match = re.search(r'\"(.*?)\"', line)
+                                                if match:
+                                                        devices.append(match.group(1))
+                                        else:
+                                                break # 已经离开音频设备区域
+                        
+                        def update_ui(device_list):
+                                self.streaming_device_combo['values'] = device_list
+                                if device_list:
+                                        # 尝试自动选择"立体声混音"
+                                        current_selection = self.streaming_device_var.get()
+                                        if not current_selection or current_selection not in device_list:
+                                                stereo_mix = next((d for d in device_list if '立体声混音' in d or 'Stereo Mix' in d), None)
+                                                if stereo_mix:
+                                                        self.streaming_device_var.set(stereo_mix)
+                                                else:
+                                                        self.streaming_device_var.set(device_list[0])
+                                self.log(f"找到 {len(device_list)} 个音频设备。")
+
+                        self.root.after(0, update_ui, devices)
+
+                except Exception as e:
+                        self.log(f"错误：检测音频设备失败 - {e}")
+                        self.root.after(0, messagebox.showerror, "错误", f"无法检测音频设备，请确保FFmpeg已正确放置在软件根目录。\n\n{e}", parent=self.root)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _copy_stream_url(self):
+        """复制播放地址到剪贴板"""
+        url = self.streaming_url_var.get()
+        if url and "生成" not in url:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(url)
+                self.log("播放地址已复制到剪贴板。")
+
+    def _toggle_streaming_state(self):
+        """切换串流的开始/停止状态"""
+        if self.streaming_process:
+                self._stop_desktop_streaming()
+        else:
+                self._start_desktop_streaming()
+
+    def _start_desktop_streaming(self):
+        """启动HTTP服务器和FFmpeg进程以开始串流"""
+        self.log("准备开始串流...")
+        
+        # 1. 验证端口
+        try:
+                port = int(self.streaming_port_var.get())
+                if not (1024 <= port <= 65535): raise ValueError
+        except ValueError:
+                messagebox.showerror("错误", "端口号必须是 1024 到 65535 之间的数字。", parent=self.root)
+                return
+
+        # 2. 验证设备
+        device = self.streaming_device_var.get()
+        if not device:
+                messagebox.showerror("错误", "请选择一个有效的音频源设备。", parent=self.root)
+                return
+        
+        # 3. 验证HLS文件夹和核心文件是否存在
+        hls_folder = os.path.join(application_path, "hls_stream")
+        required_files = [
+                os.path.join(hls_folder, "index.html"),
+                os.path.join(hls_folder, "hls.min.js")
+        ]
+        
+        if not os.path.isdir(hls_folder):
+                messagebox.showerror("文件夹缺失", f"错误：找不到串流文件夹。\n请确保 'hls_stream' 文件夹与主程序在同一目录下。", parent=self.root)
+                return
+        for f_path in required_files:
+                if not os.path.exists(f_path):
+                        messagebox.showerror("文件缺失", f"错误：串流文件夹中缺少核心文件。\n找不到: {os.path.basename(f_path)}", parent=self.root)
+                        return
+
+        # 4. 启动HTTP服务器
+        def http_server_worker():
+                class Handler(http.server.SimpleHTTPRequestHandler):
+                        def __init__(self, *args, **kwargs):
+                                super().__init__(*args, directory=hls_folder, **kwargs)
+                
+                try:
+                        # 0.0.0.0 允许局域网内任何设备访问
+                        with socketserver.TCPServer(("0.0.0.0", port), Handler) as httpd:
+                                self.http_server = httpd
+                                self.log(f"HTTP服务器已在 {port} 端口启动。")
+                                httpd.serve_forever()
+                except OSError as e:
+                        self.log(f"!!! 启动HTTP服务器失败: {e}")
+                        self.root.after(0, messagebox.showerror, "端口错误", f"无法在端口 {port} 上启动服务器。\n\n该端口可能已被其他程序占用。\n请尝试更换一个端口号。", parent=self.root)
+                        self.root.after(0, self._stop_desktop_streaming) # 启动失败后，重置UI状态
+                        return
+
+                self.log("HTTP服务器已关闭。")
+
+        self.http_server_thread = threading.Thread(target=http_server_worker, daemon=True)
+        self.http_server_thread.start()
+        
+        # 5. 构建并启动FFmpeg命令
+        ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
+        playlist_path = os.path.join(hls_folder, "stream.m3u8")
+
+        command = [
+                ffmpeg_path,
+                "-f", "dshow",
+                "-i", f"audio={device}",
+                "-acodec", "aac",
+                "-b:a", "128k",
+                "-ar", "44100",
+                "-f", "hls",
+                "-hls_time", "2",
+                "-hls_list_size", "5",
+                "-hls_flags", "delete_segments",
+                "-y", # 覆盖旧的播放列表文件
+                playlist_path
+        ]
+
+        self.log("正在启动HLS桌面串流...")
+        self.streaming_process = subprocess.Popen(command)
+        
+        # 6. 更新UI状态
+        self.streaming_status_var.set("正在串流...")
+        my_ip = self._get_local_ip()
+        self.streaming_url_var.set(f"http://{my_ip}:{port}")
+        self.stream_toggle_button.config(text="■  停 止 串 流", bootstyle="danger")
+        self.log(f"串流已开始！播放地址: {self.streaming_url_var.get()}")
+
+    def _stop_desktop_streaming(self):
+        """停止FFmpeg进程和HTTP服务器"""
+        self.log("正在停止串流...")
+        
+        # 1. 停止FFmpeg进程
+        if self.streaming_process:
+                try:
+                        self.streaming_process.terminate() # 尝试优雅地终止
+                        self.streaming_process.wait(timeout=2) # 等待2秒
+                except subprocess.TimeoutExpired:
+                        self.streaming_process.kill() # 如果无法终止，则强制杀死
+                self.streaming_process = None
+            
+        # 2. 停止HTTP服务器
+        if self.http_server:
+                self.http_server.shutdown()
+                self.http_server = None
+        
+        # 3. 更新UI状态
+        self.streaming_status_var.set("空闲")
+        self.streaming_url_var.set("串流停止时生成")
+        self.stream_toggle_button.config(text="▶  开 始 串 流", bootstyle="success")
+        self.log("串流已停止。")
+#↑串流模式代码结束
+
+# ↓--- 动态语音功能的全套方法 ---
 
     def load_dynamic_voice_tasks(self):
         # 注意：动态语音任务是实验性功能，暂存在主任务文件里
@@ -9256,6 +9532,11 @@ class TimedBroadcastApp:
         self.log("程序已从托盘恢复。")
 
     def quit_app(self, icon=None, item=None):
+        # --- ↓↓↓ 新增代码：确保退出时停止串流 ↓↓↓ ---
+        if self.streaming_process:
+                self._stop_desktop_streaming()
+        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+
         # --- ↓↓↓ 新增/修正：在退出时写入时间戳文件 ↓↓↓ ---
         try:
             with open(TIMESTAMP_FILE, "w") as f:
