@@ -137,10 +137,10 @@ TIMESTAMP_FILE = os.path.join(application_path, ".timestamp.dat")
 
 PROMPT_FOLDER = os.path.join(application_path, "提示音")
 AUDIO_FOLDER = os.path.join(application_path, "音频文件")
-
 BGM_FOLDER = os.path.join(application_path, "文稿背景")
 VOICE_SCRIPT_FOLDER = os.path.join(application_path, "语音文稿")
 SCREENSHOT_FOLDER = os.path.join(application_path, "截屏")
+DYNAMIC_VOICE_CACHE_FOLDER = os.path.join(AUDIO_FOLDER, "动态语音缓存")
 
 ICON_FILE = resource_path("icon.ico")
 REMINDER_SOUND_FILE = os.path.join(PROMPT_FOLDER, "reminder.wav")
@@ -152,6 +152,7 @@ REGISTRY_PARENT_KEY_PATH = r"Software\创翔科技"
 # !!! 警告：请将这个字符串修改为您自己的、独一无二的复杂字符串 !!!
 SECRET_SALT = "42492f00-d980-40e1-a17e-ba8094727636"
 AMAP_API_KEY = "c62d9b56d92792d1d11c8544f1b547dc"
+PRE_GENERATION_MINUTES = 5 # 动态语音预生成提前分钟数
 SENTINEL_LOCATIONS = [
     # 文件哨兵1: 程序根目录 (相对路径)
     ('file', 'dat.sys', None, None), 
@@ -375,7 +376,8 @@ class TimedBroadcastApp:
         folders_to_create = [
             PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER, 
             VOICE_SCRIPT_FOLDER, SCREENSHOT_FOLDER,
-            WALLPAPER_CACHE_FOLDER
+            WALLPAPER_CACHE_FOLDER,
+            DYNAMIC_VOICE_CACHE_FOLDER
         ]
         for folder in folders_to_create:
             if not os.path.exists(folder):
@@ -3285,55 +3287,181 @@ class TimedBroadcastApp:
         return text
 
     def _execute_dynamic_voice_task(self, task):
+        # **核心逻辑：播放前先检查缓存**
+        final_audio_path = None
+        
+        # 检查内存中的任务对象是否有缓存路径的记录
+        if 'cached_audio_path' in task and task.get('cached_audio_path'):
+            # 再次确认磁盘上这个文件是否真的存在
+            if os.path.exists(task['cached_audio_path']):
+                final_audio_path = task['cached_audio_path']
+                self.log(f"任务 '{task['name']}' 命中缓存，直接使用预生成的音频。")
+            else:
+                self.log(f"警告：任务 '{task['name']}' 缓存记录存在，但文件丢失，将重新生成。")
+        
+        # --- 如果缓存检查失败 (final_audio_path 依然是 None)，则执行旧的即时合成逻辑 ---
+        if final_audio_path is None:
+            self.log(f"任务 '{task['name']}' 未命中缓存，开始即时生成...")
+            
+            source_text = task.get('source_text', '')
+            if not source_text:
+                self.log(f"动态语音任务 '{task['name']}' 文稿为空，已跳过。")
+                return
+
+            segments = self._parse_dynamic_script(source_text)
+            if not segments:
+                self.log(f"动态语音任务 '{task['name']}' 未能解析出有效片段。")
+                return
+
+            temp_files = []
+            final_audio = None
+            
+            try:
+                from pydub import AudioSegment
+                ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
+                if os.path.exists(ffmpeg_path):
+                    AudioSegment.converter = ffmpeg_path
+            except ImportError:
+                self.log("警告：pydub库未安装，无法拼接动态语音。")
+                return
+
+            try:
+                for i, segment in enumerate(segments):
+                    if self._is_interrupted():
+                        self.log("动态语音生成被中断。")
+                        return
+
+                    self.update_playing_text(f"[{task['name']}] 正在生成第 {i+1}/{len(segments)} 段语音...")
+                    
+                    processed_text = self._replace_dynamic_tags(segment['text'], datetime.now())
+                    
+                    actor = segment['actor']
+                    voice_name = '在线-云扬 (男)' if actor == '男' else '在线-晓晓 (女)'
+                    voice_params = { 'voice': voice_name, 'speed': task.get('speed', '0'), 'pitch': task.get('pitch', '0') }
+                    
+                    temp_filename = f"temp_runtime_{int(time.time())}_{i}.mp3"
+                    output_path = os.path.join(AUDIO_FOLDER, temp_filename)
+                    temp_files.append(output_path)
+
+                    synthesis_success = threading.Event()
+                    error_message = ""
+                    def online_callback(result):
+                        nonlocal error_message
+                        if not result['success']: error_message = result.get('error', '未知在线合成错误')
+                        synthesis_success.set()
+                    
+                    s_thread = threading.Thread(target=self._synthesis_worker_edge, args=(processed_text, voice_params, output_path, online_callback))
+                    s_thread.start()
+                    s_thread.join()
+
+                    if error_message: raise Exception(f"生成片段 '{processed_text}' 时失败: {error_message}")
+
+                self.update_playing_text(f"[{task['name']}] 正在合成最终音频...")
+                for file_path in temp_files:
+                    segment_audio = AudioSegment.from_mp3(file_path)
+                    if final_audio is None: final_audio = segment_audio
+                    else: final_audio += segment_audio
+                
+                if final_audio is None: raise Exception("未能生成任何有效的音频片段。")
+
+                final_audio_path_runtime = os.path.join(AUDIO_FOLDER, f"final_runtime_{int(time.time())}.wav")
+                temp_files.append(final_audio_path_runtime)
+                final_audio.export(final_audio_path_runtime, format="wav")
+                final_audio_path = final_audio_path_runtime
+
+            except Exception as e:
+                self.log(f"!!! 即时生成动态语音任务 '{task['name']}' 失败: {e}")
+                for f in temp_files:
+                    if os.path.exists(f):
+                        try: os.remove(f)
+                        except: pass
+                return
+            finally:
+                segment_files = [f for f in temp_files if "temp_runtime" in f]
+                for f in segment_files:
+                    if os.path.exists(f):
+                        try: os.remove(f)
+                        except: pass
+        
+        # --- 统一的播放逻辑 ---
+        if final_audio_path and os.path.exists(final_audio_path):
+            try:
+                final_task = task.copy()
+                final_task['content'] = final_audio_path
+                final_task['repeat'] = 1
+                
+                self._play_voice_task_internal(final_task)
+            finally:
+                if "runtime" in os.path.basename(final_audio_path):
+                    if os.path.exists(final_audio_path):
+                        try: os.remove(final_audio_path)
+                        except Exception as e_del: self.log(f"删除即时生成的最终文件失败: {e_del}")
+        else:
+            self.log(f"!!! 最终播放错误：找不到有效的音频文件用于任务 '{task['name']}'")
+
+    def _pre_generate_dynamic_voice(self, task, trigger_time):
+        """
+        预生成动态语音任务的音频文件，并将其缓存。
+        这是一个后台函数，只合成，不播放。
+        """
+        # 检查任务是否已经被缓存了，如果是，就直接返回，避免重复工作
+        if task.get('cached_audio_path') and task.get('cached_for_time') == trigger_time:
+            if os.path.exists(task.get('cached_audio_path')):
+                return
+
+        # 为这个任务和触发时间生成一个唯一的文件名
+        safe_task_name = re.sub(r'[\\/*?:"<>|]', "", task['name'])
+        safe_trigger_time = trigger_time.replace(":", "-")
+        cache_filename = f"cache_{safe_task_name}_{safe_trigger_time}.wav"
+        cache_filepath = os.path.join(DYNAMIC_VOICE_CACHE_FOLDER, cache_filename)
+
+        self.log(f"开始为任务 '{task['name']}' ({trigger_time}) 预生成动态语音...")
+
         source_text = task.get('source_text', '')
         if not source_text:
-            self.log(f"动态语音任务 '{task['name']}' 文稿为空，已跳过。")
+            self.log(f"预生成失败：任务 '{task['name']}' 文稿为空。")
             return
 
         segments = self._parse_dynamic_script(source_text)
         if not segments:
-            self.log(f"动态语音任务 '{task['name']}' 未能解析出有效片段。")
+            self.log(f"预生成失败：任务 '{task['name']}' 未能解析出有效片段。")
             return
 
-        temp_files = []
+        temp_segment_files = []
         final_audio = None
-        
+
         try:
             from pydub import AudioSegment
             ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
             if os.path.exists(ffmpeg_path):
                 AudioSegment.converter = ffmpeg_path
-            else:
-                self.log("警告：未找到ffmpeg.exe，音频拼接功能可能受限。")
         except ImportError:
-            self.log("警告：pydub库未安装，无法拼接动态语音。")
+            self.log("预生成失败：pydub 库未安装。")
             return
 
         try:
+            # 1. 循环合成每个片段
             for i, segment in enumerate(segments):
-                if self._is_interrupted():
-                    self.log("动态语音生成被中断。")
-                    return
-
-                self.update_playing_text(f"[{task['name']}] 正在生成第 {i+1}/{len(segments)} 段语音...")
-                
-                processed_text = self._replace_dynamic_tags(segment['text'], datetime.now())
+                # **核心修正**：使用目标触发时间来替换占位符
+                target_dt_obj = datetime.now().replace(
+                    hour=int(trigger_time[0:2]),
+                    minute=int(trigger_time[3:5]),
+                    second=int(trigger_time[6:8]),
+                    microsecond=0
+                )
+                processed_text = self._replace_dynamic_tags(segment['text'], target_dt_obj)
                 
                 actor = segment['actor']
-                
-                # --- ↓↓↓ 核心修正：直接使用用户友好的语音名称 ---
                 voice_name = '在线-云扬 (男)' if actor == '男' else '在线-晓晓 (女)'
-                
                 voice_params = {
-                    'voice': voice_name,  # <--- 传递 '在线-云扬 (男)' 而不是 voice_id
+                    'voice': voice_name,
                     'speed': task.get('speed', '0'),
                     'pitch': task.get('pitch', '0')
                 }
-                # --- ↑↑↑ 修正结束 ---
-                
-                temp_filename = f"temp_{int(time.time())}_{i}.mp3"
-                output_path = os.path.join(AUDIO_FOLDER, temp_filename)
-                temp_files.append(output_path)
+
+                temp_segment_filename = f"temp_pregen_{int(time.time())}_{i}.mp3"
+                output_path = os.path.join(AUDIO_FOLDER, temp_segment_filename)
+                temp_segment_files.append(output_path)
 
                 synthesis_success = threading.Event()
                 error_message = ""
@@ -3348,10 +3476,10 @@ class TimedBroadcastApp:
                 s_thread.join()
 
                 if error_message:
-                    raise Exception(f"生成片段 '{processed_text}' 时失败: {error_message}")
+                    raise Exception(f"生成片段时失败: {error_message}")
 
-            self.update_playing_text(f"[{task['name']}] 正在合成最终音频...")
-            for file_path in temp_files:
+            # 2. 拼接所有片段
+            for file_path in temp_segment_files:
                 segment_audio = AudioSegment.from_mp3(file_path)
                 if final_audio is None:
                     final_audio = segment_audio
@@ -3361,26 +3489,25 @@ class TimedBroadcastApp:
             if final_audio is None:
                 raise Exception("未能生成任何有效的音频片段。")
 
-            final_task = task.copy()
-            final_audio_path = os.path.join(AUDIO_FOLDER, f"final_{int(time.time())}.wav")
-            temp_files.append(final_audio_path)
-            final_audio.export(final_audio_path, format="wav")
-            
-            final_task['content'] = final_audio_path
-            final_task['repeat'] = 1
-            
-            self._play_voice_task_internal(final_task)
+            # 3. 导出到最终的缓存文件
+            final_audio.export(cache_filepath, format="wav")
+
+            # 4. 在内存中更新任务对象，记录缓存文件的路径
+            task['cached_audio_path'] = cache_filepath
+            task['cached_for_time'] = trigger_time 
+
+            self.log(f"任务 '{task['name']}' 预生成成功！缓存文件: {cache_filename}")
 
         except Exception as e:
-            self.log(f"!!! 执行动态语音任务 '{task['name']}' 失败: {e}")
+            self.log(f"!!! 预生成任务 '{task['name']}' 失败: {e}")
+            if 'cached_audio_path' in task: del task['cached_audio_path']
+            if 'cached_for_time' in task: del task['cached_for_time']
         finally:
-            self.log("正在清理动态语音临时文件...")
-            for f in temp_files:
+            # 5. 清理临时的片段文件
+            for f in temp_segment_files:
                 if os.path.exists(f):
-                    try:
-                        os.remove(f)
-                    except Exception as e_del:
-                        self.log(f"删除临时文件 {os.path.basename(f)} 失败: {e_del}")
+                    try: os.remove(f)
+                    except Exception as e_del: self.log(f"删除预生成临时文件 {os.path.basename(f)} 失败: {e_del}")
 
 #以上动态语音全套方法结束
 
@@ -5272,6 +5399,7 @@ class TimedBroadcastApp:
         self.update_task_list()
         self.save_tasks()
         close_callback()
+
     def open_audio_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
         is_edit_mode = task_to_edit is not None
@@ -7363,7 +7491,14 @@ class TimedBroadcastApp:
     def _scheduler_worker(self):
         while self.running:
             now = datetime.now()
+            # 计算出需要预生成的时间点
+            pre_generation_time = now + timedelta(minutes=PRE_GENERATION_MINUTES)
+
             if not self.is_app_locked_down:
+                # --- 新增的预生成检查 ---
+                self._check_tasks_for_pre_generation(pre_generation_time)
+
+                # --- 原有的检查逻辑保持不变 ---
                 self._check_broadcast_tasks(now)
                 self._check_advanced_tasks(now)
                 self._check_time_chime(now)
@@ -7373,6 +7508,39 @@ class TimedBroadcastApp:
 
             self._check_power_tasks(now)
             time.sleep(1)
+
+    def _check_tasks_for_pre_generation(self, pre_gen_time):
+        """检查是否有动态语音任务需要在指定时间点（未来）被预生成。"""
+        if self._is_in_holiday(pre_gen_time):
+            return
+
+        pre_gen_time_str = pre_gen_time.strftime("%H:%M:%S")
+
+        for task in self.tasks:
+            if task.get('status') != '启用' or task.get('type') != 'dynamic_voice':
+                continue
+
+            try:
+                start, end = [d.strip() for d in task.get('date_range', '').split('~')]
+                if not (datetime.strptime(start, "%Y-%m-%d").date() <= pre_gen_time.date() <= datetime.strptime(end, "%Y-%m-%d").date()):
+                    continue
+            except (ValueError, IndexError):
+                pass
+
+            schedule = task.get('weekday', '每周:1234567')
+            run_on_pre_gen_day = (schedule.startswith("每周:") and str(pre_gen_time.isoweekday()) in schedule[3:]) or \
+                                 (schedule.startswith("每月:") and f"{pre_gen_time.day:02d}" in schedule[3:].split(','))
+            if not run_on_pre_gen_day:
+                continue
+
+            for trigger_time in [t.strip() for t in task.get('time', '').split(',')]:
+                if trigger_time == pre_gen_time_str:
+                    threading.Thread(
+                        target=self._pre_generate_dynamic_voice,
+                        args=(task, trigger_time),
+                        daemon=True
+                    ).start()
+                    break
 
     def _is_task_due(self, task, now):
         current_date_str = now.strftime("%Y-%m-%d")
@@ -9115,6 +9283,13 @@ class TimedBroadcastApp:
         self.save_print_tasks()
         self.save_backup_tasks()
         self.save_dynamic_voice_tasks()
+
+        if os.path.exists(DYNAMIC_VOICE_CACHE_FOLDER):
+            try:
+                shutil.rmtree(DYNAMIC_VOICE_CACHE_FOLDER)
+                self.log("已清空动态语音缓存。")
+            except Exception as e:
+                self.log(f"清空动态语音缓存失败: {e}")
 
         if AUDIO_AVAILABLE and pygame.mixer.get_init(): pygame.mixer.quit()
 
