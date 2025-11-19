@@ -6066,14 +6066,14 @@ class TimedBroadcastApp:
         interval_frame1 = ttk.Frame(time_frame)
         interval_frame1.grid(row=1, column=1, columnspan=2, sticky='w', padx=5, pady=2)
         ttk.Radiobutton(interval_frame1, text="播 n 首", variable=interval_var, value="first").pack(side=LEFT)
-        interval_first_entry = ttk.Entry(interval_frame1, font=self.font_11, width=15)
+        interval_first_entry = ttk.Entry(interval_frame1, font=self.font_11, width=6)
         interval_first_entry.pack(side=LEFT, padx=5)
         ttk.Label(interval_frame1, text="(单视频时,指 n 遍)").pack(side=LEFT, padx=5)
 
         interval_frame2 = ttk.Frame(time_frame)
         interval_frame2.grid(row=2, column=1, columnspan=2, sticky='w', padx=5, pady=2)
         ttk.Radiobutton(interval_frame2, text="播 n 秒", variable=interval_var, value="seconds").pack(side=LEFT)
-        interval_seconds_entry = ttk.Entry(interval_frame2, font=self.font_11, width=15)
+        interval_seconds_entry = ttk.Entry(interval_frame2, font=self.font_11, width=6)
         interval_seconds_entry.pack(side=LEFT, padx=5)
         ttk.Label(interval_frame2, text="(3600秒 = 1小时)").pack(side=LEFT, padx=5)
 
