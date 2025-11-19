@@ -5390,11 +5390,11 @@ class TimedBroadcastApp:
         if task_to_edit is None:
             self.tasks.append(new_bell_schedule_task)
             self.log(f"通过“打铃模式”成功添加了一个名为 '{new_bell_schedule_task['name']}' 的铃声计划。")
-            messagebox.showinfo("成功", f"已成功生成并添加了一个包含 {len(generated_times)} 个时间点的铃声计划！", parent=self.root)
+            messagebox.showinfo("成功", f"已成功生成并添加了一个包含 {len(generated_times)} 个时间点的铃声计划！", parent=parent_dialog)
         else:
             self.tasks[index] = new_bell_schedule_task
             self.log(f"已成功修改打铃计划 '{new_bell_schedule_task['name']}'。")
-            messagebox.showinfo("成功", "打铃计划已成功修改！", parent=self.root)
+            messagebox.showinfo("成功", "打铃计划已成功修改！", parent=parent_dialog)
         
         self.update_task_list()
         self.save_tasks()
@@ -5582,7 +5582,7 @@ class TimedBroadcastApp:
         # 需要保存引用以便动态修改文本
         self.lbl_interval_first = ttk.Radiobutton(interval_frame1, text="播 n 首", variable=interval_var, value="first")
         self.lbl_interval_first.pack(side=LEFT)
-        interval_first_entry = ttk.Entry(interval_frame1, font=self.font_11, width=15)
+        interval_first_entry = ttk.Entry(interval_frame1, font=self.font_11, width=6)
         interval_first_entry.pack(side=LEFT, padx=5)
         self.lbl_interval_hint = ttk.Label(interval_frame1, text="(单曲时,指 n 遍)")
         self.lbl_interval_hint.pack(side=LEFT, padx=5)
@@ -5590,7 +5590,7 @@ class TimedBroadcastApp:
         interval_frame2 = ttk.Frame(time_frame)
         interval_frame2.grid(row=2, column=1, columnspan=2, sticky='w', padx=5, pady=2)
         ttk.Radiobutton(interval_frame2, text="播 n 秒", variable=interval_var, value="seconds").pack(side=LEFT)
-        interval_seconds_entry = ttk.Entry(interval_frame2, font=self.font_11, width=15)
+        interval_seconds_entry = ttk.Entry(interval_frame2, font=self.font_11, width=6)
         interval_seconds_entry.pack(side=LEFT, padx=5)
         ttk.Label(interval_frame2, text="(3600秒 = 1小时)").pack(side=LEFT, padx=5)
         
@@ -8565,6 +8565,9 @@ class TimedBroadcastApp:
         return False
 
     def _play_audio_task_internal(self, task):
+        # 在这里导入，确保可用，无需去文件头添加
+        import pathlib 
+
         playlist = []
         
         # 获取基础参数
@@ -8578,10 +8581,8 @@ class TimedBroadcastApp:
         if audio_type == 'single':
             if os.path.exists(task['content']):
                 if interval_type == 'first':
-                    # 单文件模式：重复播放同一个文件 n 次
                     playlist = [task['content']] * repeat_count
-                else: # 按秒播放
-                    # 循环播放同一个文件，直到时间到（给一个足够大的列表）
+                else: 
                     playlist = [task['content']] * 1000 
         
         elif audio_type == 'folder':
@@ -8598,24 +8599,19 @@ class TimedBroadcastApp:
                 if task.get('play_order') == 'random':
                     random.shuffle(all_files)
                 else:
-                    all_files.sort() # 顺序播时按文件名排序
+                    all_files.sort()
                 
                 if interval_type == 'first':
-                    # 文件夹模式：播放前 n 个文件
                     playlist = all_files[:repeat_count]
-                else: # 按秒播放
-                    # 循环播放整个文件夹，直到时间到
+                else: 
                     playlist = all_files * 100 
                     
         elif audio_type == 'playlist':
-            # --- [新增] 自定义列表模式逻辑 ---
             custom_list = task.get('custom_playlist', [])
             if custom_list:
                 if interval_type == 'first':
-                    # 自定义列表模式：将整个列表重复播放 n 遍
                     playlist = custom_list * repeat_count
-                else: # 按秒播放
-                    # 循环播放整个列表，直到时间到
+                else: 
                     playlist = custom_list * 1000
 
         if not playlist:
@@ -8638,7 +8634,7 @@ class TimedBroadcastApp:
                 start_time = time.time()
 
                 for i, audio_path in enumerate(playlist):
-                    # --- [新增] 健壮性检查：文件不存在则跳过 ---
+                    # 1. 基础检查
                     if not os.path.exists(audio_path):
                         self.log(f"警告：文件不存在，已跳过: {os.path.basename(audio_path)}")
                         continue
@@ -8647,41 +8643,67 @@ class TimedBroadcastApp:
                         self.log(f"任务 '{task['name']}' 被新指令中断。")
                         break
                     
-                    media = instance.media_new(audio_path)
+                    # 2. [核心修复] 使用 pathlib 将路径转换为标准的 URI 格式
+                    # 这能解决所有中文、空格、特殊符号（如全角冒号）导致的路径识别问题
+                    try:
+                        uri_path = pathlib.Path(audio_path).absolute().as_uri()
+                    except Exception:
+                        # 如果转换失败，作为兜底，使用简单的替换
+                        uri_path = audio_path.replace('\\', '/')
+
+                    # 3. 强制重置
+                    self.vlc_player.stop()
+                    
+                    media = instance.media_new(uri_path)
                     self.vlc_player.set_media(media)
                     self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
                     self.vlc_player.play()
-                    time.sleep(0.2) # 等待VLC状态更新
 
+                    # 4. 智能启动等待 (Timeout = 2.5s)
+                    start_wait = time.time()
+                    is_started = False
+                    while time.time() - start_wait < 2.5:
+                        state = self.vlc_player.get_state()
+                        
+                        if state == vlc.State.Error:
+                            self.log(f"VLC 无法播放文件 (Error状态): {os.path.basename(audio_path)}")
+                            break
+                        
+                        if state in {vlc.State.Opening, vlc.State.Buffering, vlc.State.Playing}:
+                            is_started = True
+                            break
+                        
+                        time.sleep(0.1)
+                    
+                    if not is_started:
+                        self.log(f"播放启动超时，跳过: {os.path.basename(audio_path)}")
+                        continue
+
+                    # 5. 正常播放循环
                     last_text_update_time = 0
-                    # 播放循环
-                    while self.vlc_player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
+                    while self.vlc_player.get_state() in {vlc.State.Opening, vlc.State.Buffering, vlc.State.Playing, vlc.State.Paused}:
                         if self._is_interrupted():
                             self.vlc_player.stop()
                             break
 
                         now = time.time()
-                        # 处理按秒播放的停止逻辑
                         if interval_type == 'seconds':
                             elapsed = now - start_time
                             if elapsed >= duration_seconds:
                                 self.vlc_player.stop()
                                 self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
                                 break
-                            # 更新UI倒计时
                             if now - last_text_update_time >= 1.0:
                                 remaining = int(duration_seconds - elapsed)
                                 self.update_playing_text(f"[{task['name']}] {os.path.basename(audio_path)} (剩余 {remaining} 秒)")
                                 last_text_update_time = now
                         else:
-                            # 更新UI进度
                             if now - last_text_update_time >= 1.0:
                                 self.update_playing_text(f"[{task['name']}] {os.path.basename(audio_path)} ({i+1}/{len(playlist)})")
                                 last_text_update_time = now
                         
                         time.sleep(0.1)
                     
-                    # 外层循环检查：如果总时间到了，跳出文件列表循环
                     if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
                         break
                 
@@ -8701,11 +8723,11 @@ class TimedBroadcastApp:
                 return
             
             self.log(f"VLC不可用，回退到Pygame引擎播放任务 '{task['name']}'。")
-            supported_pygame_formats = ('.wav', '.mp3', '.ogg')
+            # [修复] 这里也加上 .flac，虽然Pygame对flac支持不如VLC，但加上也没坏处
+            supported_pygame_formats = ('.wav', '.mp3', '.ogg', '.flac')
             
             start_time = time.time()
             for i, audio_path in enumerate(playlist):
-                # --- [新增] 健壮性检查：文件不存在则跳过 ---
                 if not os.path.exists(audio_path):
                     self.log(f"警告：文件不存在，已跳过: {os.path.basename(audio_path)}")
                     continue
@@ -8718,7 +8740,6 @@ class TimedBroadcastApp:
                     self.log(f"警告: Pygame不支持播放 '{os.path.basename(audio_path)}'。请安装VLC播放器以支持更多格式。")
                     continue
 
-                # UI 状态更新
                 status_base = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)}"
                 if interval_type == 'first':
                     self.update_playing_text(f"{status_base} ({i+1}/{len(playlist)})")
@@ -8743,7 +8764,6 @@ class TimedBroadcastApp:
                             pygame.mixer.music.stop()
                             return
 
-                        # 处理按秒播放的停止逻辑
                         if interval_type == 'seconds':
                             now = time.time()
                             elapsed = now - start_time
@@ -8758,7 +8778,6 @@ class TimedBroadcastApp:
 
                         time.sleep(0.1)
 
-                    # 外层循环检查
                     if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
                         return
                 except Exception as e:
@@ -9435,7 +9454,7 @@ class TimedBroadcastApp:
         if x + width > screen_width: x = screen_width - width
         if y + height > screen_height: y = screen_height - height
         
-        win.geometry(f'+{x}+{y}')
+        win.geometry(f'{width}x{height}+{x}+{y}')
 
     def _normalize_time_string(self, time_str):
         try:
