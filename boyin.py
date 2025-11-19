@@ -23,10 +23,6 @@ import hashlib
 import requests
 import edge_tts
 import asyncio
-#下面新增3个用于实现串流模式
-import socket
-import http.server
-import socketserver
 
 # --- ↓↓↓ 新增代码：全局隐藏 subprocess 调用的控制台窗口 ↓↓↓ ---
 
@@ -223,15 +219,6 @@ class TimedBroadcastApp:
         self.timer_show_clock_var = tk.BooleanVar(value=True)
         self.timer_play_sound_var = tk.BooleanVar(value=True)
         self.timer_sound_file_var = tk.StringVar(value="")
-
-        #用于串流模式
-        self.streaming_status_var = tk.StringVar(value="空闲")
-        self.streaming_port_var = tk.StringVar(value="8000")
-        self.streaming_device_var = tk.StringVar()
-        self.streaming_url_var = tk.StringVar(value="串流停止时生成")
-        self.streaming_process = None
-        self.http_server = None
-        self.http_server_thread = None
         
         # 用于管理计时器窗口的状态
         self.timer_window = None
@@ -695,8 +682,6 @@ class TimedBroadcastApp:
         media_tab = ttk.Frame(notebook, padding=10)
         wallpaper_tab = ttk.Frame(notebook, padding=10)
         timer_tab = ttk.Frame(notebook, padding=10)
-        streaming_tab = ttk.Frame(notebook, padding=10)
-
 
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
@@ -705,7 +690,6 @@ class TimedBroadcastApp:
         notebook.add(media_tab, text=' 媒体处理 ')
         notebook.add(wallpaper_tab, text=' 网络壁纸 ')
         notebook.add(timer_tab, text=' 计时工具 ')
-        notebook.add(streaming_tab, text=' 串流模式 ')
 
         self._build_screenshot_ui(screenshot_tab)
         self._build_execute_ui(execute_tab)
@@ -3026,267 +3010,7 @@ class TimedBroadcastApp:
         self.log("全屏计时器已关闭。")
 #↑全套计时功能代码结束
 
-#↓串流模式全套代码
-    def _build_streaming_ui(self, parent_frame):
-        # 检查ffmpeg是否存在
-        ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
-        if not os.path.exists(ffmpeg_path):
-                warning_label = ttk.Label(parent_frame,
-                                      text="错误：串流功能依赖于 FFmpeg。\n\n请将 ffmpeg.exe 文件放置到本软件所在的文件夹内，然后重启软件。",
-                                      font=self.font_12_bold, bootstyle="danger", justify="center")
-                warning_label.pack(pady=50, fill=X, expand=True)
-                return
-
-        scrolled_frame = ScrolledFrame(parent_frame, autohide=True)
-        scrolled_frame.pack(fill=BOTH, expand=True)
-        container = scrolled_frame.container
-
-        # --- 描述区 ---
-        title_label = ttk.Label(container, text="桌面音频串流 (HLS)", font=self.font_14_bold, bootstyle="primary")
-        title_label.pack(anchor="w", pady=(0, 5))
-        
-        desc_text = ("此功能会捕获您电脑的全部声音输出（如音乐、视频声音），并将其转换为HLS流。\n"
-                     "局域网内的任何设备（手机、电脑）只需通过浏览器访问指定地址即可收听，无需安装任何软件。")
-        desc_label = ttk.Label(container, text=desc_text, bootstyle="secondary")
-        desc_label.pack(anchor="w", pady=(0, 15), fill=X)
-        
-        # --- 设置区 ---
-        settings_lf = ttk.LabelFrame(container, text="串流设置", padding=15)
-        settings_lf.pack(fill=X, pady=10)
-        settings_lf.columnconfigure(1, weight=1)
-
-        ttk.Label(settings_lf, text="音频源:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
-        self.streaming_device_combo = ttk.Combobox(settings_lf, textvariable=self.streaming_device_var, state='readonly', font=self.font_11)
-        self.streaming_device_combo.grid(row=0, column=1, sticky='ew')
-        
-        refresh_btn = ttk.Button(settings_lf, text="刷新设备", bootstyle="outline", command=self._populate_audio_devices)
-        refresh_btn.grid(row=0, column=2, padx=5)
-
-        ttk.Label(settings_lf, text="端口号:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
-        port_frame = ttk.Frame(settings_lf)
-        port_frame.grid(row=1, column=1, sticky='w')
-        port_entry = ttk.Entry(port_frame, textvariable=self.streaming_port_var, width=10, font=self.font_11)
-        port_entry.pack(side=LEFT)
-        ttk.Label(port_frame, text="(推荐范围: 1024-65535)", bootstyle="secondary").pack(side=LEFT, padx=10)
-
-        # --- 控制与状态区 ---
-        status_lf = ttk.LabelFrame(container, text="控制与状态", padding=15)
-        status_lf.pack(fill=X, pady=10)
-        status_lf.columnconfigure(0, weight=1)
-
-        self.stream_toggle_button = ttk.Button(status_lf, text="▶  开 始 串 流", style="lg.success.TButton", command=self._toggle_streaming_state)
-        self.stream_toggle_button.grid(row=0, column=0, columnspan=2, sticky='ew', ipady=8, pady=(0, 15))
-
-        status_frame = ttk.Frame(status_lf)
-        status_frame.grid(row=1, column=0, columnspan=2, sticky='ew', pady=5)
-        ttk.Label(status_frame, text="当前状态:").pack(side=LEFT)
-        ttk.Label(status_frame, textvariable=self.streaming_status_var).pack(side=LEFT, padx=5)
-
-        url_frame = ttk.Frame(status_lf)
-        url_frame.grid(row=2, column=0, columnspan=2, sticky='ew', pady=5)
-        url_frame.columnconfigure(1, weight=1)
-        ttk.Label(url_frame, text="播放地址:").grid(row=0, column=0, sticky='w')
-        url_entry = ttk.Entry(url_frame, textvariable=self.streaming_url_var, state='readonly', font=self.font_11)
-        url_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        
-        copy_btn = ttk.Button(url_frame, text="复制", bootstyle="outline", command=self._copy_stream_url)
-        copy_btn.grid(row=0, column=2)
-
-        # 当用户切换到这个页面时，自动填充一次设备列表
-        parent_frame.bind("<Visibility>", lambda event: self._populate_audio_devices())
-
-    def _get_local_ip(self):
-        """获取本机的局-域网IP地址"""
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-                # 这不会真的发送数据，只是用来获取连接的本地IP
-                s.connect(('10.255.255.255', 1))
-                IP = s.getsockname()[0]
-        except Exception:
-                IP = '127.0.0.1'
-        finally:
-                s.close()
-        return IP
-
-    def _populate_audio_devices(self):
-        """在后台线程中运行ffmpeg以获取音频设备列表，并更新UI"""
-        def worker():
-                self.log("正在检测可用的音频录制设备...")
-                try:
-                        ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
-                        command = [
-                                ffmpeg_path,
-                                "-list_devices", "true",
-                                "-f", "dshow",
-                                "-i", "dummy"
-                        ]
-                        
-                        # 使用您全局的startupinfo来隐藏窗口
-                        process = subprocess.Popen(command, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
-                        stdout, stderr = process.communicate(timeout=10)
-                        
-                        output = stderr  # dshow设备列表通常在stderr中
-                        
-                        devices = []
-                        in_audio_devices_section = False
-                        for line in output.splitlines():
-                                if "DirectShow audio devices" in line:
-                                        in_audio_devices_section = True
-                                elif in_audio_devices_section:
-                                        if ']' in line and '"' in line:
-                                                match = re.search(r'\"(.*?)\"', line)
-                                                if match:
-                                                        devices.append(match.group(1))
-                                        else:
-                                                break # 已经离开音频设备区域
-                        
-                        def update_ui(device_list):
-                                self.streaming_device_combo['values'] = device_list
-                                if device_list:
-                                        # 尝试自动选择"立体声混音"
-                                        current_selection = self.streaming_device_var.get()
-                                        if not current_selection or current_selection not in device_list:
-                                                stereo_mix = next((d for d in device_list if '立体声混音' in d or 'Stereo Mix' in d), None)
-                                                if stereo_mix:
-                                                        self.streaming_device_var.set(stereo_mix)
-                                                else:
-                                                        self.streaming_device_var.set(device_list[0])
-                                self.log(f"找到 {len(device_list)} 个音频设备。")
-
-                        self.root.after(0, update_ui, devices)
-
-                except Exception as e:
-                        self.log(f"错误：检测音频设备失败 - {e}")
-                        self.root.after(0, messagebox.showerror, "错误", f"无法检测音频设备，请确保FFmpeg已正确放置在软件根目录。\n\n{e}", parent=self.root)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _copy_stream_url(self):
-        """复制播放地址到剪贴板"""
-        url = self.streaming_url_var.get()
-        if url and "生成" not in url:
-                self.root.clipboard_clear()
-                self.root.clipboard_append(url)
-                self.log("播放地址已复制到剪贴板。")
-
-    def _toggle_streaming_state(self):
-        """切换串流的开始/停止状态"""
-        if self.streaming_process:
-                self._stop_desktop_streaming()
-        else:
-                self._start_desktop_streaming()
-
-    def _start_desktop_streaming(self):
-        """启动HTTP服务器和FFmpeg进程以开始串流"""
-        self.log("准备开始串流...")
-        
-        # 1. 验证端口
-        try:
-                port = int(self.streaming_port_var.get())
-                if not (1024 <= port <= 65535): raise ValueError
-        except ValueError:
-                messagebox.showerror("错误", "端口号必须是 1024 到 65535 之间的数字。", parent=self.root)
-                return
-
-        # 2. 验证设备
-        device = self.streaming_device_var.get()
-        if not device:
-                messagebox.showerror("错误", "请选择一个有效的音频源设备。", parent=self.root)
-                return
-        
-        # 3. 验证HLS文件夹和核心文件是否存在
-        hls_folder = os.path.join(application_path, "hls_stream")
-        required_files = [
-                os.path.join(hls_folder, "index.html"),
-                os.path.join(hls_folder, "hls.min.js")
-        ]
-        
-        if not os.path.isdir(hls_folder):
-                messagebox.showerror("文件夹缺失", f"错误：找不到串流文件夹。\n请确保 'hls_stream' 文件夹与主程序在同一目录下。", parent=self.root)
-                return
-        for f_path in required_files:
-                if not os.path.exists(f_path):
-                        messagebox.showerror("文件缺失", f"错误：串流文件夹中缺少核心文件。\n找不到: {os.path.basename(f_path)}", parent=self.root)
-                        return
-
-        # 4. 启动HTTP服务器
-        def http_server_worker():
-                class Handler(http.server.SimpleHTTPRequestHandler):
-                        def __init__(self, *args, **kwargs):
-                                super().__init__(*args, directory=hls_folder, **kwargs)
-                
-                try:
-                        # 0.0.0.0 允许局域网内任何设备访问
-                        with socketserver.TCPServer(("0.0.0.0", port), Handler) as httpd:
-                                self.http_server = httpd
-                                self.log(f"HTTP服务器已在 {port} 端口启动。")
-                                httpd.serve_forever()
-                except OSError as e:
-                        self.log(f"!!! 启动HTTP服务器失败: {e}")
-                        self.root.after(0, messagebox.showerror, "端口错误", f"无法在端口 {port} 上启动服务器。\n\n该端口可能已被其他程序占用。\n请尝试更换一个端口号。", parent=self.root)
-                        self.root.after(0, self._stop_desktop_streaming) # 启动失败后，重置UI状态
-                        return
-
-                self.log("HTTP服务器已关闭。")
-
-        self.http_server_thread = threading.Thread(target=http_server_worker, daemon=True)
-        self.http_server_thread.start()
-        
-        # 5. 构建并启动FFmpeg命令
-        ffmpeg_path = os.path.join(application_path, "ffmpeg.exe")
-        playlist_path = os.path.join(hls_folder, "stream.m3u8")
-
-        command = [
-                ffmpeg_path,
-                "-f", "dshow",
-                "-i", f"audio={device}",
-                "-acodec", "aac",
-                "-b:a", "128k",
-                "-ar", "44100",
-                "-f", "hls",
-                "-hls_time", "2",
-                "-hls_list_size", "5",
-                "-hls_flags", "delete_segments",
-                "-y", # 覆盖旧的播放列表文件
-                playlist_path
-        ]
-
-        self.log("正在启动HLS桌面串流...")
-        self.streaming_process = subprocess.Popen(command)
-        
-        # 6. 更新UI状态
-        self.streaming_status_var.set("正在串流...")
-        my_ip = self._get_local_ip()
-        self.streaming_url_var.set(f"http://{my_ip}:{port}")
-        self.stream_toggle_button.config(text="■  停 止 串 流", bootstyle="danger")
-        self.log(f"串流已开始！播放地址: {self.streaming_url_var.get()}")
-
-    def _stop_desktop_streaming(self):
-        """停止FFmpeg进程和HTTP服务器"""
-        self.log("正在停止串流...")
-        
-        # 1. 停止FFmpeg进程
-        if self.streaming_process:
-                try:
-                        self.streaming_process.terminate() # 尝试优雅地终止
-                        self.streaming_process.wait(timeout=2) # 等待2秒
-                except subprocess.TimeoutExpired:
-                        self.streaming_process.kill() # 如果无法终止，则强制杀死
-                self.streaming_process = None
-            
-        # 2. 停止HTTP服务器
-        if self.http_server:
-                self.http_server.shutdown()
-                self.http_server = None
-        
-        # 3. 更新UI状态
-        self.streaming_status_var.set("空闲")
-        self.streaming_url_var.set("串流停止时生成")
-        self.stream_toggle_button.config(text="▶  开 始 串 流", bootstyle="success")
-        self.log("串流已停止。")
-#↑串流模式代码结束
-
-# ↓--- 动态语音功能的全套方法 ---
+# --- 动态语音功能的全套方法 ---
 
     def load_dynamic_voice_tasks(self):
         # 注意：动态语音任务是实验性功能，暂存在主任务文件里
@@ -5682,7 +5406,7 @@ class TimedBroadcastApp:
         dialog = ttk.Toplevel(self.root)
         dialog.title("修改音频节目" if is_edit_mode else "添加音频节目")
         dialog.resizable(True, True)
-        dialog.minsize(800, 580)
+        dialog.minsize(800, 600) #稍微增加高度以容纳新选项
         dialog.transient(self.root)
 
         # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
@@ -5702,28 +5426,32 @@ class TimedBroadcastApp:
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
 
+        # --- 0. 节目名称 ---
         ttk.Label(content_frame, text="节目名称:").grid(row=0, column=0, sticky='e', padx=5, pady=2)
         name_entry = ttk.Entry(content_frame, font=self.font_11)
         name_entry.grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
+        
         audio_type_var = tk.StringVar(value="single")
-        ttk.Label(content_frame, text="音频文件").grid(row=1, column=0, sticky='e', padx=5, pady=2)
+        # 用于暂存播放列表数据的变量
+        self.temp_playlist_data = [] 
+
+        # --- 1. 单文件模式 ---
+        ttk.Label(content_frame, text="音频文件:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
         audio_single_frame = ttk.Frame(content_frame)
         audio_single_frame.grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         audio_single_frame.columnconfigure(1, weight=1)
+        
         ttk.Radiobutton(audio_single_frame, text="", variable=audio_type_var, value="single").grid(row=0, column=0, sticky='w')
         audio_single_entry = ttk.Entry(audio_single_frame, font=self.font_11)
         audio_single_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        ttk.Label(audio_single_frame, text="00:00").grid(row=0, column=2, padx=10)
-
-        # 根据VLC是否可用，动态设置支持的文件类型和提示信息
+        
+        # 根据VLC是否可用设置提示
         if VLC_AVAILABLE:
             filetypes = [("所有支持的音频", "*.mp3 *.wav *.ogg *.flac *.m4a *.wma *.ape"), ("所有文件", "*.*")]
-            vlc_info_text = " (已启用VLC，支持绝大多数格式)"
-            vlc_info_style = "success"
+            vlc_info_text = " (VLC支持多格式)"
         else:
             filetypes = [("支持的音频", "*.mp3 *.wav *.ogg *.flac"), ("所有文件", "*.*")]
-            vlc_info_text = " (提示: 安装VLC播放器可支持更多格式)"
-            vlc_info_style = "warning"
+            vlc_info_text = " (仅基础格式)"
 
         def select_single_audio():
             filename = filedialog.askopenfilename(
@@ -5737,28 +5465,55 @@ class TimedBroadcastApp:
                 audio_single_entry.insert(0, filename)
         
         ttk.Button(audio_single_frame, text="选取...", command=select_single_audio, bootstyle="outline").grid(row=0, column=3, padx=5)
+        ttk.Label(audio_single_frame, text=vlc_info_text, font=self.font_9, bootstyle="secondary").grid(row=0, column=4, sticky='w')
+
+        # --- 2. [新增] 自定义列表模式 ---
+        # 这一行放在单文件和文件夹之间
+        ttk.Label(content_frame, text="音频列表:").grid(row=2, column=0, sticky='e', padx=5, pady=2)
+        playlist_frame = ttk.Frame(content_frame)
+        playlist_frame.grid(row=2, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         
-        # 将提示标签放到 audio_single_frame 的第4列，避免覆盖
-        ttk.Label(audio_single_frame, text=vlc_info_text, bootstyle=vlc_info_style, font=self.font_9).grid(row=0, column=4, sticky='w', padx=10)
+        ttk.Radiobutton(playlist_frame, text="", variable=audio_type_var, value="playlist").pack(side=LEFT)
         
-        ttk.Label(content_frame, text="音频文件夹").grid(row=2, column=0, sticky='e', padx=5, pady=2)
+        self.playlist_info_var = tk.StringVar(value="(包含 0 首歌曲)")
+        playlist_info_label = ttk.Label(playlist_frame, textvariable=self.playlist_info_var)
+        playlist_info_label.pack(side=LEFT, padx=10)
+        
+        def launch_editor():
+            # 调用编辑器，传入当前dialog作为父窗口，以及当前的数据
+            new_list = self.open_playlist_editor(dialog, self.temp_playlist_data)
+            if new_list is not None: # 用户点击了确定
+                self.temp_playlist_data = new_list
+                self.playlist_info_var.set(f"(包含 {len(new_list)} 首歌曲)")
+                # 自动选中列表模式
+                audio_type_var.set("playlist")
+
+        self.edit_playlist_btn = ttk.Button(playlist_frame, text="编辑播放列表...", command=launch_editor, bootstyle="info-outline")
+        self.edit_playlist_btn.pack(side=LEFT)
+
+        # --- 3. [修改] 文件夹模式 (包含顺序/随机播) ---
+        ttk.Label(content_frame, text="音频文件夹:").grid(row=3, column=0, sticky='e', padx=5, pady=2)
         audio_folder_frame = ttk.Frame(content_frame)
-        audio_folder_frame.grid(row=2, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
+        audio_folder_frame.grid(row=3, column=1, columnspan=3, sticky='ew', padx=5, pady=2)
         audio_folder_frame.columnconfigure(1, weight=1)
+        
         ttk.Radiobutton(audio_folder_frame, text="", variable=audio_type_var, value="folder").grid(row=0, column=0, sticky='w')
         audio_folder_entry = ttk.Entry(audio_folder_frame, font=self.font_11)
         audio_folder_entry.grid(row=0, column=1, sticky='ew', padx=5)
+        
         def select_folder(entry_widget):
             foldername = filedialog.askdirectory(title="选择文件夹", initialdir=application_path, parent=dialog)
             if foldername: entry_widget.delete(0, END); entry_widget.insert(0, foldername)
         ttk.Button(audio_folder_frame, text="选取...", command=lambda: select_folder(audio_folder_entry), bootstyle="outline").grid(row=0, column=2, padx=5)
         
-        play_order_frame = ttk.Frame(content_frame)
-        play_order_frame.grid(row=3, column=1, columnspan=3, sticky='w', padx=5, pady=2)
+        # [改动] 将播放顺序选项移动到这里
         play_order_var = tk.StringVar(value="sequential")
-        ttk.Radiobutton(play_order_frame, text="顺序播", variable=play_order_var, value="sequential").pack(side=LEFT, padx=10)
-        ttk.Radiobutton(play_order_frame, text="随机播", variable=play_order_var, value="random").pack(side=LEFT, padx=10)
-
+        self.folder_seq_rb = ttk.Radiobutton(audio_folder_frame, text="顺序播", variable=play_order_var, value="sequential")
+        self.folder_seq_rb.grid(row=0, column=3, padx=(10,0))
+        self.folder_rand_rb = ttk.Radiobutton(audio_folder_frame, text="随机播", variable=play_order_var, value="random")
+        self.folder_rand_rb.grid(row=0, column=4, padx=5)
+        
+        # --- 4. 背景图片 ---
         bg_image_var = tk.IntVar(value=0)
         bg_image_path_var = tk.StringVar()
         bg_image_order_var = tk.StringVar(value="sequential")
@@ -5768,7 +5523,7 @@ class TimedBroadcastApp:
         bg_image_frame.columnconfigure(1, weight=1)
         bg_image_cb = ttk.Checkbutton(bg_image_frame, text="背景图片:", variable=bg_image_var, bootstyle="round-toggle")
         bg_image_cb.grid(row=0, column=0)
-        if not IMAGE_AVAILABLE: bg_image_cb.config(state=DISABLED, text="背景图片(Pillow未安装):")
+        if not IMAGE_AVAILABLE: bg_image_cb.config(state=DISABLED, text="背景图片(无库):")
 
         bg_image_entry = ttk.Entry(bg_image_frame, textvariable=bg_image_path_var, font=self.font_11)
         bg_image_entry.grid(row=0, column=1, sticky='ew', padx=(5,5))
@@ -5779,6 +5534,7 @@ class TimedBroadcastApp:
         ttk.Radiobutton(bg_image_btn_frame, text="顺序", variable=bg_image_order_var, value="sequential").pack(side=LEFT, padx=(10,0))
         ttk.Radiobutton(bg_image_btn_frame, text="随机", variable=bg_image_order_var, value="random").pack(side=LEFT)
 
+        # --- 5. 音量 ---
         volume_frame = ttk.Frame(content_frame)
         volume_frame.grid(row=5, column=1, columnspan=3, sticky='w', padx=5, pady=3)
         ttk.Label(volume_frame, text="音量:").pack(side=LEFT)
@@ -5786,6 +5542,7 @@ class TimedBroadcastApp:
         volume_entry.pack(side=LEFT, padx=5)
         ttk.Label(volume_frame, text="0-100").pack(side=LEFT, padx=5)
 
+        # --- 6. 时间与规则 ---
         time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
         time_frame.grid(row=1, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
@@ -5797,39 +5554,38 @@ class TimedBroadcastApp:
         ttk.Label(time_frame, text="<可多个>").grid(row=0, column=2, sticky='w', padx=5)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_time_settings_dialog(start_time_entry), bootstyle="outline").grid(row=0, column=3, padx=5)
 
-        # --- ▼▼▼ 批量添加功能的容器 ▼▼▼ ---
+        # 批量添加容器
         batch_add_container = ttk.Frame(time_frame)
-        batch_add_container.grid(row=0, column=4, rowspan=3, sticky='n', padx=5) # 放在第0行第4列，向下跨越，靠上对齐
-
-        # 批量添加的输入框
+        batch_add_container.grid(row=0, column=4, rowspan=3, sticky='n', padx=5)
         batch_interval_frame = ttk.Frame(batch_add_container)
         batch_interval_frame.pack(pady=(0, 2))
         ttk.Label(batch_interval_frame, text="每").pack(side=LEFT)
         batch_interval_entry = ttk.Entry(batch_interval_frame, font=self.font_11, width=4)
         batch_interval_entry.pack(side=LEFT, padx=(2,2))
         ttk.Label(batch_interval_frame, text="分钟").pack(side=LEFT)
-
         batch_count_frame = ttk.Frame(batch_add_container)
         batch_count_frame.pack(pady=(0, 5))
         ttk.Label(batch_count_frame, text="共").pack(side=LEFT)
         batch_count_entry = ttk.Entry(batch_count_frame, font=self.font_11, width=4)
         batch_count_entry.pack(side=LEFT, padx=(2,2))
         ttk.Label(batch_count_frame, text="次   ").pack(side=LEFT)
-
-        # 批量添加的触发按钮
         ttk.Button(batch_add_container, text="批量添加", 
                    command=lambda: self._apply_batch_time_addition(start_time_entry, batch_interval_entry, batch_count_entry, dialog), 
                    bootstyle="outline-info").pack(fill=X)
-        # --- ▲▲▲ 批量添加功能结束 ▲▲▲ ---
 
+        # 间隔播报设置
         interval_var = tk.StringVar(value="first")
         ttk.Label(time_frame, text="间隔播报:").grid(row=1, column=0, sticky='e', padx=5, pady=2)
+        
         interval_frame1 = ttk.Frame(time_frame)
         interval_frame1.grid(row=1, column=1, columnspan=2, sticky='w', padx=5, pady=2)
-        ttk.Radiobutton(interval_frame1, text="播 n 首", variable=interval_var, value="first").pack(side=LEFT)
+        # 需要保存引用以便动态修改文本
+        self.lbl_interval_first = ttk.Radiobutton(interval_frame1, text="播 n 首", variable=interval_var, value="first")
+        self.lbl_interval_first.pack(side=LEFT)
         interval_first_entry = ttk.Entry(interval_frame1, font=self.font_11, width=15)
         interval_first_entry.pack(side=LEFT, padx=5)
-        ttk.Label(interval_frame1, text="(单曲时,指 n 遍)").pack(side=LEFT, padx=5)
+        self.lbl_interval_hint = ttk.Label(interval_frame1, text="(单曲时,指 n 遍)")
+        self.lbl_interval_hint.pack(side=LEFT, padx=5)
         
         interval_frame2 = ttk.Frame(time_frame)
         interval_frame2.grid(row=2, column=1, columnspan=2, sticky='w', padx=5, pady=2)
@@ -5864,13 +5620,22 @@ class TimedBroadcastApp:
         dialog_button_frame = ttk.Frame(other_frame)
         dialog_button_frame.grid(row=0, column=2, sticky='se', padx=20, pady=10)
 
+        # --- 数据加载逻辑 ---
         if is_edit_mode:
             task = task_to_edit
             name_entry.insert(0, task.get('name', ''))
             start_time_entry.insert(0, task.get('time', ''))
             audio_type_var.set(task.get('audio_type', 'single'))
-            if task.get('audio_type') == 'single': audio_single_entry.insert(0, task.get('content', ''))
-            else: audio_folder_entry.insert(0, task.get('content', ''))
+            
+            if task.get('audio_type') == 'single': 
+                audio_single_entry.insert(0, task.get('content', ''))
+            elif task.get('audio_type') == 'folder':
+                audio_folder_entry.insert(0, task.get('content', ''))
+            elif task.get('audio_type') == 'playlist':
+                # 加载保存的播放列表
+                self.temp_playlist_data = task.get('custom_playlist', [])
+                self.playlist_info_var.set(f"(包含 {len(self.temp_playlist_data)} 首歌曲)")
+
             play_order_var.set(task.get('play_order', 'sequential'))
             volume_entry.insert(0, task.get('volume', '80'))
             interval_var.set(task.get('interval_type', 'first'))
@@ -5886,47 +5651,68 @@ class TimedBroadcastApp:
             volume_entry.insert(0, "80"); interval_first_entry.insert(0, "1"); interval_seconds_entry.insert(0, "600")
             weekday_entry.insert(0, "每周:1234567"); date_range_entry.insert(0, "2025-01-01 ~ 2099-12-31")
 
+        # --- [新增] UI 联动逻辑 ---
+        def toggle_controls(*args):
+            atype = audio_type_var.get()
+            # 1. 控制文件夹排序按钮
+            folder_state = 'normal' if atype == 'folder' else 'disabled'
+            self.folder_seq_rb.config(state=folder_state)
+            self.folder_rand_rb.config(state=folder_state)
+            
+            # 2. 动态更新间隔播报的提示文本
+            if atype == 'playlist':
+                self.lbl_interval_first.config(text="播 n 遍")
+                self.lbl_interval_hint.config(text="(指将列表完整播放n遍)")
+            else:
+                self.lbl_interval_first.config(text="播 n 首")
+                self.lbl_interval_hint.config(text="(单曲时,指 n 遍)")
+
+        audio_type_var.trace_add("write", toggle_controls)
+        # 初始化一次状态
+        self.root.after(10, toggle_controls)
+
         def save_task():
-            # --- ↓↓↓ 新增的输入验证模块 ↓↓↓ ---
+            # 验证音量
             try:
                 volume = int(volume_entry.get().strip() or 80)
-                if not (0 <= volume <= 100):
-                    messagebox.showerror("输入错误", "音量必须是 0 到 100 之间的整数。", parent=dialog)
-                    return
+                if not (0 <= volume <= 100): raise ValueError
             except ValueError:
-                messagebox.showerror("输入错误", "音量必须是一个有效的整数。", parent=dialog)
-                return
+                messagebox.showerror("输入错误", "音量必须是 0 到 100 之间的整数。", parent=dialog); return
 
+            # 验证间隔次数
             if interval_var.get() == 'first':
                 try:
-                    interval_first = int(interval_first_entry.get().strip() or 1)
-                    if interval_first < 1:
-                        messagebox.showerror("输入错误", "“播 n 首”的次数必须大于或等于 1。", parent=dialog)
-                        return
+                    val = int(interval_first_entry.get().strip() or 1)
+                    if val < 1: raise ValueError
                 except ValueError:
-                    messagebox.showerror("输入错误", "“播 n 首”的次数必须是一个有效的整数。", parent=dialog)
-                    return
-            else: # 'seconds'
+                    messagebox.showerror("输入错误", "次数必须大于或等于 1。", parent=dialog); return
+            else: 
                 try:
-                    interval_seconds = int(interval_seconds_entry.get().strip() or 1)
-                    if interval_seconds < 1:
-                        messagebox.showerror("输入错误", "“播 n 秒”的秒数必须大于或等于 1。", parent=dialog)
-                        return
+                    val = int(interval_seconds_entry.get().strip() or 1)
+                    if val < 1: raise ValueError
                 except ValueError:
-                    messagebox.showerror("输入错误", "“播 n 秒”的秒数必须是一个有效的整数。", parent=dialog)
-                    return
+                    messagebox.showerror("输入错误", "秒数必须大于或等于 1。", parent=dialog); return
 
-            if not weekday_entry.get().strip():
-                messagebox.showerror("输入错误", "“周几/几号”规则不能为空，请点击“选取...”进行设置。", parent=dialog)
-                return
+            if not weekday_entry.get().strip(): messagebox.showerror("输入错误", "周几规则不能为空", parent=dialog); return
+            if not date_range_entry.get().strip(): messagebox.showerror("输入错误", "日期范围不能为空", parent=dialog); return
+
+            # 验证音频内容
+            audio_type = audio_type_var.get()
+            audio_path = ""
+            custom_playlist = []
             
-            if not date_range_entry.get().strip():
-                messagebox.showerror("输入错误", "“日期范围”不能为空，请点击“设置...”进行配置。", parent=dialog)
-                return
-            # --- ↑↑↑ 验证模块结束 ↑↑↑ ---
+            if audio_type == 'single':
+                audio_path = audio_single_entry.get().strip()
+                if not audio_path: messagebox.showwarning("警告", "请选择音频文件", parent=dialog); return
+            elif audio_type == 'folder':
+                audio_path = audio_folder_entry.get().strip()
+                if not audio_path: messagebox.showwarning("警告", "请选择音频文件夹", parent=dialog); return
+            elif audio_type == 'playlist':
+                if not self.temp_playlist_data:
+                    messagebox.showwarning("警告", "播放列表为空，请点击'编辑播放列表'添加歌曲。", parent=dialog); return
+                custom_playlist = self.temp_playlist_data
+                audio_path = None # 列表模式下，content 字段为空
 
-            audio_path = audio_single_entry.get().strip() if audio_type_var.get() == "single" else audio_folder_entry.get().strip()
-            if not audio_path: messagebox.showwarning("警告", "请选择音频文件或文件夹", parent=dialog); return
             is_valid_time, time_msg = self._normalize_multiple_times_string(start_time_entry.get().strip())
             if not is_valid_time: messagebox.showwarning("格式错误", time_msg, parent=dialog); return
             is_valid_date, date_msg = self._normalize_date_range_string(date_range_entry.get().strip())
@@ -5937,8 +5723,11 @@ class TimedBroadcastApp:
             saved_delay_type = 'ontime' if play_mode == 'immediate' else play_mode
 
             new_task_data = {
-                'name': name_entry.get().strip(), 'time': time_msg, 'content': audio_path, 'type': 'audio',
-                'audio_type': audio_type_var.get(), 'play_order': play_order_var.get(),
+                'name': name_entry.get().strip(), 'time': time_msg, 'type': 'audio',
+                'audio_type': audio_type,
+                'content': audio_path,
+                'custom_playlist': custom_playlist, # 保存列表数据
+                'play_order': play_order_var.get(),
                 'volume': str(volume), 'interval_type': interval_var.get(),
                 'interval_first': interval_first_entry.get().strip() or "1",
                 'interval_seconds': interval_seconds_entry.get().strip() or "600",
@@ -5963,7 +5752,141 @@ class TimedBroadcastApp:
         ttk.Button(dialog_button_frame, text=button_text, command=save_task, bootstyle="primary").pack(side=LEFT, padx=10, ipady=5)
         ttk.Button(dialog_button_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=10, ipady=5)
         dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
-        self.center_window(dialog, parent=self.root) # <--- 新增此行 修复居中,如有问题,后期删除
+        self.center_window(dialog, parent=self.root)
+
+    def open_playlist_editor(self, parent_dialog, initial_data):
+        # 1. 创建编辑器窗口
+        editor = ttk.Toplevel(parent_dialog)
+        editor.title("播放列表编辑器")
+        editor.geometry("700x500")
+        editor.transient(parent_dialog) # 设置为父窗口的临时窗口
+        editor.grab_set() # 独占焦点，实现模态
+        editor.attributes('-topmost', True) # 保持在最前
+
+        # 内部数据副本，避免直接修改原数据，点击保存后才生效
+        current_playlist = list(initial_data)
+
+        # --- UI 布局 ---
+        main_layout = ttk.Frame(editor, padding=10)
+        main_layout.pack(fill=BOTH, expand=True)
+
+        # 左侧：列表区域
+        list_frame = ttk.LabelFrame(main_layout, text=f"当前歌曲 ({len(current_playlist)} 首)", padding=5)
+        list_frame.pack(side=LEFT, fill=BOTH, expand=True)
+        
+        listbox = tk.Listbox(list_frame, font=self.font_11, selectmode=EXTENDED, activestyle='none')
+        listbox.pack(side=LEFT, fill=BOTH, expand=True)
+        
+        scrollbar = ttk.Scrollbar(list_frame, orient=VERTICAL, command=listbox.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        listbox.configure(yscrollcommand=scrollbar.set)
+
+        # 右侧：按钮区域
+        btn_frame = ttk.Frame(main_layout)
+        btn_frame.pack(side=RIGHT, fill=Y, padx=(10, 0))
+
+        # --- 功能函数 ---
+        def refresh_list():
+            listbox.delete(0, END)
+            for path in current_playlist:
+                # 在列表中只显示文件名，看起来更清爽
+                listbox.insert(END, os.path.basename(path))
+            list_frame.config(text=f"当前歌曲 ({len(current_playlist)} 首)")
+
+        def add_files():
+            # 暂时取消置顶以便文件选择框能正常显示在最前
+            editor.attributes('-topmost', False)
+            files = filedialog.askopenfilenames(
+                title="添加音频文件",
+                filetypes=[("Audio", "*.mp3 *.wav *.ogg *.flac *.m4a *.wma *.ape"), ("All", "*.*")],
+                parent=editor
+            )
+            editor.attributes('-topmost', True) # 恢复置顶
+            
+            if files:
+                for f in files:
+                    current_playlist.append(f)
+                refresh_list()
+                listbox.see(END) # 滚动到底部
+
+        def remove_selected():
+            selected_indices = list(listbox.curselection())
+            if not selected_indices: return
+            # 从后往前删，避免索引偏移导致删错
+            for i in reversed(selected_indices):
+                del current_playlist[i]
+            refresh_list()
+
+        def move_up():
+            selected = listbox.curselection()
+            if not selected or len(selected) > 1: return # 仅支持单选移动
+            idx = selected[0]
+            if idx > 0:
+                current_playlist[idx], current_playlist[idx-1] = current_playlist[idx-1], current_playlist[idx]
+                refresh_list()
+                listbox.selection_set(idx-1)
+                listbox.see(idx-1)
+
+        def move_down():
+            selected = listbox.curselection()
+            if not selected or len(selected) > 1: return
+            idx = selected[0]
+            if idx < len(current_playlist) - 1:
+                current_playlist[idx], current_playlist[idx+1] = current_playlist[idx+1], current_playlist[idx]
+                refresh_list()
+                listbox.selection_set(idx+1)
+                listbox.see(idx+1)
+
+        def clear_all():
+            if not current_playlist: return
+            editor.attributes('-topmost', False)
+            if messagebox.askyesno("确认", "确定要清空列表吗？", parent=editor):
+                current_playlist.clear()
+                refresh_list()
+            editor.attributes('-topmost', True)
+
+        # 按钮布局
+        ttk.Button(btn_frame, text="添加文件", command=add_files, bootstyle="success").pack(fill=X, pady=5)
+        ttk.Button(btn_frame, text="移除选中", command=remove_selected, bootstyle="warning").pack(fill=X, pady=5)
+        ttk.Separator(btn_frame, orient=HORIZONTAL).pack(fill=X, pady=10)
+        ttk.Button(btn_frame, text="上移 ↑", command=move_up, bootstyle="info-outline").pack(fill=X, pady=5)
+        ttk.Button(btn_frame, text="下移 ↓", command=move_down, bootstyle="info-outline").pack(fill=X, pady=5)
+        ttk.Separator(btn_frame, orient=HORIZONTAL).pack(fill=X, pady=10)
+        ttk.Button(btn_frame, text="清空列表", command=clear_all, bootstyle="danger-outline").pack(fill=X, pady=5)
+
+        # 底部确认区
+        bottom_frame = ttk.Frame(editor, padding=(0, 10, 0, 0))
+        bottom_frame.pack(side=BOTTOM, fill=X)
+        
+        result_container = [None] # 使用列表容器来存储返回值
+
+        def on_confirm():
+            result_container[0] = current_playlist
+            editor.destroy()
+        
+        def on_cancel():
+            editor.destroy()
+
+        ttk.Button(bottom_frame, text="保存并返回", command=on_confirm, bootstyle="primary").pack(side=RIGHT, padx=10)
+        ttk.Button(bottom_frame, text="取消", command=on_cancel, bootstyle="secondary").pack(side=RIGHT, padx=10)
+        
+        # 处理窗口关闭事件（点击X号等同于取消）
+        editor.protocol("WM_DELETE_WINDOW", on_cancel)
+
+        # 初始化列表显示
+        refresh_list()
+        
+        # 窗口定位居中
+        self.center_window(editor, parent=parent_dialog)
+        
+        # --- 核心：阻塞等待窗口关闭 ---
+        self.root.wait_window(editor)
+        
+        # 窗口关闭后，重新确保父窗口置顶，防止层级混乱
+        parent_dialog.attributes('-topmost', True)
+        parent_dialog.focus_force()
+
+        return result_container[0]
 
     def open_video_dialog(self, parent_dialog, task_to_edit=None, index=None):
         parent_dialog.destroy()
@@ -7673,22 +7596,24 @@ class TimedBroadcastApp:
                 ))
             else:
                 content = task.get('content', '')
-                content_preview = "" # <--- 初始化
+                content_preview = "" 
                 
-                # <--- 新增/修改：在这里统一处理显示内容 ---
-                if task_type == 'voice':
+                # --- ↓↓↓ 核心修改：增加对自定义列表的显示支持 ↓↓↓ ---
+                if task.get('audio_type') == 'playlist':
+                    count = len(task.get('custom_playlist', []))
+                    content_preview = f"自定义列表 (共 {count} 首)"
+                # --- ↑↑↑ 修改结束 ---
+                
+                elif task_type == 'voice':
                     source_text = task.get('source_text', '')
                     clean_content = source_text.replace('\n', ' ').replace('\r', '')
                     content_preview = (clean_content[:30] + '...') if len(clean_content) > 30 else clean_content
-                elif content: # 对 audio 和 video 类型生效
+                elif content: # 对 audio (single/folder) 和 video 类型生效
                     is_url = content.lower().startswith(('http://', 'https://', 'rtsp://', 'rtmp://', 'mms://'))
                     if is_url:
-                        # 如果是URL，直接显示URL（可以考虑截断过长的URL）
                         content_preview = (content[:40] + '...') if len(content) > 40 else content
                     else:
-                        # 如果是本地路径，显示文件名
                         content_preview = os.path.basename(content)
-                # --- 修改结束 ---
 
                 display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
                 self.task_tree.insert('', END, values=(
@@ -7696,7 +7621,7 @@ class TimedBroadcastApp:
                     task.get('status', ''),
                     task.get('time', ''),
                     display_mode,
-                    content_preview, # <--- 使用新生成的 content_preview
+                    content_preview, 
                     task.get('volume', ''),
                     task.get('weekday', ''),
                     task.get('date_range', '')
@@ -8634,37 +8559,68 @@ class TimedBroadcastApp:
 
     def _play_audio_task_internal(self, task):
         playlist = []
+        
+        # 获取基础参数
+        audio_type = task.get('audio_type', 'single')
+        interval_type = task.get('interval_type', 'first')
         repeat_count = int(task.get('interval_first', 1))
+        duration_seconds = int(task.get('interval_seconds', 0))
 
-        # 1. 构建播放列表
-        if task.get('audio_type') == 'single':
+        # --- 1. 根据类型构建播放列表 ---
+        
+        if audio_type == 'single':
             if os.path.exists(task['content']):
-                playlist = [task['content']] * repeat_count
-        else:
+                if interval_type == 'first':
+                    # 单文件模式：重复播放同一个文件 n 次
+                    playlist = [task['content']] * repeat_count
+                else: # 按秒播放
+                    # 循环播放同一个文件，直到时间到（给一个足够大的列表）
+                    playlist = [task['content']] * 1000 
+        
+        elif audio_type == 'folder':
             folder_path = task['content']
             if os.path.isdir(folder_path):
-                # 扩展支持的音频格式列表
+                # 支持的音频格式
                 supported_extensions = ('.mp3', '.wav', '.ogg', '.flac', '.m4a', '.wma', '.ape')
                 all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(supported_extensions)]
+                
+                if not all_files:
+                    self.log(f"警告：文件夹为空或无支持的音频文件: {folder_path}")
+                    return
+
                 if task.get('play_order') == 'random':
                     random.shuffle(all_files)
+                else:
+                    all_files.sort() # 顺序播时按文件名排序
                 
-                if task.get('interval_type', 'first') == 'first':
+                if interval_type == 'first':
+                    # 文件夹模式：播放前 n 个文件
                     playlist = all_files[:repeat_count]
-                else: # 如果是按秒播放，则需要整个文件夹列表
-                    playlist = all_files
+                else: # 按秒播放
+                    # 循环播放整个文件夹，直到时间到
+                    playlist = all_files * 100 
+                    
+        elif audio_type == 'playlist':
+            # --- [新增] 自定义列表模式逻辑 ---
+            custom_list = task.get('custom_playlist', [])
+            if custom_list:
+                if interval_type == 'first':
+                    # 自定义列表模式：将整个列表重复播放 n 遍
+                    playlist = custom_list * repeat_count
+                else: # 按秒播放
+                    # 循环播放整个列表，直到时间到
+                    playlist = custom_list * 1000
 
         if not playlist:
-            self.log(f"错误: 音频列表为空或文件/文件夹不存在，任务 '{task['name']}' 无法播放。")
+            self.log(f"错误: 播放列表为空或文件/文件夹不存在，任务 '{task['name']}' 无法播放。")
             return
 
-        # 2. 智能选择播放引擎
+        # --- 2. 开始播放 (包含VLC和Pygame两种引擎) ---
+        
         if VLC_AVAILABLE:
-            # --- 使用 VLC 播放 ---
-            self.log(f"检测到VLC，使用VLC引擎播放任务 '{task['name']}'。")
+            self.log(f"使用VLC引擎播放任务 '{task['name']}'")
             try:
                 instance = vlc.Instance()
-                # <--- 核心修复 1：将 player 赋值给 self.vlc_player ---
                 self.vlc_player = instance.media_player_new()
                 
                 if self.is_muted:
@@ -8673,9 +8629,13 @@ class TimedBroadcastApp:
                     self.vlc_player.audio_set_mute(False)
 
                 start_time = time.time()
-                duration_seconds = int(task.get('interval_seconds', 0))
 
                 for i, audio_path in enumerate(playlist):
+                    # --- [新增] 健壮性检查：文件不存在则跳过 ---
+                    if not os.path.exists(audio_path):
+                        self.log(f"警告：文件不存在，已跳过: {os.path.basename(audio_path)}")
+                        continue
+                    
                     if self._is_interrupted():
                         self.log(f"任务 '{task['name']}' 被新指令中断。")
                         break
@@ -8684,33 +8644,38 @@ class TimedBroadcastApp:
                     self.vlc_player.set_media(media)
                     self.vlc_player.audio_set_volume(int(task.get('volume', 80)))
                     self.vlc_player.play()
-                    time.sleep(0.2) # 等待播放开始
+                    time.sleep(0.2) # 等待VLC状态更新
 
                     last_text_update_time = 0
+                    # 播放循环
                     while self.vlc_player.get_state() in {vlc.State.Opening, vlc.State.Playing, vlc.State.Paused}:
                         if self._is_interrupted():
                             self.vlc_player.stop()
                             break
 
                         now = time.time()
-                        if task.get('interval_type') == 'seconds':
+                        # 处理按秒播放的停止逻辑
+                        if interval_type == 'seconds':
                             elapsed = now - start_time
                             if elapsed >= duration_seconds:
                                 self.vlc_player.stop()
                                 self.log(f"已达到 {duration_seconds} 秒播放时长限制。")
                                 break
+                            # 更新UI倒计时
                             if now - last_text_update_time >= 1.0:
                                 remaining = int(duration_seconds - elapsed)
                                 self.update_playing_text(f"[{task['name']}] {os.path.basename(audio_path)} (剩余 {remaining} 秒)")
                                 last_text_update_time = now
                         else:
+                            # 更新UI进度
                             if now - last_text_update_time >= 1.0:
                                 self.update_playing_text(f"[{task['name']}] {os.path.basename(audio_path)} ({i+1}/{len(playlist)})")
                                 last_text_update_time = now
                         
                         time.sleep(0.1)
                     
-                    if task.get('interval_type') == 'seconds' and (time.time() - start_time) >= duration_seconds:
+                    # 外层循环检查：如果总时间到了，跳出文件列表循环
+                    if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
                         break
                 
                 self.vlc_player.stop()
@@ -8718,25 +8683,26 @@ class TimedBroadcastApp:
             except Exception as e:
                 self.log(f"使用VLC播放音频失败: {e}")
             finally:
-                # <--- 核心修复 2：确保播放结束后清理 self.vlc_player ---
                 if self.vlc_player:
                     self.vlc_player.stop()
                     self.vlc_player = None
-                # --- 修复结束 ---
 
         else:
-            # --- 回退到 Pygame 播放 (这部分逻辑不变) ---
+            # --- 回退到 Pygame 播放 ---
             if not AUDIO_AVAILABLE:
                 self.log("错误: Pygame未初始化，无法播放音频。")
                 return
             
             self.log(f"VLC不可用，回退到Pygame引擎播放任务 '{task['name']}'。")
             supported_pygame_formats = ('.wav', '.mp3', '.ogg')
-            interval_type = task.get('interval_type', 'first')
-            duration_seconds = int(task.get('interval_seconds', 0))
             
             start_time = time.time()
             for i, audio_path in enumerate(playlist):
+                # --- [新增] 健壮性检查：文件不存在则跳过 ---
+                if not os.path.exists(audio_path):
+                    self.log(f"警告：文件不存在，已跳过: {os.path.basename(audio_path)}")
+                    continue
+
                 if self._is_interrupted():
                     self.log(f"任务 '{task['name']}' 被新指令中断。")
                     return
@@ -8745,11 +8711,11 @@ class TimedBroadcastApp:
                     self.log(f"警告: Pygame不支持播放 '{os.path.basename(audio_path)}'。请安装VLC播放器以支持更多格式。")
                     continue
 
+                # UI 状态更新
+                status_base = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)}"
                 if interval_type == 'first':
-                    status_msg = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)} ({i+1}/{len(playlist)})"
-                    self.update_playing_text(status_msg)
-
-                self.log(f"正在播放: {os.path.basename(audio_path)} ({i+1}/{len(playlist)})")
+                    self.update_playing_text(f"{status_base} ({i+1}/{len(playlist)})")
+                self.log(f"正在播放: {os.path.basename(audio_path)}")
 
                 try:
                     pygame.mixer.music.load(audio_path)
@@ -8770,6 +8736,7 @@ class TimedBroadcastApp:
                             pygame.mixer.music.stop()
                             return
 
+                        # 处理按秒播放的停止逻辑
                         if interval_type == 'seconds':
                             now = time.time()
                             elapsed = now - start_time
@@ -8779,12 +8746,12 @@ class TimedBroadcastApp:
                                 return
                             if now - last_text_update_time >= 1.0:
                                 remaining_seconds = int(duration_seconds - elapsed)
-                                status_msg = f"[{task['name']}] 正在播放: {os.path.basename(audio_path)} (剩余 {remaining_seconds} 秒)"
-                                self.update_playing_text(status_msg)
+                                self.update_playing_text(f"{status_base} (剩余 {remaining_seconds} 秒)")
                                 last_text_update_time = now
 
                         time.sleep(0.1)
 
+                    # 外层循环检查
                     if interval_type == 'seconds' and (time.time() - start_time) >= duration_seconds:
                         return
                 except Exception as e:
@@ -9532,11 +9499,6 @@ class TimedBroadcastApp:
         self.log("程序已从托盘恢复。")
 
     def quit_app(self, icon=None, item=None):
-        # --- ↓↓↓ 新增代码：确保退出时停止串流 ↓↓↓ ---
-        if self.streaming_process:
-                self._stop_desktop_streaming()
-        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
-
         # --- ↓↓↓ 新增/修正：在退出时写入时间戳文件 ↓↓↓ ---
         try:
             with open(TIMESTAMP_FILE, "w") as f:
