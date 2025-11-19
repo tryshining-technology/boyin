@@ -5794,10 +5794,14 @@ class TimedBroadcastApp:
             list_frame.config(text=f"当前歌曲 ({len(current_playlist)} 首)")
 
         def add_files():
-            # 1. 暂时取消置顶
+            # --- ↓↓↓ 核心修复开始 ↓↓↓ ---
+            # 1. 暂时取消【两个窗口】的置顶：编辑器本身 和 它的父窗口(音频节目窗口)
             editor.attributes('-topmost', False)
-            # 2. [关键新增] 强制刷新界面，确保系统应用了“取消置顶”的状态
-            editor.update() 
+            parent_dialog.attributes('-topmost', False) 
+            
+            # 2. 强制刷新界面，确保系统应用了“取消置顶”的状态
+            editor.update()
+            parent_dialog.update()
             
             files = filedialog.askopenfilenames(
                 title="添加音频文件",
@@ -5805,10 +5809,13 @@ class TimedBroadcastApp:
                 parent=editor
             )
             
-            # 3. 恢复置顶
-            editor.attributes('-topmost', True)
-            # 4. [关键新增] 抢回输入焦点，防止焦点丢失
+            # 3. 恢复【两个窗口】的置顶
+            parent_dialog.attributes('-topmost', True) # 先恢复父窗口
+            editor.attributes('-topmost', True)        # 再恢复子窗口
+            
+            # 4. 抢回输入焦点
             editor.focus_force() 
+            # --- ↑↑↑ 核心修复结束 ↑↑↑ ---
             
             if files:
                 for f in files:
@@ -5846,10 +5853,15 @@ class TimedBroadcastApp:
 
         def clear_all():
             if not current_playlist: return
+            # 同样，弹窗确认时也建议暂时取消置顶，防止被遮挡（虽然messagebox通常处理得较好）
             editor.attributes('-topmost', False)
+            parent_dialog.attributes('-topmost', False)
+            
             if messagebox.askyesno("确认", "确定要清空列表吗？", parent=editor):
                 current_playlist.clear()
                 refresh_list()
+            
+            parent_dialog.attributes('-topmost', True)
             editor.attributes('-topmost', True)
 
         # 按钮布局
@@ -8566,7 +8578,8 @@ class TimedBroadcastApp:
 
     def _play_audio_task_internal(self, task):
         # 在这里导入，确保可用，无需去文件头添加
-        import pathlib 
+        import pathlib
+        import urllib.parse 
 
         playlist = []
         
@@ -8643,13 +8656,22 @@ class TimedBroadcastApp:
                         self.log(f"任务 '{task['name']}' 被新指令中断。")
                         break
                     
-                    # 2. [核心修复] 使用 pathlib 将路径转换为标准的 URI 格式
-                    # 这能解决所有中文、空格、特殊符号（如全角冒号）导致的路径识别问题
+                    # 2. [核心修复 V3] 终极路径转换逻辑
+                    # 目的：确保全角冒号、井号、空格等特殊字符被正确编码为VLC可识别的URI
                     try:
+                        # 方法A: 优先使用标准库转换
                         uri_path = pathlib.Path(audio_path).absolute().as_uri()
                     except Exception:
-                        # 如果转换失败，作为兜底，使用简单的替换
-                        uri_path = audio_path.replace('\\', '/')
+                        # 方法B: 如果标准库失败，手动构建 (极少发生，但作为保险)
+                        try:
+                            abs_path = os.path.abspath(audio_path).replace('\\', '/')
+                            # 显式保留冒号和斜杠不被编码，只编码中文、空格等其他字符
+                            # 注意：这里 safe='/:' 是为了防止把 C:/ 的冒号也给转义了
+                            encoded_path = urllib.parse.quote(abs_path, safe='/:')
+                            uri_path = f"file:///{encoded_path}"
+                        except Exception:
+                            # 方法C: 实在不行，传原始路径
+                            uri_path = audio_path
 
                     # 3. 强制重置
                     self.vlc_player.stop()
@@ -8667,6 +8689,8 @@ class TimedBroadcastApp:
                         
                         if state == vlc.State.Error:
                             self.log(f"VLC 无法播放文件 (Error状态): {os.path.basename(audio_path)}")
+                            # 仅在出错时打印URI，方便调试
+                            print(f"Debug - Playback Failed for URI: {uri_path}")
                             break
                         
                         if state in {vlc.State.Opening, vlc.State.Buffering, vlc.State.Playing}:
