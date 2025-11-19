@@ -5794,20 +5794,27 @@ class TimedBroadcastApp:
             list_frame.config(text=f"当前歌曲 ({len(current_playlist)} 首)")
 
         def add_files():
-            # 暂时取消置顶以便文件选择框能正常显示在最前
+            # 1. 暂时取消置顶
             editor.attributes('-topmost', False)
+            # 2. [关键新增] 强制刷新界面，确保系统应用了“取消置顶”的状态
+            editor.update() 
+            
             files = filedialog.askopenfilenames(
                 title="添加音频文件",
                 filetypes=[("Audio", "*.mp3 *.wav *.ogg *.flac *.m4a *.wma *.ape"), ("All", "*.*")],
                 parent=editor
             )
-            editor.attributes('-topmost', True) # 恢复置顶
+            
+            # 3. 恢复置顶
+            editor.attributes('-topmost', True)
+            # 4. [关键新增] 抢回输入焦点，防止焦点丢失
+            editor.focus_force() 
             
             if files:
                 for f in files:
                     current_playlist.append(f)
                 refresh_list()
-                listbox.see(END) # 滚动到底部
+                listbox.see(END)
 
         def remove_selected():
             selected_indices = list(listbox.curselection())
@@ -9428,7 +9435,7 @@ class TimedBroadcastApp:
         if x + width > screen_width: x = screen_width - width
         if y + height > screen_height: y = screen_height - height
         
-        win.geometry(f'{width}x{height}+{x}+{y}')
+        win.geometry(f'+{x}+{y}')
 
     def _normalize_time_string(self, time_str):
         try:
