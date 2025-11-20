@@ -682,6 +682,7 @@ class TimedBroadcastApp:
         media_tab = ttk.Frame(notebook, padding=10)
         wallpaper_tab = ttk.Frame(notebook, padding=10)
         timer_tab = ttk.Frame(notebook, padding=10)
+        remote_tab = ttk.Frame(notebook, padding=10)
 
         notebook.add(screenshot_tab, text=' 定时截屏 ')
         notebook.add(execute_tab, text=' 定时运行 ')
@@ -690,6 +691,7 @@ class TimedBroadcastApp:
         notebook.add(media_tab, text=' 媒体处理 ')
         notebook.add(wallpaper_tab, text=' 网络壁纸 ')
         notebook.add(timer_tab, text=' 计时工具 ')
+        notebook.add(remote_tab, text=' 远程控制 ')
 
         self._build_screenshot_ui(screenshot_tab)
         self._build_execute_ui(execute_tab)
@@ -698,6 +700,7 @@ class TimedBroadcastApp:
         self._build_media_processing_ui(media_tab)
         self._build_wallpaper_ui(wallpaper_tab)
         self._build_timer_ui(timer_tab)
+        self._build_remote_control_ui(remote_tab)
 
         return page_frame
 
@@ -3009,6 +3012,481 @@ class TimedBroadcastApp:
         self.is_fullscreen_exclusive = False # 解除“绝对霸权”标志
         self.log("全屏计时器已关闭。")
 #↑全套计时功能代码结束
+
+#↓全套远程控制代码
+
+    def _build_remote_control_ui(self, parent_frame):
+        # 1. 绑定变量 (从 settings 加载)
+        self.remote_port_var = tk.StringVar(value=self.settings.get("remote_port", "8888"))
+        self.remote_auth_var = tk.BooleanVar(value=self.settings.get("remote_auth_enabled", False))
+        self.remote_user_var = tk.StringVar(value=self.settings.get("remote_username", "admin"))
+        self.remote_pass_var = tk.StringVar(value=self.settings.get("remote_password", "123"))
+        
+        # 模式选择：如果 remote_enabled 为 True，则是永久模式，否则默认临时模式
+        initial_mode = "permanent" if self.settings.get("remote_enabled") else "temp"
+        self.remote_mode_var = tk.StringVar(value=initial_mode)
+        self.remote_temp_min_var = tk.StringVar(value=self.settings.get("remote_temp_minutes", "60"))
+        
+        # 运行时状态标志
+        self.remote_server_active = False 
+        self.remote_stop_timer = None
+
+        # 2. 使用滚动框架防止屏幕太小显示不全
+        scrolled = ScrolledFrame(parent_frame, autohide=True)
+        scrolled.pack(fill=BOTH, expand=True)
+        container = scrolled.container
+
+        # --- 区域 A: 状态显示 ---
+        status_lf = ttk.LabelFrame(container, text="服务状态", padding=15)
+        status_lf.pack(fill=X, pady=10, padx=5)
+        
+        self.remote_status_label = ttk.Label(status_lf, text="🔴 服务未启动", font=self.font_14_bold, foreground="gray")
+        self.remote_status_label.pack(anchor='w')
+        
+        self.remote_url_label = ttk.Label(status_lf, text="本机访问地址: -", font=self.font_11, bootstyle="info")
+        self.remote_url_label.pack(anchor='w', pady=(5, 0))
+
+        # --- 区域 B: 基础配置 ---
+        config_lf = ttk.LabelFrame(container, text="基础配置", padding=15)
+        config_lf.pack(fill=X, pady=10, padx=5)
+        
+        # 端口
+        port_frame = ttk.Frame(config_lf)
+        port_frame.pack(fill=X, pady=5)
+        ttk.Label(port_frame, text="监听端口:").pack(side=LEFT)
+        ttk.Entry(port_frame, textvariable=self.remote_port_var, width=8, font=self.font_11).pack(side=LEFT, padx=10)
+        ttk.Label(port_frame, text="(默认8888，如冲突请修改)", bootstyle="secondary").pack(side=LEFT)
+
+        # 验证
+        auth_frame = ttk.Frame(config_lf)
+        auth_frame.pack(fill=X, pady=5)
+        ttk.Checkbutton(auth_frame, text="启用账号密码验证 (推荐)", variable=self.remote_auth_var, bootstyle="round-toggle", command=self._toggle_remote_auth_ui).pack(side=LEFT)
+        
+        self.auth_inputs_frame = ttk.Frame(config_lf)
+        self.auth_inputs_frame.pack(fill=X, pady=5)
+        ttk.Label(self.auth_inputs_frame, text="用户名:").pack(side=LEFT)
+        ttk.Entry(self.auth_inputs_frame, textvariable=self.remote_user_var, width=12, font=self.font_11).pack(side=LEFT, padx=(5, 15))
+        ttk.Label(self.auth_inputs_frame, text="密码:").pack(side=LEFT)
+        ttk.Entry(self.auth_inputs_frame, textvariable=self.remote_pass_var, width=12, font=self.font_11).pack(side=LEFT, padx=5)
+        
+        self._toggle_remote_auth_ui() # 初始化输入框的禁用/启用状态
+
+        # --- 区域 C: 启动模式 ---
+        mode_lf = ttk.LabelFrame(container, text="启动模式", padding=15)
+        mode_lf.pack(fill=X, pady=10, padx=5)
+        
+        ttk.Radiobutton(mode_lf, text="永久开启 (每次随软件自动启动)", variable=self.remote_mode_var, value="permanent").pack(anchor='w', pady=5)
+        
+        temp_frame = ttk.Frame(mode_lf)
+        temp_frame.pack(anchor='w', pady=5)
+        ttk.Radiobutton(temp_frame, text="临时开启", variable=self.remote_mode_var, value="temp").pack(side=LEFT)
+        ttk.Label(temp_frame, text="，运行").pack(side=LEFT)
+        ttk.Entry(temp_frame, textvariable=self.remote_temp_min_var, width=5, font=self.font_11).pack(side=LEFT, padx=5)
+        ttk.Label(temp_frame, text="分钟后自动关闭").pack(side=LEFT)
+
+        # --- 区域 D: 操作按钮 ---
+        btn_frame = ttk.Frame(container, padding=10)
+        btn_frame.pack(fill=X, pady=10)
+        
+        # 这里的 command 暂时留空或绑定到 pass，下一步我们再写逻辑
+        self.remote_start_btn = ttk.Button(btn_frame, text="▶ 启动服务", bootstyle="success", command=self._start_remote_service)
+        self.remote_start_btn.pack(side=LEFT, padx=10, ipady=5, expand=True, fill=X)
+        
+        self.remote_stop_btn = ttk.Button(btn_frame, text="⏹ 停止服务", bootstyle="danger", command=self._stop_remote_service, state=DISABLED)
+        self.remote_stop_btn.pack(side=LEFT, padx=10, ipady=5, expand=True, fill=X)
+
+    def _toggle_remote_auth_ui(self):
+        """根据复选框状态，启用或禁用用户名密码输入框"""
+        state = NORMAL if self.remote_auth_var.get() else DISABLED
+        for child in self.auth_inputs_frame.winfo_children():
+            try:
+                child.configure(state=state)
+            except: pass
+
+    def _get_local_ip(self):
+        """获取本机局域网IP"""
+        import socket
+        try:
+            # 不需要真正连接外网，只是探测路由路径
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except:
+            return "127.0.0.1"
+
+    def _start_remote_service(self):
+        """启动服务按钮逻辑"""
+        # 1. 验证输入
+        try:
+            port = int(self.remote_port_var.get())
+            temp_min = int(self.remote_temp_min_var.get())
+            if not (1024 <= port <= 65535):
+                raise ValueError("端口号建议在 1024-65535 之间")
+        except ValueError as e:
+            messagebox.showerror("输入错误", f"端口或分钟数格式不正确。\n{e}", parent=self.root)
+            return
+
+        # 2. 保存设置
+        is_permanent = (self.remote_mode_var.get() == "permanent")
+        self.settings.update({
+            "remote_enabled": is_permanent, # 只有永久模式才保存为 True (下次自动启动)
+            "remote_port": str(port),
+            "remote_auth_enabled": self.remote_auth_var.get(),
+            "remote_username": self.remote_user_var.get(),
+            "remote_password": self.remote_pass_var.get(),
+            "remote_temp_minutes": str(temp_min)
+        })
+        self.save_settings()
+
+        # 3. 检查端口变更
+        # 如果服务线程已经启动过，且用户修改了端口，必须重启软件
+        if hasattr(self, 'flask_thread_started') and self.flask_thread_started:
+            if hasattr(self, 'current_running_port') and self.current_running_port != port:
+                messagebox.showwarning("重启生效", "检测到您修改了端口号。\n\n由于技术限制，修改端口需要重启软件才能生效。\n当前服务将继续在旧端口运行。", parent=self.root)
+                port = self.current_running_port # 回滚到旧端口
+                self.remote_port_var.set(str(port))
+
+        # 4. 启动 Flask 线程 (如果还没启动)
+        if not hasattr(self, 'flask_thread_started'):
+            # 注意：_run_flask_server 方法将在下一步实现
+            threading.Thread(target=self._run_flask_server, args=(port,), daemon=True).start()
+            self.flask_thread_started = True
+            self.current_running_port = port
+        
+        # 5. 更新 UI 状态
+        self.remote_server_active = True
+        ip = self._get_local_ip()
+        url = f"http://{ip}:{port}"
+        
+        self.remote_status_label.config(text="🟢 服务运行中", foreground="green")
+        self.remote_url_label.config(text=f"本机访问地址: {url}")
+        
+        # 锁定输入框，防止运行时修改
+        self.remote_start_btn.config(state=DISABLED)
+        self.remote_stop_btn.config(state=NORMAL)
+        self.remote_port_var.set(str(port)) # 确保显示的是实际运行端口
+        
+        # 6. 处理临时模式倒计时
+        if not is_permanent:
+            if self.remote_stop_timer:
+                self.root.after_cancel(self.remote_stop_timer)
+            
+            timeout_ms = temp_min * 60 * 1000
+            self.remote_stop_timer = self.root.after(timeout_ms, self._auto_stop_remote_service)
+            self.log(f"远程控制已启动 (临时模式)，将在 {temp_min} 分钟后自动关闭。")
+        else:
+            self.log(f"远程控制已启动 (永久模式)。")
+
+    def _stop_remote_service(self):
+        """停止服务按钮逻辑"""
+        self.remote_server_active = False
+        
+        # 取消倒计时
+        if self.remote_stop_timer:
+            self.root.after_cancel(self.remote_stop_timer)
+            self.remote_stop_timer = None
+            
+        # 更新 UI
+        self.remote_status_label.config(text="🔴 服务已暂停", foreground="gray")
+        self.remote_url_label.config(text="本机访问地址: -")
+        self.remote_start_btn.config(state=NORMAL)
+        self.remote_stop_btn.config(state=DISABLED)
+        
+        self.log("远程控制服务已暂停 (端口仍被占用，重启软件可彻底释放)。")
+
+    def _auto_stop_remote_service(self):
+        """倒计时结束自动停止"""
+        if self.remote_server_active:
+            self.log("临时远程控制时间已到，自动暂停服务。")
+            self._stop_remote_service()
+            messagebox.showinfo("提示", "远程控制服务已因超时自动暂停。", parent=self.root)
+
+    def _run_flask_server(self, port):
+        """后台运行的 Flask Web 服务器"""
+        try:
+            from flask import Flask, jsonify, render_template_string, request, Response
+            from functools import wraps
+        except ImportError:
+            self.log("错误：未安装 Flask 库，无法启动远程控制。")
+            return
+
+        app = Flask(__name__)
+        
+        # 禁用 Flask 的控制台刷屏日志
+        import logging
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.ERROR)
+
+        # --- 1. 权限验证装饰器 ---
+        def check_auth(username, password):
+            """检查用户名密码是否匹配设置"""
+            return username == self.settings.get('remote_username') and \
+                   password == self.settings.get('remote_password')
+
+        def authenticate():
+            """发送 401 响应，触发浏览器弹窗登录"""
+            return Response(
+            '需要登录才能访问控制台。\n'
+            'Login Required.', 401,
+            {'WWW-Authenticate': 'Basic realm="Broadcast Control"'})
+
+        def requires_auth(f):
+            @wraps(f)
+            def decorated(*args, **kwargs):
+                # A. 检查服务是否处于“开启”状态 (软开关)
+                if not self.remote_server_active:
+                    return "Service is paused. Please start it on the PC.", 503
+                
+                # B. 检查是否启用密码验证
+                if self.settings.get('remote_auth_enabled', False):
+                    auth = request.authorization
+                    if not auth or not check_auth(auth.username, auth.password):
+                        return authenticate()
+                return f(*args, **kwargs)
+            return decorated
+
+        # --- 2. 前端 HTML 模板 (响应式设计) ---
+        html_template = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>移动播控台</title>
+            <style>
+                :root { --primary: #007bff; --danger: #dc3545; --success: #28a745; --bg: #f4f6f9; --card: #ffffff; }
+                body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); margin: 0; padding: 15px; color: #333; }
+                .container { max-width: 1000px; margin: 0 auto; }
+                
+                /* 电脑端双栏布局 */
+                @media (min-width: 800px) {
+                    .grid-layout { display: grid; grid-template-columns: 1fr 1.2fr; gap: 20px; }
+                }
+                
+                .card { background: var(--card); border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 15px; }
+                h2 { margin-top: 0; font-size: 1.1rem; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; color: #555; }
+                
+                .status-box { background: #e9ecef; padding: 12px; border-radius: 8px; text-align: center; margin-bottom: 15px; font-weight: bold; color: #495057; font-size: 0.9rem; }
+                
+                .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; color: white; cursor: pointer; margin-bottom: 10px; -webkit-tap-highlight-color: transparent; }
+                .btn:active { opacity: 0.8; transform: scale(0.98); }
+                .btn-danger { background: var(--danger); }
+                .btn-success { background: var(--success); }
+                .btn-primary { background: var(--primary); }
+                .btn-outline { background: transparent; border: 2px solid var(--primary); color: var(--primary); }
+                
+                select, input, textarea { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; margin-bottom: 10px; font-family: inherit; }
+                textarea { resize: vertical; min-height: 80px; }
+                
+                .row { display: flex; gap: 10px; }
+                .col { flex: 1; }
+                label { display: block; margin-bottom: 5px; font-size: 0.9rem; color: #666; }
+                
+                .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; padding: 10px 20px; border-radius: 20px; display: none; z-index: 9999; font-size: 14px; }
+            </style>
+        </head>
+        <body>
+            <div class="toast" id="toast">操作成功</div>
+            <div class="container">
+                <div class="grid-layout">
+                    <!-- 左侧：控制区 -->
+                    <div class="left-panel">
+                        <div class="card">
+                            <h2>📡 状态与控制</h2>
+                            <div class="status-box" id="status_text">连接中...</div>
+                            <div class="row">
+                                <button class="btn btn-danger col" onclick="api('stop')">⏹ 停止</button>
+                                <button class="btn btn-outline col" onclick="api('mute')" id="mute_btn">🔇 静音</button>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <h2>▶️ 节目点播</h2>
+                            <select id="task_select">
+                                {% for task in tasks %}
+                                <option value="{{ task.name }}">{{ task.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <button class="btn btn-success" onclick="playSelected()">立即插队播放</button>
+                        </div>
+                    </div>
+
+                    <!-- 右侧：插播区 -->
+                    <div class="right-panel">
+                        <div class="card">
+                            <h2>💬 实时语音插播</h2>
+                            <textarea id="tts_text" placeholder="在此输入通知内容..."></textarea>
+                            
+                            <div class="row">
+                                <div class="col">
+                                    <label>播音员</label>
+                                    <select id="tts_voice">
+                                        <option value="male">男声 (云扬)</option>
+                                        <option value="female">女声 (晓晓)</option>
+                                    </select>
+                                </div>
+                                <div class="col">
+                                    <label>播放次数</label>
+                                    <input type="number" id="tts_repeat" value="2" min="1" max="10">
+                                </div>
+                            </div>
+                            
+                            <button class="btn btn-primary" onclick="sendTTS()">🚀 发送语音插播</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                function showToast(msg) {
+                    const t = document.getElementById('toast');
+                    t.innerText = msg;
+                    t.style.display = 'block';
+                    setTimeout(() => t.style.display = 'none', 2500);
+                }
+
+                function api(action, data={}) {
+                    fetch('/api/' + action, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(data)
+                    }).then(res => {
+                        if(res.status === 401) { location.reload(); return; }
+                        if(res.status === 503) { showToast("服务已暂停"); return; }
+                        return res.json();
+                    }).then(res => {
+                        if(res) { showToast(res.message); updateStatus(); }
+                    }).catch(err => showToast("连接失败"));
+                }
+
+                function playSelected() {
+                    const name = document.getElementById('task_select').value;
+                    if(!name) return;
+                    if(confirm('确定要立即播放 "' + name + '" 吗？')) {
+                        api('play', {name: name});
+                    }
+                }
+
+                function sendTTS() {
+                    const text = document.getElementById('tts_text').value;
+                    if(!text) return alert("请输入内容");
+                    const voice = document.getElementById('tts_voice').value;
+                    const repeat = document.getElementById('tts_repeat').value;
+                    
+                    api('intercut', {
+                        text: text,
+                        voice_type: voice,
+                        repeat: parseInt(repeat)
+                    });
+                }
+
+                function updateStatus() {
+                    fetch('/api/status').then(res => res.json()).then(data => {
+                        document.getElementById('status_text').innerText = data.status;
+                        const muteBtn = document.getElementById('mute_btn');
+                        if(data.is_muted) {
+                            muteBtn.innerText = "🔈 取消静音";
+                            muteBtn.style.background = "#ffc107";
+                            muteBtn.style.color = "#000";
+                            muteBtn.style.border = "none";
+                        } else {
+                            muteBtn.innerText = "🔇 一键静音";
+                            muteBtn.style.background = "transparent";
+                            muteBtn.style.color = "#007bff";
+                            muteBtn.style.border = "2px solid #007bff";
+                        }
+                    }).catch(e => {});
+                }
+                
+                setInterval(updateStatus, 3000);
+                updateStatus();
+            </script>
+        </body>
+        </html>
+        """
+
+        # --- 3. API 路由定义 ---
+
+        @app.route('/')
+        @requires_auth
+        def index():
+            # 过滤出有效的任务列表传给网页
+            valid_tasks = [t for t in self.tasks if t.get('status') == '启用']
+            return render_template_string(html_template, tasks=valid_tasks)
+
+        @app.route('/api/status')
+        @requires_auth
+        def api_status():
+            # 获取当前播放状态文本 (线程安全读取)
+            status_text = "未知"
+            if hasattr(self, 'status_labels') and len(self.status_labels) > 2:
+                try:
+                    status_text = self.status_labels[2].cget("text")
+                except: pass
+            return jsonify({'status': status_text, 'is_muted': self.is_muted})
+
+        @app.route('/api/stop', methods=['POST'])
+        @requires_auth
+        def api_stop():
+            self.stop_current_playback()
+            return jsonify({'message': '已发送停止指令'})
+
+        @app.route('/api/mute', methods=['POST'])
+        @requires_auth
+        def api_mute():
+            self.toggle_mute_all()
+            return jsonify({'message': '静音状态已切换'})
+
+        @app.route('/api/play', methods=['POST'])
+        @requires_auth
+        def api_play():
+            data = request.json
+            task_name = data.get('name')
+            # 查找任务
+            target_task = next((t for t in self.tasks if t['name'] == task_name), None)
+            if target_task:
+                # 复用现有的高优先级播放逻辑
+                self.playback_command_queue.put(('PLAY_INTERRUPT', (target_task, "manual_remote")))
+                return jsonify({'message': f'开始播放: {task_name}'})
+            return jsonify({'message': '未找到该任务'})
+
+        @app.route('/api/intercut', methods=['POST'])
+        @requires_auth
+        def api_intercut():
+            data = request.json
+            text = data.get('text')
+            voice_type = data.get('voice_type') # male / female
+            repeat = data.get('repeat', 1)
+            
+            # 映射到具体的语音名称 (复用 Edge-TTS 映射)
+            voice_name = '在线-云扬 (男)' if voice_type == 'male' else '在线-晓晓 (女)'
+            
+            # 构造任务数据
+            task_data = {
+                'text': text,
+                'params': {'voice': voice_name, 'speed': '0', 'pitch': '0', 'volume': '100'},
+                'repeats': repeat
+            }
+            
+            # 清除停止信号并放入队列 (复用插播逻辑)
+            if hasattr(self, 'intercut_stop_event'):
+                self.intercut_stop_event.clear()
+            if hasattr(self, 'intercut_queue'):
+                self.intercut_queue.put(task_data)
+            
+            return jsonify({'message': '插播指令已发送'})
+
+        # --- 4. 启动服务 ---
+        # host='0.0.0.0' 允许局域网访问
+        # use_reloader=False 防止在某些环境中二次启动导致端口冲突
+        try:
+            app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
+        except Exception as e:
+            self.log(f"Web服务器异常退出: {e}")
+
+    # --- ↑↑↑ 远程控制模块结束 ↑↑↑ ---
 
 # --- 动态语音功能的全套方法 ---
 
@@ -9370,7 +9848,13 @@ class TimedBroadcastApp:
             "timer_duration": "00:10:00",
             "timer_show_clock": True,
             "timer_play_sound": True,
-            "timer_sound_file": ""
+            "timer_sound_file": "",
+            "remote_enabled": False,
+            "remote_port": "8888",
+            "remote_auth_enabled": False,
+            "remote_username": "admin",
+            "remote_password": "123",
+            "remote_temp_minutes": "60"
         }
         if os.path.exists(SETTINGS_FILE):
             try:
