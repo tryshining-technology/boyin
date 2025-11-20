@@ -490,7 +490,11 @@ class TimedBroadcastApp:
                                                   command=self._prompt_for_password_unlock)
 
         for i, text in enumerate(status_texts):
-            label = ttk.Label(self.status_frame, text=f"{text}: --", font=self.font_11,
+            initial_value = "--"
+            if text == "播放状态":
+                initial_value = "待机" # <--- 关键修改
+            
+            label = ttk.Label(self.status_frame, text=f"{text}: {initial_value}", font=self.font_11,
                               bootstyle=(PRIMARY, INVERSE) if i % 2 == 0 else (SECONDARY, INVERSE),
                               padding=(15, 5))
             label.pack(side=LEFT, padx=2, fill=Y)
@@ -3636,33 +3640,53 @@ class TimedBroadcastApp:
             self._refresh_song_library()
 
     def _refresh_song_library(self):
-        """扫描所有文件夹，建立歌曲索引"""
+        """扫描所有文件夹，建立歌曲索引 (多线程防卡死版)"""
         folders = self.settings.get("song_request_folders", [])
         if not folders:
             self.song_library = []
             self.sr_count_label.config(text="歌曲总数: 0")
             return
 
-        self.log("正在扫描点歌台曲库...")
-        temp_library = []
-        supported_ext = ('.mp3', '.wav', '.flac', '.ogg', '.m4a', '.wma')
-        
-        for folder in folders:
-            if not os.path.exists(folder): continue
-            for root, _, files in os.walk(folder):
-                for f in files:
-                    if f.lower().endswith(supported_ext):
-                        # 存储完整信息
-                        temp_library.append({
-                            'name': f,
-                            'path': os.path.join(root, f),
-                            'folder': folder
-                        })
-        
-        self.song_library = temp_library
-        count = len(self.song_library)
-        self.sr_count_label.config(text=f"歌曲总数: {count}")
-        self.log(f"曲库扫描完成，共找到 {count} 首歌曲。")
+        # 禁用刷新按钮，防止重复点击
+        # (假设按钮定义为 self.sr_refresh_btn，如果没有定义变量名，这行可忽略或需去UI构建处补上变量名)
+        # 这里简单处理，只改状态文字
+        self.sr_count_label.config(text="正在扫描中...", foreground="red")
+        self.log("开始后台扫描点歌台曲库...")
+
+        def scan_worker():
+            temp_library = []
+            supported_ext = ('.mp3', '.wav', '.flac', '.ogg', '.m4a', '.wma')
+            
+            for folder in folders:
+                if not os.path.exists(folder): continue
+                try:
+                    for root, dirs, files in os.walk(folder):
+                        # --- 简单的过滤逻辑 ---
+                        # 跳过隐藏文件夹和系统文件夹
+                        dirs[:] = [d for d in dirs if not d.startswith('.') and '$' not in d]
+                        
+                        for f in files:
+                            if f.lower().endswith(supported_ext):
+                                temp_library.append({
+                                    'name': f,
+                                    'path': os.path.join(root, f),
+                                    'folder': folder
+                                })
+                except Exception as e:
+                    print(f"扫描出错: {e}")
+
+            # 扫描结束，回到主线程更新UI
+            def update_ui():
+                self.song_library = temp_library
+                count = len(self.song_library)
+                if hasattr(self, 'sr_count_label'):
+                    self.sr_count_label.config(text=f"歌曲总数: {count}", foreground="black")
+                self.log(f"曲库扫描完成，共找到 {count} 首歌曲。")
+            
+            self.root.after(0, update_ui)
+
+        # 在后台线程运行
+        threading.Thread(target=scan_worker, daemon=True).start()
 
     def _delete_song_request(self):
         """删除选中的点歌请求"""
@@ -3708,23 +3732,26 @@ class TimedBroadcastApp:
             ))
 
     def _toggle_song_request_service(self):
-        """启动/停止点歌台服务"""
-        # 如果正在运行，则停止
+        """启动/停止点歌台服务 (含自动播放逻辑)"""
         if self.song_request_server_active:
+            # --- 停止逻辑 ---
             self.song_request_server_active = False
             self.sr_status_label.config(text="🔴 服务已停止", foreground="gray")
             self.sr_url_label.config(text="地址: -")
             self.sr_toggle_btn.config(text="启动服务", bootstyle="success")
+            
+            # 联动：同时停止队列播放
+            self._stop_song_queue_play() 
+            
             self.log("点歌台服务已停止。")
         else:
-            # 启动
+            # --- 启动逻辑 ---
             try:
                 port = int(self.sr_port_var.get())
             except ValueError:
                 messagebox.showerror("错误", "端口号必须是整数", parent=self.root)
                 return
 
-            # 保存当前配置
             self.settings.update({
                 "song_request_port": str(port),
                 "song_request_rate_limit": self.sr_rate_limit_var.get(),
@@ -3735,7 +3762,6 @@ class TimedBroadcastApp:
             })
             self.save_settings()
 
-            # 启动线程
             threading.Thread(target=self._run_song_request_server, args=(port,), daemon=True).start()
             
             self.song_request_server_active = True
@@ -3745,9 +3771,12 @@ class TimedBroadcastApp:
             self.sr_status_label.config(text="🟢 服务运行中", foreground="green")
             self.sr_url_label.config(text=f"访问地址: {url}")
             self.sr_toggle_btn.config(text="停止服务", bootstyle="danger")
+            
+            # 联动：自动启动队列播放 (实现无人值守)
+            self._start_song_queue_play()
+            
             self.log(f"点歌台服务已启动，监听端口: {port}")
             
-            # 如果曲库为空，自动刷新一次
             if not self.song_library:
                 self._refresh_song_library()
 
@@ -8536,8 +8565,10 @@ class TimedBroadcastApp:
         dialog.title("周几或几号")
         dialog.resizable(False, False)
         dialog.transient(self.root)
+        
+        # 1. 核心修复：先隐藏，居中后再显示，防止闪烁和跑偏
+        dialog.withdraw() 
 
-        # --- ↓↓↓ 【最终BUG修复 V4】核心修改 ↓↓↓ ---
         dialog.attributes('-topmost', True)
         self.root.attributes('-disabled', True)
         
@@ -8545,24 +8576,35 @@ class TimedBroadcastApp:
             self.root.attributes('-disabled', False)
             dialog.destroy()
             self.root.focus_force()
-        # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
+        
         week_type_var = tk.StringVar(value="week")
         week_frame = ttk.LabelFrame(main_frame, text="按周", padding=10)
         week_frame.pack(fill=X, pady=5)
         ttk.Radiobutton(week_frame, text="每周", variable=week_type_var, value="week").grid(row=0, column=0, sticky='w')
+        
         weekdays = [("周一", 1), ("周二", 2), ("周三", 3), ("周四", 4), ("周五", 5), ("周六", 6), ("周日", 7)]
         week_vars = {num: tk.IntVar(value=1) for day, num in weekdays}
-        for i, (day, num) in enumerate(weekdays): ttk.Checkbutton(week_frame, text=day, variable=week_vars[num]).grid(row=(i // 4) + 1, column=i % 4, sticky='w', padx=10, pady=3)
+        for i, (day, num) in enumerate(weekdays): 
+            ttk.Checkbutton(week_frame, text=day, variable=week_vars[num]).grid(row=(i // 4) + 1, column=i % 4, sticky='w', padx=10, pady=3)
+        
         day_frame = ttk.LabelFrame(main_frame, text="按月", padding=10)
         day_frame.pack(fill=BOTH, expand=True, pady=5)
         ttk.Radiobutton(day_frame, text="每月", variable=week_type_var, value="day").grid(row=0, column=0, sticky='w')
+        
         day_vars = {i: tk.IntVar(value=0) for i in range(1, 32)}
-        for i in range(1, 32): ttk.Checkbutton(day_frame, text=f"{i:02d}", variable=day_vars[i]).grid(row=((i - 1) // 7) + 1, column=(i - 1) % 7, sticky='w', padx=8, pady=2)
-        bottom_frame = ttk.Frame(main_frame); bottom_frame.pack(pady=10)
-        current_val = weekday_entry.get()
+        for i in range(1, 32): 
+            ttk.Checkbutton(day_frame, text=f"{i:02d}", variable=day_vars[i]).grid(row=((i - 1) // 7) + 1, column=(i - 1) % 7, sticky='w', padx=8, pady=2)
+        
+        # --- 2. 核心修复：兼容 Entry 为 None 的情况 (点歌台模式) ---
+        current_val = ""
+        if weekday_entry:
+            current_val = weekday_entry.get()
+        elif hasattr(self, 'sr_weekday_var'): # 如果是从点歌台调用的
+            current_val = self.sr_weekday_var.get()
+
         if current_val.startswith("每周:"):
             week_type_var.set("week")
             selected_days = current_val.replace("每周:", "")
@@ -8571,16 +8613,32 @@ class TimedBroadcastApp:
             week_type_var.set("day")
             selected_days = current_val.replace("每月:", "").split(',')
             for day_num in day_vars: day_vars[day_num].set(1 if f"{day_num:02d}" in selected_days else 0)
+        
+        bottom_frame = ttk.Frame(main_frame); bottom_frame.pack(pady=10)
+        
         def confirm():
-            if week_type_var.get() == "week": result = "每周:" + "".join(sorted([str(n) for n, v in week_vars.items() if v.get()]))
-            else: result = "每月:" + ",".join(sorted([f"{n:02d}" for n, v in day_vars.items() if v.get()]))
-            if isinstance(weekday_entry, ttk.Entry): weekday_entry.delete(0, END); weekday_entry.insert(0, result)
+            if week_type_var.get() == "week": 
+                result = "每周:" + "".join(sorted([str(n) for n, v in week_vars.items() if v.get()]))
+            else: 
+                result = "每月:" + ",".join(sorted([f"{n:02d}" for n, v in day_vars.items() if v.get()]))
+            
+            # 回写数据
+            if weekday_entry:
+                weekday_entry.delete(0, END)
+                weekday_entry.insert(0, result)
+            elif hasattr(self, 'sr_weekday_var'): # 回写到点歌台变量
+                self.sr_weekday_var.set(result)
+                
             cleanup_and_destroy()
+
         ttk.Button(bottom_frame, text="确定", command=confirm, bootstyle="primary").pack(side=LEFT, padx=5, ipady=5)
         ttk.Button(bottom_frame, text="取消", command=cleanup_and_destroy).pack(side=LEFT, padx=5, ipady=5)
+        
         dialog.protocol("WM_DELETE_WINDOW", cleanup_and_destroy)
 
+        # 3. 核心修复：强制刷新并居中，然后显示
         self.center_window(dialog, parent=self.root)
+        dialog.deiconify()
 
 #第9部分
     def show_daterange_settings_dialog(self, date_range_entry):
