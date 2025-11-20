@@ -6,7 +6,7 @@ pywin32>=306
 psutil>=5.9.0
 requests
 edge-tts>=7.2.3
-Flask>=3.1.0
+Flask>=3.0.3
 
 # --- UI、界面美化与图像处理 ---
 ttkbootstrap>=1.10.1
