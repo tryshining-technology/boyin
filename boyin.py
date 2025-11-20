@@ -3204,7 +3204,7 @@ class TimedBroadcastApp:
             messagebox.showinfo("提示", "远程控制服务已因超时自动暂停。", parent=self.root)
 
     def _run_flask_server(self, port):
-        """后台运行的 Flask Web 服务器"""
+        """后台运行的 Flask Web 服务器 (修复语音列表版)"""
         try:
             from flask import Flask, jsonify, render_template_string, request, Response
             from functools import wraps
@@ -3214,32 +3214,25 @@ class TimedBroadcastApp:
 
         app = Flask(__name__)
         
-        # 禁用 Flask 的控制台刷屏日志
         import logging
         log = logging.getLogger('werkzeug')
         log.setLevel(logging.ERROR)
 
-        # --- 1. 权限验证装饰器 ---
+        # --- 1. 权限验证装饰器 (保持不变) ---
         def check_auth(username, password):
-            """检查用户名密码是否匹配设置"""
             return username == self.settings.get('remote_username') and \
                    password == self.settings.get('remote_password')
 
         def authenticate():
-            """发送 401 响应，触发浏览器弹窗登录"""
             return Response(
-            '需要登录才能访问控制台。\n'
             'Login Required.', 401,
             {'WWW-Authenticate': 'Basic realm="Broadcast Control"'})
 
         def requires_auth(f):
             @wraps(f)
             def decorated(*args, **kwargs):
-                # A. 检查服务是否处于“开启”状态 (软开关)
                 if not self.remote_server_active:
-                    return "Service is paused. Please start it on the PC.", 503
-                
-                # B. 检查是否启用密码验证
+                    return "Service is paused.", 503
                 if self.settings.get('remote_auth_enabled', False):
                     auth = request.authorization
                     if not auth or not check_auth(auth.username, auth.password):
@@ -3247,7 +3240,7 @@ class TimedBroadcastApp:
                 return f(*args, **kwargs)
             return decorated
 
-        # --- 2. 前端 HTML 模板 (响应式设计) ---
+        # --- 2. 前端 HTML 模板 (核心修改：JS动态加载语音) ---
         html_template = """
         <!DOCTYPE html>
         <html>
@@ -3259,31 +3252,20 @@ class TimedBroadcastApp:
                 :root { --primary: #007bff; --danger: #dc3545; --success: #28a745; --bg: #f4f6f9; --card: #ffffff; }
                 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); margin: 0; padding: 15px; color: #333; }
                 .container { max-width: 1000px; margin: 0 auto; }
-                
-                /* 电脑端双栏布局 */
-                @media (min-width: 800px) {
-                    .grid-layout { display: grid; grid-template-columns: 1fr 1.2fr; gap: 20px; }
-                }
-                
+                @media (min-width: 800px) { .grid-layout { display: grid; grid-template-columns: 1fr 1.2fr; gap: 20px; } }
                 .card { background: var(--card); border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 15px; }
                 h2 { margin-top: 0; font-size: 1.1rem; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; color: #555; }
-                
                 .status-box { background: #e9ecef; padding: 12px; border-radius: 8px; text-align: center; margin-bottom: 15px; font-weight: bold; color: #495057; font-size: 0.9rem; }
-                
                 .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; color: white; cursor: pointer; margin-bottom: 10px; -webkit-tap-highlight-color: transparent; }
-                .btn:active { opacity: 0.8; transform: scale(0.98); }
                 .btn-danger { background: var(--danger); }
                 .btn-success { background: var(--success); }
                 .btn-primary { background: var(--primary); }
                 .btn-outline { background: transparent; border: 2px solid var(--primary); color: var(--primary); }
-                
                 select, input, textarea { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; margin-bottom: 10px; font-family: inherit; }
                 textarea { resize: vertical; min-height: 80px; }
-                
                 .row { display: flex; gap: 10px; }
                 .col { flex: 1; }
                 label { display: block; margin-bottom: 5px; font-size: 0.9rem; color: #666; }
-                
                 .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; padding: 10px 20px; border-radius: 20px; display: none; z-index: 9999; font-size: 14px; }
             </style>
         </head>
@@ -3291,7 +3273,6 @@ class TimedBroadcastApp:
             <div class="toast" id="toast">操作成功</div>
             <div class="container">
                 <div class="grid-layout">
-                    <!-- 左侧：控制区 -->
                     <div class="left-panel">
                         <div class="card">
                             <h2>📡 状态与控制</h2>
@@ -3301,7 +3282,6 @@ class TimedBroadcastApp:
                                 <button class="btn btn-outline col" onclick="api('mute')" id="mute_btn">🔇 静音</button>
                             </div>
                         </div>
-
                         <div class="card">
                             <h2>▶️ 节目点播</h2>
                             <select id="task_select">
@@ -3312,19 +3292,15 @@ class TimedBroadcastApp:
                             <button class="btn btn-success" onclick="playSelected()">立即插队播放</button>
                         </div>
                     </div>
-
-                    <!-- 右侧：插播区 -->
                     <div class="right-panel">
                         <div class="card">
                             <h2>💬 实时语音插播</h2>
                             <textarea id="tts_text" placeholder="在此输入通知内容..."></textarea>
-                            
                             <div class="row">
                                 <div class="col">
-                                    <label>播音员</label>
+                                    <label>播音员 (本地)</label>
                                     <select id="tts_voice">
-                                        <option value="male">男声 (云扬)</option>
-                                        <option value="female">女声 (晓晓)</option>
+                                        <option value="">加载中...</option>
                                     </select>
                                 </div>
                                 <div class="col">
@@ -3332,13 +3308,11 @@ class TimedBroadcastApp:
                                     <input type="number" id="tts_repeat" value="2" min="1" max="10">
                                 </div>
                             </div>
-                            
                             <button class="btn btn-primary" onclick="sendTTS()">🚀 发送语音插播</button>
                         </div>
                     </div>
                 </div>
             </div>
-
             <script>
                 function showToast(msg) {
                     const t = document.getElementById('toast');
@@ -3346,7 +3320,6 @@ class TimedBroadcastApp:
                     t.style.display = 'block';
                     setTimeout(() => t.style.display = 'none', 2500);
                 }
-
                 function api(action, data={}) {
                     fetch('/api/' + action, {
                         method: 'POST',
@@ -3360,28 +3333,18 @@ class TimedBroadcastApp:
                         if(res) { showToast(res.message); updateStatus(); }
                     }).catch(err => showToast("连接失败"));
                 }
-
                 function playSelected() {
                     const name = document.getElementById('task_select').value;
                     if(!name) return;
-                    if(confirm('确定要立即播放 "' + name + '" 吗？')) {
-                        api('play', {name: name});
-                    }
+                    if(confirm('确定要立即播放 "' + name + '" 吗？')) { api('play', {name: name}); }
                 }
-
                 function sendTTS() {
                     const text = document.getElementById('tts_text').value;
                     if(!text) return alert("请输入内容");
                     const voice = document.getElementById('tts_voice').value;
                     const repeat = document.getElementById('tts_repeat').value;
-                    
-                    api('intercut', {
-                        text: text,
-                        voice_type: voice,
-                        repeat: parseInt(repeat)
-                    });
+                    api('intercut', { text: text, voice_name: voice, repeat: parseInt(repeat) });
                 }
-
                 function updateStatus() {
                     fetch('/api/status').then(res => res.json()).then(data => {
                         document.getElementById('status_text').innerText = data.status;
@@ -3400,8 +3363,29 @@ class TimedBroadcastApp:
                     }).catch(e => {});
                 }
                 
+                // --- 新增：加载真实语音列表 ---
+                function loadVoices() {
+                    fetch('/api/voices').then(res => res.json()).then(data => {
+                        const select = document.getElementById('tts_voice');
+                        select.innerHTML = "";
+                        if (data.voices.length === 0) {
+                            const option = document.createElement('option');
+                            option.text = "无本地语音";
+                            select.add(option);
+                        } else {
+                            data.voices.forEach(v => {
+                                const option = document.createElement('option');
+                                option.value = v;
+                                option.text = v;
+                                select.add(option);
+                            });
+                        }
+                    });
+                }
+
                 setInterval(updateStatus, 3000);
                 updateStatus();
+                loadVoices(); // 页面加载时获取语音列表
             </script>
         </body>
         </html>
@@ -3412,18 +3396,23 @@ class TimedBroadcastApp:
         @app.route('/')
         @requires_auth
         def index():
-            # 过滤出有效的任务列表传给网页
             valid_tasks = [t for t in self.tasks if t.get('status') == '启用']
             return render_template_string(html_template, tasks=valid_tasks)
+
+        # --- 新增：获取本地语音列表接口 ---
+        @app.route('/api/voices')
+        @requires_auth
+        def api_voices():
+            # 调用主程序已有的方法获取 SAPI 列表
+            voices = self.get_available_voices()
+            return jsonify({'voices': voices})
 
         @app.route('/api/status')
         @requires_auth
         def api_status():
-            # 获取当前播放状态文本 (线程安全读取)
             status_text = "未知"
             if hasattr(self, 'status_labels') and len(self.status_labels) > 2:
-                try:
-                    status_text = self.status_labels[2].cget("text")
+                try: status_text = self.status_labels[2].cget("text")
                 except: pass
             return jsonify({'status': status_text, 'is_muted': self.is_muted})
 
@@ -3444,10 +3433,8 @@ class TimedBroadcastApp:
         def api_play():
             data = request.json
             task_name = data.get('name')
-            # 查找任务
             target_task = next((t for t in self.tasks if t['name'] == task_name), None)
             if target_task:
-                # 复用现有的高优先级播放逻辑
                 self.playback_command_queue.put(('PLAY_INTERRUPT', (target_task, "manual_remote")))
                 return jsonify({'message': f'开始播放: {task_name}'})
             return jsonify({'message': '未找到该任务'})
@@ -3457,63 +3444,24 @@ class TimedBroadcastApp:
         def api_intercut():
             data = request.json
             text = data.get('text')
-            voice_type = data.get('voice_type') # 'male' 或 'female'
+            # 这里接收的是前端传来的真实语音名称
+            voice_name = data.get('voice_name') 
             repeat = data.get('repeat', 1)
             
-            # --- ↓↓↓ 修复开始：智能匹配本地 SAPI 语音 ↓↓↓ ---
-            # 1. 获取本机所有可用的 SAPI 播音员名称
-            local_voices = self.get_available_voices()
-            target_voice = ""
-
-            if not local_voices:
-                # 如果获取失败，保持空字符串，让系统用默认的
-                target_voice = ""
-            else:
-                # 2. 根据 'male'/'female' 关键词在本地列表中搜索
-                if voice_type == 'male':
-                    # 常见的本地男声关键词 (Kangkang是Win10常见男声)
-                    male_keywords = ['Kangkang', 'Danny', 'Paul', 'Mark', 'Male', 'Hanhan', 'Yunyang']
-                    for v in local_voices:
-                        if any(k in v for k in male_keywords):
-                            target_voice = v
-                            break
-                else:
-                    # 常见的本地女声关键词
-                    female_keywords = ['Huihui', 'Yaoyao', 'Julie', 'Female', 'Zira', 'Xiaoxiao']
-                    for v in local_voices:
-                        if any(k in v for k in female_keywords):
-                            target_voice = v
-                            break
-                
-                # 3. 如果没找到匹配性别的，但列表不为空，这就很尴尬了
-                #    为了体现差异，如果是选男声但没找到，尝试用列表里的第2个（如果有的话），否则用第1个
-                if not target_voice and local_voices:
-                    if voice_type == 'male' and len(local_voices) > 1:
-                        target_voice = local_voices[1] # 盲猜第二个可能是男的
-                    else:
-                        target_voice = local_voices[0]
-
-            # --- ↑↑↑ 修复结束 ↑↑↑ ---
-            
-            # 构造任务数据 (传入真实的本地语音名称)
+            # 构造任务数据
             task_data = {
                 'text': text,
-                'params': {'voice': target_voice, 'speed': '0', 'pitch': '0', 'volume': '100'},
+                'params': {'voice': voice_name, 'speed': '0', 'pitch': '0', 'volume': '100'},
                 'repeats': repeat
             }
             
-            # 清除停止信号并放入队列
             if hasattr(self, 'intercut_stop_event'):
                 self.intercut_stop_event.clear()
             if hasattr(self, 'intercut_queue'):
                 self.intercut_queue.put(task_data)
             
-            # 返回调试信息，方便您确认到底用了哪个声音
-            return jsonify({'message': f'插播已发送 (使用语音: {target_voice or "默认"})'})
+            return jsonify({'message': '插播指令已发送'})
 
-        # --- 4. 启动服务 ---
-        # host='0.0.0.0' 允许局域网访问
-        # use_reloader=False 防止在某些环境中二次启动导致端口冲突
         try:
             app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
         except Exception as e:
