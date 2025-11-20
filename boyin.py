@@ -207,6 +207,9 @@ class TimedBroadcastApp:
         self.print_tasks = []
         self.backup_tasks = []
         self.dynamic_voice_tasks = []
+        self.song_library = []
+        self.song_queue = []
+        self.song_request_server_active = False
         
         self.settings = {}
         self.wallpaper_enabled_var = tk.BooleanVar()
@@ -682,6 +685,7 @@ class TimedBroadcastApp:
         media_tab = ttk.Frame(notebook, padding=10)
         wallpaper_tab = ttk.Frame(notebook, padding=10)
         timer_tab = ttk.Frame(notebook, padding=10)
+        song_request_tab = ttk.Frame(notebook, padding=10)
         remote_tab = ttk.Frame(notebook, padding=10)
 
         notebook.add(screenshot_tab, text=' 定时截屏 ')
@@ -691,6 +695,7 @@ class TimedBroadcastApp:
         notebook.add(media_tab, text=' 媒体处理 ')
         notebook.add(wallpaper_tab, text=' 网络壁纸 ')
         notebook.add(timer_tab, text=' 计时工具 ')
+        notebook.add(song_request_tab, text=' 点歌台 ') 
         notebook.add(remote_tab, text=' 远程控制 ')
 
         self._build_screenshot_ui(screenshot_tab)
@@ -700,6 +705,7 @@ class TimedBroadcastApp:
         self._build_media_processing_ui(media_tab)
         self._build_wallpaper_ui(wallpaper_tab)
         self._build_timer_ui(timer_tab)
+        self._build_song_request_ui(song_request_tab)
         self._build_remote_control_ui(remote_tab)
 
         return page_frame
@@ -3468,6 +3474,665 @@ class TimedBroadcastApp:
             self.log(f"Web服务器异常退出: {e}")
 
     # --- ↑↑↑ 远程控制模块结束 ↑↑↑ ---
+
+#↓点歌台全套代码
+
+    def _build_song_request_ui(self, parent_frame):
+        # 1. 变量绑定
+        self.sr_port_var = tk.StringVar(value=self.settings.get("song_request_port", "9999"))
+        self.sr_rate_limit_var = tk.StringVar(value=self.settings.get("song_request_rate_limit", "5"))
+        self.sr_start_time_var = tk.StringVar(value=self.settings.get("song_request_open_time_start", "18:00:00"))
+        self.sr_end_time_var = tk.StringVar(value=self.settings.get("song_request_open_time_end", "19:00:00"))
+        self.sr_weekday_var = tk.StringVar(value=self.settings.get("song_request_weekday", "每周:1234567"))
+        self.sr_date_range_var = tk.StringVar(value=self.settings.get("song_request_date_range", "2025-01-01 ~ 2099-12-31"))
+        
+        # 2. 布局容器 (左右分栏)
+        parent_frame.columnconfigure(0, weight=4) # 左侧 40%
+        parent_frame.columnconfigure(1, weight=6) # 右侧 60%
+        parent_frame.rowconfigure(0, weight=1)
+
+        left_panel = ttk.Frame(parent_frame)
+        left_panel.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
+        
+        right_panel = ttk.Frame(parent_frame)
+        right_panel.grid(row=0, column=1, sticky='nsew', padx=(5, 0))
+
+        # --- 【左侧面板：设置】 ---
+        
+        # A. 服务状态与端口
+        status_lf = ttk.LabelFrame(left_panel, text="服务状态", padding=10)
+        status_lf.pack(fill=X, pady=5)
+        
+        self.sr_status_label = ttk.Label(status_lf, text="🔴 服务未启动", font=self.font_12_bold, foreground="gray")
+        self.sr_status_label.pack(anchor='w')
+        self.sr_url_label = ttk.Label(status_lf, text="地址: -", bootstyle="info")
+        self.sr_url_label.pack(anchor='w')
+        
+        port_frame = ttk.Frame(status_lf)
+        port_frame.pack(fill=X, pady=5)
+        ttk.Label(port_frame, text="端口:").pack(side=LEFT)
+        ttk.Entry(port_frame, textvariable=self.sr_port_var, width=6).pack(side=LEFT, padx=5)
+        self.sr_toggle_btn = ttk.Button(port_frame, text="重启服务", bootstyle="outline", command=self._toggle_song_request_service)
+        self.sr_toggle_btn.pack(side=RIGHT)
+
+        # B. 开放规则
+        rule_lf = ttk.LabelFrame(left_panel, text="开放规则 (不受节假日限制)", padding=10)
+        rule_lf.pack(fill=X, pady=5)
+        
+        time_frame = ttk.Frame(rule_lf)
+        time_frame.pack(fill=X, pady=2)
+        ttk.Label(time_frame, text="时间:").pack(side=LEFT)
+        e1 = ttk.Entry(time_frame, textvariable=self.sr_start_time_var, width=8); e1.pack(side=LEFT, padx=2)
+        self._bind_mousewheel_to_entry(e1, self._handle_time_scroll)
+        ttk.Label(time_frame, text="至").pack(side=LEFT)
+        e2 = ttk.Entry(time_frame, textvariable=self.sr_end_time_var, width=8); e2.pack(side=LEFT, padx=2)
+        self._bind_mousewheel_to_entry(e2, self._handle_time_scroll)
+        
+        week_frame = ttk.Frame(rule_lf)
+        week_frame.pack(fill=X, pady=2)
+        ttk.Label(week_frame, text="周期:").pack(side=LEFT)
+        ttk.Entry(week_frame, textvariable=self.sr_weekday_var).pack(side=LEFT, fill=X, expand=True, padx=2)
+        ttk.Button(week_frame, text="...", width=3, command=lambda: self.show_weekday_settings_dialog(None)).pack(side=LEFT) # 暂不绑定Entry对象，后续完善
+
+        date_frame = ttk.Frame(rule_lf)
+        date_frame.pack(fill=X, pady=2)
+        ttk.Label(date_frame, text="日期:").pack(side=LEFT)
+        e3 = ttk.Entry(date_frame, textvariable=self.sr_date_range_var); e3.pack(side=LEFT, fill=X, expand=True, padx=2)
+        self._bind_mousewheel_to_entry(e3, self._handle_date_scroll)
+
+        # C. 曲库管理
+        folder_lf = ttk.LabelFrame(left_panel, text="曲库文件夹", padding=10)
+        folder_lf.pack(fill=BOTH, expand=True, pady=5)
+        
+        self.sr_folder_listbox = tk.Listbox(folder_lf, height=5, font=self.font_9)
+        self.sr_folder_listbox.pack(fill=BOTH, expand=True, pady=5)
+        # 加载已保存的文件夹
+        for folder in self.settings.get("song_request_folders", []):
+            self.sr_folder_listbox.insert(END, folder)
+            
+        f_btn_frame = ttk.Frame(folder_lf)
+        f_btn_frame.pack(fill=X)
+        ttk.Button(f_btn_frame, text="+", width=3, command=self._add_song_folder).pack(side=LEFT)
+        ttk.Button(f_btn_frame, text="-", width=3, command=self._remove_song_folder).pack(side=LEFT, padx=5)
+        ttk.Button(f_btn_frame, text="刷新曲库", bootstyle="link", command=self._refresh_song_library).pack(side=RIGHT)
+        self.sr_count_label = ttk.Label(folder_lf, text="歌曲总数: 0", font=self.font_9, bootstyle="secondary")
+        self.sr_count_label.pack(anchor='e')
+
+        # D. 安全设置
+        safe_lf = ttk.LabelFrame(left_panel, text="安全设置", padding=10)
+        safe_lf.pack(fill=X, pady=5)
+        ttk.Label(safe_lf, text="单IP频率限制(分钟):").pack(side=LEFT)
+        ttk.Entry(safe_lf, textvariable=self.sr_rate_limit_var, width=5).pack(side=LEFT, padx=5)
+
+        # --- 【右侧面板：队列】 ---
+        
+        queue_lf = ttk.LabelFrame(right_panel, text="实时点歌队列", padding=10)
+        queue_lf.pack(fill=BOTH, expand=True)
+        
+        columns = ('序号', '时间', '点歌人', '歌曲名', 'IP')
+        self.sr_queue_tree = ttk.Treeview(queue_lf, columns=columns, show='headings', selectmode='extended')
+        self.sr_queue_tree.heading('序号', text='No.'); self.sr_queue_tree.column('序号', width=40, anchor='center')
+        self.sr_queue_tree.heading('时间', text='时间'); self.sr_queue_tree.column('时间', width=60, anchor='center')
+        self.sr_queue_tree.heading('点歌人', text='点歌人'); self.sr_queue_tree.column('点歌人', width=80, anchor='w')
+        self.sr_queue_tree.heading('歌曲名', text='歌曲名'); self.sr_queue_tree.column('歌曲名', width=150, anchor='w')
+        self.sr_queue_tree.heading('IP', text='IP'); self.sr_queue_tree.column('IP', width=100, anchor='center')
+        
+        self.sr_queue_tree.pack(side=LEFT, fill=BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(queue_lf, orient=VERTICAL, command=self.sr_queue_tree.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        self.sr_queue_tree.configure(yscrollcommand=scrollbar.set)
+        
+        # 队列控制按钮
+        ctrl_frame = ttk.Frame(right_panel, padding=(0, 10))
+        ctrl_frame.pack(fill=X)
+        
+        self.sr_play_btn = ttk.Button(ctrl_frame, text="▶ 启动队列播放", bootstyle="success", command=self._start_song_queue_play)
+        self.sr_play_btn.pack(side=LEFT, fill=X, expand=True, padx=2)
+        
+        ttk.Button(ctrl_frame, text="⏹ 停止", bootstyle="danger", command=self._stop_song_queue_play).pack(side=LEFT, fill=X, expand=True, padx=2)
+        ttk.Button(ctrl_frame, text="🗑️ 删除选中", bootstyle="warning", command=self._delete_song_request).pack(side=LEFT, fill=X, expand=True, padx=2)
+        ttk.Button(ctrl_frame, text="🔥 清空", bootstyle="secondary", command=self._clear_song_queue).pack(side=LEFT, fill=X, expand=True, padx=2)
+
+        # 保存设置按钮 (全局)
+        ttk.Button(left_panel, text="保存点歌台设置", bootstyle="primary", command=self.save_settings).pack(fill=X, pady=10)
+
+    def _add_song_folder(self):
+        """添加曲库文件夹"""
+        folder = filedialog.askdirectory(title="选择包含歌曲的文件夹", parent=self.root)
+        if not folder: return
+        
+        current_folders = self.settings.get("song_request_folders", [])
+        # 避免重复添加
+        if folder not in current_folders:
+            current_folders.append(folder)
+            self.settings["song_request_folders"] = current_folders
+            self.save_settings()
+            
+            # 更新UI
+            self.sr_folder_listbox.insert(END, folder)
+            self.log(f"已添加点歌台曲库目录: {folder}")
+            
+            # 自动刷新一次曲库
+            self._refresh_song_library()
+
+    def _remove_song_folder(self):
+        """移除选中的文件夹"""
+        selection = self.sr_folder_listbox.curselection()
+        if not selection: return
+        
+        index = selection[0]
+        folder_path = self.sr_folder_listbox.get(index)
+        
+        current_folders = self.settings.get("song_request_folders", [])
+        if folder_path in current_folders:
+            current_folders.remove(folder_path)
+            self.settings["song_request_folders"] = current_folders
+            self.save_settings()
+            
+            self.sr_folder_listbox.delete(index)
+            self.log(f"已移除点歌台曲库目录: {folder_path}")
+            
+            # 移除后也刷新一下
+            self._refresh_song_library()
+
+    def _refresh_song_library(self):
+        """扫描所有文件夹，建立歌曲索引"""
+        folders = self.settings.get("song_request_folders", [])
+        if not folders:
+            self.song_library = []
+            self.sr_count_label.config(text="歌曲总数: 0")
+            return
+
+        self.log("正在扫描点歌台曲库...")
+        temp_library = []
+        supported_ext = ('.mp3', '.wav', '.flac', '.ogg', '.m4a', '.wma')
+        
+        for folder in folders:
+            if not os.path.exists(folder): continue
+            for root, _, files in os.walk(folder):
+                for f in files:
+                    if f.lower().endswith(supported_ext):
+                        # 存储完整信息
+                        temp_library.append({
+                            'name': f,
+                            'path': os.path.join(root, f),
+                            'folder': folder
+                        })
+        
+        self.song_library = temp_library
+        count = len(self.song_library)
+        self.sr_count_label.config(text=f"歌曲总数: {count}")
+        self.log(f"曲库扫描完成，共找到 {count} 首歌曲。")
+
+    def _delete_song_request(self):
+        """删除选中的点歌请求"""
+        selection = self.sr_queue_tree.selection()
+        if not selection: return
+        
+        # 从后往前删，防止索引偏移
+        # 注意：这里假设 Treeview 的顺序和 self.song_queue 的顺序是完全一致的
+        # 因为我们是 append 添加的，所以通常是一致的
+        indices = sorted([self.sr_queue_tree.index(s) for s in selection], reverse=True)
+        
+        for i in indices:
+            if 0 <= i < len(self.song_queue):
+                removed = self.song_queue.pop(i)
+                self.log(f"管理员移除了点歌请求: {removed['song_name']} (点歌人: {removed['user']})")
+        
+        self._update_song_queue_ui()
+
+    def _clear_song_queue(self):
+        """清空点歌队列"""
+        if not self.song_queue: return
+        if messagebox.askyesno("确认", "确定要清空所有待播放的点歌请求吗？", parent=self.root):
+            self.song_queue.clear()
+            self._update_song_queue_ui()
+            self.log("管理员清空了点歌队列。")
+
+    def _update_song_queue_ui(self):
+        """刷新右侧的点歌队列列表"""
+        if not hasattr(self, 'sr_queue_tree'): return
+        
+        # 清空旧数据
+        for item in self.sr_queue_tree.get_children():
+            self.sr_queue_tree.delete(item)
+            
+        # 重新填充
+        for idx, req in enumerate(self.song_queue):
+            self.sr_queue_tree.insert('', END, values=(
+                idx + 1,
+                req.get('time', '--:--'),
+                req.get('user', '匿名'),
+                req.get('song_name', '未知歌曲'),
+                req.get('ip', '127.0.0.1')
+            ))
+
+    def _toggle_song_request_service(self):
+        """启动/停止点歌台服务"""
+        # 如果正在运行，则停止
+        if self.song_request_server_active:
+            self.song_request_server_active = False
+            self.sr_status_label.config(text="🔴 服务已停止", foreground="gray")
+            self.sr_url_label.config(text="地址: -")
+            self.sr_toggle_btn.config(text="启动服务", bootstyle="success")
+            self.log("点歌台服务已停止。")
+        else:
+            # 启动
+            try:
+                port = int(self.sr_port_var.get())
+            except ValueError:
+                messagebox.showerror("错误", "端口号必须是整数", parent=self.root)
+                return
+
+            # 保存当前配置
+            self.settings.update({
+                "song_request_port": str(port),
+                "song_request_rate_limit": self.sr_rate_limit_var.get(),
+                "song_request_open_time_start": self.sr_start_time_var.get(),
+                "song_request_open_time_end": self.sr_end_time_var.get(),
+                "song_request_weekday": self.sr_weekday_var.get(),
+                "song_request_date_range": self.sr_date_range_var.get()
+            })
+            self.save_settings()
+
+            # 启动线程
+            threading.Thread(target=self._run_song_request_server, args=(port,), daemon=True).start()
+            
+            self.song_request_server_active = True
+            ip = self._get_local_ip()
+            url = f"http://{ip}:{port}"
+            
+            self.sr_status_label.config(text="🟢 服务运行中", foreground="green")
+            self.sr_url_label.config(text=f"访问地址: {url}")
+            self.sr_toggle_btn.config(text="停止服务", bootstyle="danger")
+            self.log(f"点歌台服务已启动，监听端口: {port}")
+            
+            # 如果曲库为空，自动刷新一次
+            if not self.song_library:
+                self._refresh_song_library()
+
+    def _is_song_request_allowed(self):
+        """检查当前时间是否允许点歌 (返回: bool, 原因字符串)"""
+        now = datetime.now()
+        
+        # 1. 检查日期范围
+        try:
+            d_range = self.sr_date_range_var.get()
+            start_str, end_str = [d.strip() for d in d_range.split('~')]
+            s_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+            e_date = datetime.strptime(end_str, "%Y-%m-%d").date()
+            if not (s_date <= now.date() <= e_date):
+                return False, "不在开放日期范围内"
+        except: pass # 格式错误忽略，默认允许
+
+        # 2. 检查周几
+        weekday_str = self.sr_weekday_var.get()
+        if weekday_str.startswith("每周:"):
+            if str(now.isoweekday()) not in weekday_str[3:]:
+                return False, "今日不开放"
+        elif weekday_str.startswith("每月:"):
+            if f"{now.day:02d}" not in weekday_str[3:].split(','):
+                return False, "今日不开放"
+
+        # 3. 检查具体时间
+        try:
+            t_start = datetime.strptime(self.sr_start_time_var.get(), "%H:%M:%S").time()
+            t_end = datetime.strptime(self.sr_end_time_var.get(), "%H:%M:%S").time()
+            current_t = now.time()
+            if not (t_start <= current_t <= t_end):
+                return False, f"非开放时段 ({t_start} - {t_end})"
+        except: pass
+
+        return True, "开放中"
+
+    def _run_song_request_server(self, port):
+        try:
+            from flask import Flask, jsonify, render_template_string, request, send_file
+            import io, random, string
+            from PIL import Image, ImageDraw, ImageFont
+        except ImportError:
+            self.log("错误：缺少 Flask 或 Pillow 库，点歌台无法启动。")
+            return
+
+        app = Flask(__name__)
+        import logging
+        logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
+        # 内存存储
+        ip_rate_limit = {} # {ip: last_request_timestamp}
+        captcha_store = {} # {ip: captcha_code}
+
+        # --- HTML 模板 (手机端界面) ---
+        html_template = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+            <title>校园点歌台</title>
+            <style>
+                body { font-family: sans-serif; background: #f8f9fa; margin: 0; padding: 15px; color: #333; }
+                .header { background: #fff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 15px; text-align: center; }
+                .status { font-weight: bold; color: #28a745; }
+                .status.closed { color: #dc3545; }
+                
+                .search-box { display: flex; gap: 10px; margin-bottom: 15px; }
+                input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; }
+                button { padding: 12px 20px; border: none; border-radius: 8px; background: #007bff; color: white; font-weight: bold; cursor: pointer; }
+                button:disabled { background: #ccc; }
+                
+                .song-list { list-style: none; padding: 0; margin: 0; }
+                .song-item { background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+                .song-name { font-weight: 500; font-size: 16px; }
+                .btn-req { background: #28a745; padding: 8px 15px; font-size: 14px; }
+
+                /* 弹窗样式 */
+                .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; }
+                .modal-content { background: #fff; margin: 20% auto; width: 85%; padding: 20px; border-radius: 12px; box-sizing: border-box; }
+                .form-group { margin-bottom: 15px; }
+                .form-group label { display: block; margin-bottom: 5px; color: #666; }
+                .form-group input { width: 100%; box-sizing: border-box; }
+                .captcha-row { display: flex; gap: 10px; align-items: center; }
+                .captcha-img { height: 40px; border-radius: 4px; cursor: pointer; }
+                .btn-close { background: #6c757d; margin-top: 10px; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <div id="status_text" class="status">检测中...</div>
+                <div style="font-size: 12px; color: #666; margin-top: 5px;">每人每 <span id="limit_min">5</span> 分钟限点 1 首</div>
+            </div>
+
+            <div class="search-box">
+                <input type="text" id="keyword" placeholder="搜歌手或歌名...">
+                <button onclick="search()">搜索</button>
+            </div>
+
+            <ul class="song-list" id="list">
+                <li style="text-align:center; color:#999; padding: 20px;">请输入关键词搜索歌曲</li>
+            </ul>
+
+            <!-- 点歌弹窗 -->
+            <div id="modal" class="modal">
+                <div class="modal-content">
+                    <h3 id="modal_title">点歌</h3>
+                    <div class="form-group">
+                        <label>点歌人 (可选)</label>
+                        <input type="text" id="user_name" placeholder="例如：三年二班 李雷">
+                    </div>
+                    <div class="form-group">
+                        <label>验证码 (点击图片刷新)</label>
+                        <div class="captcha-row">
+                            <input type="text" id="captcha_input" placeholder="输入4位字符">
+                            <img id="captcha_img" class="captcha-img" src="" onclick="refreshCaptcha()">
+                        </div>
+                    </div>
+                    <button onclick="submitRequest()" style="width:100%">确认提交</button>
+                    <button class="btn-close" onclick="closeModal()" style="width:100%">取消</button>
+                </div>
+            </div>
+
+            <script>
+                let currentSong = null;
+
+                function checkStatus() {
+                    fetch('/api/status').then(r=>r.json()).then(d => {
+                        const el = document.getElementById('status_text');
+                        el.innerText = d.allowed ? "🟢 点歌通道开放中" : "🔴 " + d.reason;
+                        el.className = d.allowed ? "status" : "status closed";
+                        document.getElementById('limit_min').innerText = d.limit;
+                    });
+                }
+
+                function search() {
+                    const kw = document.getElementById('keyword').value;
+                    if(!kw) return;
+                    fetch('/api/search?q='+encodeURIComponent(kw)).then(r=>r.json()).then(d => {
+                        const list = document.getElementById('list');
+                        list.innerHTML = "";
+                        if(d.length === 0) {
+                            list.innerHTML = '<li style="text-align:center; color:#999;">未找到相关歌曲</li>';
+                            return;
+                        }
+                        d.forEach(song => {
+                            const li = document.createElement('li');
+                            li.className = 'song-item';
+                            li.innerHTML = `<span class="song-name">${song}</span> <button class="btn-req" onclick="openModal('${song}')">点歌</button>`;
+                            list.appendChild(li);
+                        });
+                    });
+                }
+
+                function openModal(songName) {
+                    currentSong = songName;
+                    document.getElementById('modal_title').innerText = "点播: " + songName;
+                    document.getElementById('modal').style.display = 'block';
+                    refreshCaptcha();
+                }
+
+                function closeModal() {
+                    document.getElementById('modal').style.display = 'none';
+                    document.getElementById('captcha_input').value = "";
+                }
+
+                function refreshCaptcha() {
+                    document.getElementById('captcha_img').src = '/api/captcha?t=' + new Date().getTime();
+                }
+
+                function submitRequest() {
+                    const user = document.getElementById('user_name').value;
+                    const code = document.getElementById('captcha_input').value;
+                    if(!code) return alert("请输入验证码");
+
+                    fetch('/api/submit', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            song: currentSong,
+                            user: user,
+                            captcha: code
+                        })
+                    }).then(r=>r.json()).then(d => {
+                        alert(d.message);
+                        if(d.success) closeModal();
+                        else if(d.refresh) refreshCaptcha();
+                    }).catch(()=>alert("网络错误"));
+                }
+
+                checkStatus();
+            </script>
+        </body>
+        </html>
+        """
+
+        # --- API 路由 ---
+
+        @app.route('/')
+        def index():
+            if not self.song_request_server_active: return "Service Stopped", 503
+            return render_template_string(html_template)
+
+        @app.route('/api/status')
+        def api_status():
+            allowed, reason = self._is_song_request_allowed()
+            return jsonify({'allowed': allowed, 'reason': reason, 'limit': self.sr_rate_limit_var.get()})
+
+        @app.route('/api/search')
+        def api_search():
+            query = request.args.get('q', '').lower()
+            if not query: return jsonify([])
+            # 简单的内存搜索
+            results = [s['name'] for s in self.song_library if query in s['name'].lower()]
+            return jsonify(results[:50]) # 最多返回50条
+
+        @app.route('/api/captcha')
+        def api_captcha():
+            # 生成4位随机码
+            code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+            ip = request.remote_addr
+            captcha_store[ip] = code
+            
+            # 绘图
+            img = Image.new('RGB', (100, 40), color=(240, 240, 240))
+            d = ImageDraw.Draw(img)
+            # 尝试加载字体，失败则用默认
+            try:
+                font = ImageFont.truetype("arial.ttf", 24)
+            except:
+                font = ImageFont.load_default()
+            
+            d.text((10, 5), code, fill=(0, 0, 0), font=font)
+            # 加点噪点
+            for _ in range(50):
+                d.point((random.randint(0, 100), random.randint(0, 40)), fill=(150, 150, 150))
+
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            buf.seek(0)
+            return send_file(buf, mimetype='image/png')
+
+        @app.route('/api/submit', methods=['POST'])
+        def api_submit():
+            if not self.song_request_server_active: return jsonify({'success': False, 'message': '服务已停止'})
+            
+            # 1. 规则检查
+            allowed, reason = self._is_song_request_allowed()
+            if not allowed:
+                return jsonify({'success': False, 'message': f'提交失败: {reason}'})
+
+            data = request.json
+            ip = request.remote_addr
+            
+            # 2. 验证码检查
+            server_code = captcha_store.get(ip)
+            user_code = data.get('captcha', '').upper()
+            if not server_code or server_code != user_code:
+                return jsonify({'success': False, 'message': '验证码错误', 'refresh': True})
+            
+            # 3. 频率限制检查
+            last_time = ip_rate_limit.get(ip, 0)
+            limit_min = int(self.sr_rate_limit_var.get())
+            if time.time() - last_time < limit_min * 60:
+                remaining = int(limit_min * 60 - (time.time() - last_time))
+                return jsonify({'success': False, 'message': f'点歌太频繁，请 {remaining} 秒后再试'})
+
+            # 4. 成功入队
+            song_name = data.get('song')
+            user_name = data.get('user') or "匿名"
+            
+            # 记录时间戳
+            ip_rate_limit[ip] = time.time()
+            # 清除验证码防止重放
+            if ip in captcha_store: del captcha_store[ip]
+
+            # 添加到主程序队列
+            new_req = {
+                'time': datetime.now().strftime('%H:%M'),
+                'user': user_name,
+                'song_name': song_name,
+                'ip': ip
+            }
+            self.song_queue.append(new_req)
+            
+            # 刷新UI (线程安全调用)
+            self.root.after(0, self._update_song_queue_ui)
+            
+            return jsonify({'success': True, 'message': '🎉 点歌成功！已加入播放队列。'})
+
+        try:
+            app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
+        except Exception as e:
+            self.log(f"点歌台服务异常退出: {e}")
+
+    def _start_song_queue_play(self):
+        """启动队列自动播放"""
+        if not self.song_queue:
+            messagebox.showinfo("提示", "队列为空，请先点歌。", parent=self.root)
+            return
+            
+        if hasattr(self, 'song_queue_running') and self.song_queue_running:
+            return # 已经在运行
+
+        self.song_queue_running = True
+        self.sr_play_btn.config(state=DISABLED, text="播放中...")
+        self.log("点歌台自动播放已启动。")
+        
+        # 启动后台监控线程
+        threading.Thread(target=self._song_queue_worker, daemon=True).start()
+
+    def _stop_song_queue_play(self):
+        """停止队列播放"""
+        self.song_queue_running = False
+        self.sr_play_btn.config(state=NORMAL, text="▶ 启动队列播放")
+        
+        # 发送停止指令给主播放器
+        self.playback_command_queue.put(('STOP', None))
+        self.log("点歌台播放已停止。")
+
+    def _find_song_path(self, song_name):
+        """根据歌名在曲库中查找完整路径"""
+        for song in self.song_library:
+            if song['name'] == song_name:
+                return song['path']
+        return None
+
+    def _song_queue_worker(self):
+        """点歌台后台DJ线程"""
+        while self.song_queue_running and self.running:
+            # 1. 检查主播放器状态
+            # 我们通过读取状态栏文本来判断是否空闲 (这是最简单且不破坏原有逻辑的方法)
+            current_status = "未知"
+            if hasattr(self, 'status_labels') and len(self.status_labels) > 2:
+                try:
+                    current_status = self.status_labels[2].cget("text")
+                except: pass
+            
+            # 只有当状态为 "待机" 且 队列不为空时，才切歌
+            if "待机" in current_status and self.song_queue:
+                # 取出第一首
+                request = self.song_queue[0] # 先不pop，等播放成功再pop
+                song_name = request['song_name']
+                full_path = self._find_song_path(song_name)
+                
+                if full_path and os.path.exists(full_path):
+                    # 构造一个临时的播放任务
+                    task = {
+                        'name': f"点播: {song_name} ({request['user']})",
+                        'type': 'audio',
+                        'audio_type': 'single',
+                        'content': full_path,
+                        'volume': '100', # 点歌通常声音大点
+                        'interval_type': 'first',
+                        'interval_first': '1',
+                        'delay': 'ontime'
+                    }
+                    
+                    self.log(f"点歌台正在切歌: {song_name}")
+                    
+                    # 发送给主播放器 (使用插队模式，确保立即响应)
+                    self.playback_command_queue.put(('PLAY_INTERRUPT', (task, "manual_queue")))
+                    
+                    # 从队列和UI中移除
+                    self.song_queue.pop(0)
+                    self.root.after(0, self._update_song_queue_ui)
+                    
+                    # 等待一会儿，让状态栏变成 "播放中"，防止循环过快
+                    time.sleep(2)
+                else:
+                    self.log(f"错误：找不到歌曲文件 {song_name}，已跳过。")
+                    self.song_queue.pop(0)
+                    self.root.after(0, self._update_song_queue_ui)
+            
+            elif not self.song_queue:
+                # 队列播完了
+                self.log("点歌队列已播放完毕。")
+                self.root.after(0, lambda: self.sr_play_btn.config(state=NORMAL, text="▶ 启动队列播放"))
+                self.song_queue_running = False
+                break
+            
+            time.sleep(1) # 每秒检查一次
+
+# --- ↑↑↑ 点歌台逻辑结束 ↑↑↑ ---
 
 # --- 动态语音功能的全套方法 ---
 
@@ -9835,7 +10500,15 @@ class TimedBroadcastApp:
             "remote_auth_enabled": False,
             "remote_username": "admin",
             "remote_password": "123",
-            "remote_temp_minutes": "60"
+            "remote_temp_minutes": "60",
+            "song_request_enabled": True,
+            "song_request_port": "9999",
+            "song_request_folders": [],
+            "song_request_rate_limit": "5",
+            "song_request_open_time_start": "18:00:00",
+            "song_request_open_time_end": "19:00:00",
+            "song_request_weekday": "每周:1234567",
+            "song_request_date_range": "2025-01-01 ~ 2099-12-31"
         }
         if os.path.exists(SETTINGS_FILE):
             try:
