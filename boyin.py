@@ -3575,7 +3575,8 @@ class TimedBroadcastApp:
         ttk.Button(f_btn_frame, text="+", width=3, command=self._add_song_folder).pack(side=LEFT)
         ttk.Button(f_btn_frame, text="-", width=3, command=self._remove_song_folder).pack(side=LEFT, padx=5)
         ttk.Button(f_btn_frame, text="刷新曲库", bootstyle="link", command=self._refresh_song_library).pack(side=RIGHT)
-        self.sr_count_label = ttk.Label(folder_lf, text="歌曲总数: 0", font=self.font_9, bootstyle="secondary")
+        current_count = len(self.song_library)
+        self.sr_count_label = ttk.Label(folder_lf, text=f"歌曲总数: {current_count}", font=self.font_9, bootstyle="secondary")
         self.sr_count_label.pack(anchor='e')
 
         # D. 安全设置
@@ -3748,9 +3749,9 @@ class TimedBroadcastApp:
             ))
 
     def _toggle_song_request_service(self):
-        """启动/停止点歌台服务 (含自动播放逻辑)"""
+        """启动/停止点歌台服务 (已修复重启Bug)"""
         if self.song_request_server_active:
-            # --- 停止逻辑 ---
+            # --- 停止逻辑 (软停止) ---
             self.song_request_server_active = False
             self.sr_status_label.config(text="🔴 服务已停止", foreground="gray")
             self.sr_url_label.config(text="地址: -")
@@ -3759,7 +3760,7 @@ class TimedBroadcastApp:
             # 联动：同时停止队列播放
             self._stop_song_queue_play() 
             
-            self.log("点歌台服务已停止。")
+            self.log("点歌台服务已停止 (端口仍被占用，重启软件可彻底释放)。")
         else:
             # --- 启动逻辑 ---
             try:
@@ -3778,7 +3779,20 @@ class TimedBroadcastApp:
             })
             self.save_settings()
 
-            threading.Thread(target=self._run_song_request_server, args=(port,), daemon=True).start()
+            # --- ↓↓↓ 核心修复：防止重复启动线程 ↓↓↓ ---
+            # 1. 检查端口是否变更
+            if hasattr(self, 'sr_thread_started') and self.sr_thread_started:
+                if hasattr(self, 'sr_current_port') and self.sr_current_port != port:
+                    messagebox.showwarning("重启生效", "修改端口需要重启软件才能生效，本次将继续使用旧端口。", parent=self.root)
+                    port = self.sr_current_port
+                    self.sr_port_var.set(str(port))
+
+            # 2. 仅在线程未启动时创建新线程
+            if not hasattr(self, 'sr_thread_started'):
+                threading.Thread(target=self._run_song_request_server, args=(port,), daemon=True).start()
+                self.sr_thread_started = True
+                self.sr_current_port = port
+            # --- ↑↑↑ 修复结束 ↑↑↑ ---
             
             self.song_request_server_active = True
             ip = self._get_local_ip()
@@ -4090,17 +4104,13 @@ class TimedBroadcastApp:
             self.log(f"点歌台服务异常退出: {e}")
 
     def _start_song_queue_play(self):
-        """启动队列自动播放"""
-        if not self.song_queue:
-            messagebox.showinfo("提示", "队列为空，请先点歌。", parent=self.root)
-            return
-            
         if hasattr(self, 'song_queue_running') and self.song_queue_running:
             return # 已经在运行
 
         self.song_queue_running = True
-        self.sr_play_btn.config(state=DISABLED, text="播放中...")
-        self.log("点歌台自动播放已启动。")
+        # 更新按钮文本，让用户知道它正在监控
+        self.sr_play_btn.config(state=DISABLED, text="自动播放监控中...")
+        self.log("点歌台自动播放监控已启动 (等待点歌...)。")
         
         # 启动后台监控线程
         threading.Thread(target=self._song_queue_worker, daemon=True).start()
@@ -4122,60 +4132,54 @@ class TimedBroadcastApp:
         return None
 
     def _song_queue_worker(self):
-        """点歌台后台DJ线程"""
+        """点歌台后台DJ线程 (修复版：空队列不退出)"""
         while self.song_queue_running and self.running:
             # 1. 检查主播放器状态
-            # 我们通过读取状态栏文本来判断是否空闲 (这是最简单且不破坏原有逻辑的方法)
             current_status = "未知"
             if hasattr(self, 'status_labels') and len(self.status_labels) > 2:
                 try:
                     current_status = self.status_labels[2].cget("text")
                 except: pass
             
-            # 只有当状态为 "待机" 且 队列不为空时，才切歌
+            # 2. 只有当状态为 "待机" 且 队列不为空时，才切歌
             if "待机" in current_status and self.song_queue:
                 # 取出第一首
-                request = self.song_queue[0] # 先不pop，等播放成功再pop
+                request = self.song_queue[0] 
                 song_name = request['song_name']
                 full_path = self._find_song_path(song_name)
                 
                 if full_path and os.path.exists(full_path):
-                    # 构造一个临时的播放任务
+                    # 构造播放任务
                     task = {
                         'name': f"点播: {song_name} ({request['user']})",
                         'type': 'audio',
                         'audio_type': 'single',
                         'content': full_path,
-                        'volume': '100', # 点歌通常声音大点
+                        'volume': '100', 
                         'interval_type': 'first',
                         'interval_first': '1',
                         'delay': 'ontime'
                     }
                     
                     self.log(f"点歌台正在切歌: {song_name}")
-                    
-                    # 发送给主播放器 (使用插队模式，确保立即响应)
                     self.playback_command_queue.put(('PLAY_INTERRUPT', (task, "manual_queue")))
                     
-                    # 从队列和UI中移除
+                    # 移除并刷新UI
                     self.song_queue.pop(0)
                     self.root.after(0, self._update_song_queue_ui)
                     
-                    # 等待一会儿，让状态栏变成 "播放中"，防止循环过快
+                    # 等待状态栏变更为"播放中"
                     time.sleep(2)
                 else:
                     self.log(f"错误：找不到歌曲文件 {song_name}，已跳过。")
                     self.song_queue.pop(0)
                     self.root.after(0, self._update_song_queue_ui)
-            
-            elif not self.song_queue:
-                # 队列播完了
-                self.log("点歌队列已播放完毕。")
-                self.root.after(0, lambda: self.sr_play_btn.config(state=NORMAL, text="▶ 启动队列播放"))
-                self.song_queue_running = False
-                break
-            
+ 
             time.sleep(1) # 每秒检查一次
+
+        # 循环结束 (说明被手动停止了)
+        self.log("点歌台播放监控已停止。")
+        self.root.after(0, lambda: self.sr_play_btn.config(state=NORMAL, text="▶ 启动队列播放"))
 
 # --- ↑↑↑ 点歌台逻辑结束 ↑↑↑ ---
 
