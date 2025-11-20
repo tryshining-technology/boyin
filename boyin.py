@@ -199,6 +199,7 @@ class TimedBroadcastApp:
             except Exception as e:
                 print(f"加载窗口图标失败: {e}")
 
+        # --- 数据容器初始化 ---
         self.tasks = []
         self.holidays = []
         self.todos = []
@@ -207,23 +208,27 @@ class TimedBroadcastApp:
         self.print_tasks = []
         self.backup_tasks = []
         self.dynamic_voice_tasks = []
-        self.song_library = []
-        self.song_queue = []
-        self.song_request_server_active = False
+        
+        # --- [新增] 点歌台数据容器 ---
+        self.song_library = []      # 存储扫描到的所有歌曲信息
+        self.song_queue = []        # 存储已点播的等待队列
+        self.song_request_server_active = False # 点歌台服务运行状态
         
         self.settings = {}
+        
+        # --- 界面变量初始化 (部分) ---
         self.wallpaper_enabled_var = tk.BooleanVar()
         self.wallpaper_interval_days_var = tk.StringVar(value="1")
         self.wallpaper_change_time_var = tk.StringVar(value="08:00:00")
         self.wallpaper_cache_days_var = tk.StringVar(value="7")
-        self.timer_mode_var = tk.StringVar(value="countdown") # 'countdown' 或 'stopwatch'
+        self.timer_mode_var = tk.StringVar(value="countdown")
         self.timer_duration_var = tk.StringVar(value="00:10:00")
         self.timer_infinite_var = tk.BooleanVar(value=False)
         self.timer_show_clock_var = tk.BooleanVar(value=True)
         self.timer_play_sound_var = tk.BooleanVar(value=True)
         self.timer_sound_file_var = tk.StringVar(value="")
         
-        # 用于管理计时器窗口的状态
+        # --- 运行时状态 ---
         self.timer_window = None
         self.is_fullscreen_exclusive = False
         self.timer_after_id = None
@@ -242,10 +247,8 @@ class TimedBroadcastApp:
         self.drag_start_item = None
 
         self.playback_command_queue = queue.Queue()
-        # --- ↓↓↓ 在这里添加新代码 ↓↓↓ ---
-        self.intercut_queue = queue.Queue() # 新增：专门用于插播任务的队列
-        self.intercut_stop_event = threading.Event() # 新增：用于紧急停止插播的信号
-        # --- ↑↑↑ 新增代码结束 ↑↑↑ ---
+        self.intercut_queue = queue.Queue()
+        self.intercut_stop_event = threading.Event()
         self.reminder_queue = queue.Queue()
         self.is_reminder_active = False
 
@@ -253,8 +256,8 @@ class TimedBroadcastApp:
         self.nav_buttons = {}
         self.current_page = None
         self.current_page_name = ""
-        self.main_weather_label = None # <--- 新增此行
-        self.intercut_page_content = None # <--- 新增：用于存储插播页面的文字内容
+        self.main_weather_label = None
+        self.intercut_page_content = None
         
         self.active_processes = {}
 
@@ -274,6 +277,27 @@ class TimedBroadcastApp:
 
         self.create_folder_structure()
         self.load_settings()
+
+        # --- [新增] 核心服务变量初始化 (必须在 load_settings 之后) ---
+        # 1. 远程控制变量
+        self.remote_port_var = tk.StringVar(value=self.settings.get("remote_port", "8888"))
+        self.remote_auth_var = tk.BooleanVar(value=self.settings.get("remote_auth_enabled", False))
+        self.remote_user_var = tk.StringVar(value=self.settings.get("remote_username", "admin"))
+        self.remote_pass_var = tk.StringVar(value=self.settings.get("remote_password", "123"))
+        # 如果配置是永久开启，则模式设为 permanent，否则默认为 temp
+        self.remote_mode_var = tk.StringVar(value="permanent" if self.settings.get("remote_enabled") else "temp")
+        self.remote_temp_min_var = tk.StringVar(value=self.settings.get("remote_temp_minutes", "60"))
+        self.remote_server_active = False
+        self.remote_stop_timer = None
+
+        # 2. 点歌台变量
+        self.sr_port_var = tk.StringVar(value=self.settings.get("song_request_port", "9999"))
+        self.sr_rate_limit_var = tk.StringVar(value=self.settings.get("song_request_rate_limit", "5"))
+        self.sr_start_time_var = tk.StringVar(value=self.settings.get("song_request_open_time_start", "18:00:00"))
+        self.sr_end_time_var = tk.StringVar(value=self.settings.get("song_request_open_time_end", "19:00:00"))
+        self.sr_weekday_var = tk.StringVar(value=self.settings.get("song_request_weekday", "每周:1234567"))
+        self.sr_date_range_var = tk.StringVar(value=self.settings.get("song_request_date_range", "2025-01-01 ~ 2099-12-31"))
+        # --- ↑↑↑ 变量初始化结束 ↑↑↑ ---
 
         saved_geometry = self.settings.get("window_geometry")
         if saved_geometry:
@@ -302,6 +326,19 @@ class TimedBroadcastApp:
         self.start_background_threads()
         self.root.protocol("WM_DELETE_WINDOW", self.show_quit_dialog)
         self.start_tray_icon_thread()
+
+        # --- [新增] 自动启动逻辑 ---
+        # 1. 检查远程控制是否设置为永久开启
+        if self.settings.get("remote_enabled", False):
+            self.log("检测到远程控制设置为永久开启，正在启动...")
+            # 延时启动，避免阻塞主界面初始化
+            self.root.after(1000, self._start_remote_service)
+
+        # 2. 检查点歌台是否开启 (默认开启)
+        if self.settings.get("song_request_enabled", True):
+            self.log("检测到点歌台服务开启，正在启动...")
+            self.root.after(1500, self._toggle_song_request_service)
+        # --- ↑↑↑ 自动启动结束 ↑↑↑ ---
 
         if self.settings.get("lock_on_start", False) and self.lock_password_b64:
             self.root.after(100, self.perform_initial_lock)
@@ -3026,20 +3063,6 @@ class TimedBroadcastApp:
 #↓全套远程控制代码
 
     def _build_remote_control_ui(self, parent_frame):
-        # 1. 绑定变量 (从 settings 加载)
-        self.remote_port_var = tk.StringVar(value=self.settings.get("remote_port", "8888"))
-        self.remote_auth_var = tk.BooleanVar(value=self.settings.get("remote_auth_enabled", False))
-        self.remote_user_var = tk.StringVar(value=self.settings.get("remote_username", "admin"))
-        self.remote_pass_var = tk.StringVar(value=self.settings.get("remote_password", "123"))
-        
-        # 模式选择：如果 remote_enabled 为 True，则是永久模式，否则默认临时模式
-        initial_mode = "permanent" if self.settings.get("remote_enabled") else "temp"
-        self.remote_mode_var = tk.StringVar(value=initial_mode)
-        self.remote_temp_min_var = tk.StringVar(value=self.settings.get("remote_temp_minutes", "60"))
-        
-        # 运行时状态标志
-        self.remote_server_active = False 
-        self.remote_stop_timer = None
 
         # 2. 使用滚动框架防止屏幕太小显示不全
         scrolled = ScrolledFrame(parent_frame, autohide=True)
@@ -3482,13 +3505,6 @@ class TimedBroadcastApp:
 #↓点歌台全套代码
 
     def _build_song_request_ui(self, parent_frame):
-        # 1. 变量绑定
-        self.sr_port_var = tk.StringVar(value=self.settings.get("song_request_port", "9999"))
-        self.sr_rate_limit_var = tk.StringVar(value=self.settings.get("song_request_rate_limit", "5"))
-        self.sr_start_time_var = tk.StringVar(value=self.settings.get("song_request_open_time_start", "18:00:00"))
-        self.sr_end_time_var = tk.StringVar(value=self.settings.get("song_request_open_time_end", "19:00:00"))
-        self.sr_weekday_var = tk.StringVar(value=self.settings.get("song_request_weekday", "每周:1234567"))
-        self.sr_date_range_var = tk.StringVar(value=self.settings.get("song_request_date_range", "2025-01-01 ~ 2099-12-31"))
         
         # 2. 布局容器 (左右分栏)
         parent_frame.columnconfigure(0, weight=4) # 左侧 40%
