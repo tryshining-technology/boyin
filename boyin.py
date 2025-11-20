@@ -3457,26 +3457,59 @@ class TimedBroadcastApp:
         def api_intercut():
             data = request.json
             text = data.get('text')
-            voice_type = data.get('voice_type') # male / female
+            voice_type = data.get('voice_type') # 'male' 或 'female'
             repeat = data.get('repeat', 1)
             
-            # 映射到具体的语音名称 (复用 Edge-TTS 映射)
-            voice_name = '在线-云扬 (男)' if voice_type == 'male' else '在线-晓晓 (女)'
+            # --- ↓↓↓ 修复开始：智能匹配本地 SAPI 语音 ↓↓↓ ---
+            # 1. 获取本机所有可用的 SAPI 播音员名称
+            local_voices = self.get_available_voices()
+            target_voice = ""
+
+            if not local_voices:
+                # 如果获取失败，保持空字符串，让系统用默认的
+                target_voice = ""
+            else:
+                # 2. 根据 'male'/'female' 关键词在本地列表中搜索
+                if voice_type == 'male':
+                    # 常见的本地男声关键词 (Kangkang是Win10常见男声)
+                    male_keywords = ['Kangkang', 'Danny', 'Paul', 'Mark', 'Male', 'Hanhan', 'Yunyang']
+                    for v in local_voices:
+                        if any(k in v for k in male_keywords):
+                            target_voice = v
+                            break
+                else:
+                    # 常见的本地女声关键词
+                    female_keywords = ['Huihui', 'Yaoyao', 'Julie', 'Female', 'Zira', 'Xiaoxiao']
+                    for v in local_voices:
+                        if any(k in v for k in female_keywords):
+                            target_voice = v
+                            break
+                
+                # 3. 如果没找到匹配性别的，但列表不为空，这就很尴尬了
+                #    为了体现差异，如果是选男声但没找到，尝试用列表里的第2个（如果有的话），否则用第1个
+                if not target_voice and local_voices:
+                    if voice_type == 'male' and len(local_voices) > 1:
+                        target_voice = local_voices[1] # 盲猜第二个可能是男的
+                    else:
+                        target_voice = local_voices[0]
+
+            # --- ↑↑↑ 修复结束 ↑↑↑ ---
             
-            # 构造任务数据
+            # 构造任务数据 (传入真实的本地语音名称)
             task_data = {
                 'text': text,
-                'params': {'voice': voice_name, 'speed': '0', 'pitch': '0', 'volume': '100'},
+                'params': {'voice': target_voice, 'speed': '0', 'pitch': '0', 'volume': '100'},
                 'repeats': repeat
             }
             
-            # 清除停止信号并放入队列 (复用插播逻辑)
+            # 清除停止信号并放入队列
             if hasattr(self, 'intercut_stop_event'):
                 self.intercut_stop_event.clear()
             if hasattr(self, 'intercut_queue'):
                 self.intercut_queue.put(task_data)
             
-            return jsonify({'message': '插播指令已发送'})
+            # 返回调试信息，方便您确认到底用了哪个声音
+            return jsonify({'message': f'插播已发送 (使用语音: {target_voice or "默认"})'})
 
         # --- 4. 启动服务 ---
         # host='0.0.0.0' 允许局域网访问
