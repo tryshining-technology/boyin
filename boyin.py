@@ -186,6 +186,208 @@ EDGE_TTS_VOICES = {
     '在线-台湾-曉雨 (女)': 'zh-TW-HsiaoYuNeural',
 }
 
+#虚拟主播功能代码
+class VirtualAvatar:
+    def __init__(self, root, img_closed_path, img_open_path, img_blink_path, settings_dict):
+        self.root = root
+        self.settings = settings_dict # 引用主程序的设置字典，用于读写记忆
+        self.window = None
+        self.label = None
+        self.is_visible = False
+        self.is_talking = False
+        
+        # 图片资源容器
+        self.raw_images = {} # 原始PIL对象 (500x500)
+        self.tk_images = {}  # 当前缩放后的Tk图片对象
+        self.loaded = False
+        
+        # 读取记忆的大小 (如果没有，默认300)
+        self.default_height = 300
+        self.current_height = self.settings.get('avatar_height', self.default_height)
+        
+        # 限制最大尺寸 (防失真)
+        self.MAX_HEIGHT = 500 
+        self.MIN_HEIGHT = 100
+
+        self._load_raw_images(img_closed_path, img_open_path, img_blink_path)
+        self._anim_job = None
+
+    def _load_raw_images(self, closed_p, open_p, blink_p):
+        try:
+            def load_pil(path):
+                if not os.path.exists(path): return None
+                return Image.open(path)
+
+            self.raw_images['closed'] = load_pil(closed_p)
+            self.raw_images['open'] = load_pil(open_p)
+            self.raw_images['blink'] = load_pil(blink_p)
+            
+            # 容错：如果缺眨眼图，用闭嘴图顶替
+            if not self.raw_images['blink'] and self.raw_images['closed']:
+                self.raw_images['blink'] = self.raw_images['closed']
+            
+            if self.raw_images['closed']:
+                self.loaded = True
+            else:
+                print("错误：找不到虚拟主播主图片 (closed.png)")
+        except Exception as e:
+            print(f"虚拟主播加载失败: {e}")
+
+    def _generate_tk_images(self, target_height):
+        """生成当前尺寸的显示图片"""
+        if not self.loaded: return
+        # 确保不超过原图500px，也不小于100px
+        target_height = max(self.MIN_HEIGHT, min(target_height, self.MAX_HEIGHT))
+        
+        for key, pil_img in self.raw_images.items():
+            if pil_img:
+                aspect_ratio = pil_img.width / pil_img.height
+                target_width = int(target_height * aspect_ratio)
+                # 使用高质量缩放算法
+                resized = pil_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                self.tk_images[key] = ImageTk.PhotoImage(resized)
+
+    def show(self):
+        if not self.loaded or self.window: return
+
+        # 生成图片
+        self._generate_tk_images(self.current_height)
+
+        self.window = tk.Toplevel(self.root)
+        self.window.overrideredirect(True) # 无边框
+        self.window.attributes('-topmost', True) # 置顶
+        
+        # 设置透明背景 (Windows黑魔法)
+        bg_color = '#000001'
+        self.window.config(bg=bg_color)
+        self.window.attributes('-transparentcolor', bg_color)
+
+        # 恢复记忆的位置，如果是第一次，则放右下角
+        sw = self.window.winfo_screenwidth()
+        sh = self.window.winfo_screenheight()
+        
+        w = self.tk_images['closed'].width()
+        h = self.tk_images['closed'].height()
+        
+        # 读取保存的坐标，默认为 -1 表示未保存
+        saved_x = self.settings.get('avatar_x', -1)
+        saved_y = self.settings.get('avatar_y', -1)
+
+        if saved_x == -1 or saved_y == -1:
+            x = sw - w - 50
+            y = sh - h - 80
+        else:
+            x = saved_x
+            y = saved_y
+
+        self.window.geometry(f"{w}x{h}+{x}+{y}")
+
+        self.label = tk.Label(self.window, image=self.tk_images['closed'], bg=bg_color, bd=0)
+        self.label.pack()
+
+        # 事件绑定
+        self.window.bind("<Button-1>", self._start_move)
+        self.window.bind("<B1-Motion>", self._do_move)
+        self.window.bind("<ButtonRelease-1>", self._save_position) # 拖动结束后保存位置
+        self.window.bind("<MouseWheel>", self._on_zoom) # 滚轮缩放
+        
+        # 右键菜单
+        self.menu = tk.Menu(self.window, tearoff=0)
+        self.menu.add_command(label="恢复默认大小", command=self._reset_size)
+        self.menu.add_separator()
+        self.menu.add_command(label="隐藏主播", command=self.hide)
+        self.window.bind("<Button-3>", lambda e: self.menu.post(e.x_root, e.y_root))
+
+        self.is_visible = True
+        self._animate_loop()
+
+    def hide(self):
+        if self.window:
+            self._save_position() # 关闭前保存状态
+            if self._anim_job: self.window.after_cancel(self._anim_job)
+            self.window.destroy()
+            self.window = None
+            self.is_visible = False
+
+    def set_talking(self, status):
+        """控制嘴巴开合的开关"""
+        self.is_talking = status
+        # 状态切换时立即重置动画，提高响应感
+        if self.window and self._anim_job:
+            self.window.after_cancel(self._anim_job)
+            self._animate_loop()
+
+    def _animate_loop(self):
+        if not self.window or not self.window.winfo_exists(): return
+        
+        next_delay = 100
+        img_key = 'closed'
+
+        if self.is_talking:
+            # --- 说话模式 (随机动嘴 + 偶尔眨眼) ---
+            r = random.random()
+            if r < 0.1:   img_key = 'blink'   # 10% 眨眼
+            elif r < 0.7: img_key = 'open'    # 60% 张嘴
+            else:         img_key = 'closed'  # 30% 闭嘴
+            next_delay = random.randint(100, 200) # 语速节奏
+        else:
+            # --- 待机模式 (呼吸眨眼) ---
+            # 如果当前显示的是眨眼图，说明眨完了，该睁开了
+            if self.label.cget('image') == str(self.tk_images.get('blink')):
+                img_key = 'closed'
+                next_delay = random.randint(2000, 5000) # 睁眼 2-5秒
+            else:
+                # 否则就是该眨眼了
+                img_key = 'blink'
+                next_delay = 150 # 闭眼 0.15秒
+
+        if img_key in self.tk_images:
+            self.label.config(image=self.tk_images[img_key])
+
+        self._anim_job = self.window.after(next_delay, self._animate_loop)
+
+    def _on_zoom(self, event):
+        # 滚轮缩放逻辑
+        step = 20
+        if event.delta > 0: self.current_height += step
+        else:               self.current_height -= step
+        
+        # 限制范围
+        self.current_height = max(self.MIN_HEIGHT, min(self.current_height, self.MAX_HEIGHT))
+        self._refresh_geometry()
+        
+        # 保存大小设置
+        self.settings['avatar_height'] = self.current_height
+
+    def _reset_size(self):
+        self.current_height = self.default_height
+        self._refresh_geometry()
+        self.settings['avatar_height'] = self.current_height
+
+    def _refresh_geometry(self):
+        # 重新生成图片并应用，保持窗口左上角位置不变
+        cur_x = self.window.winfo_x()
+        cur_y = self.window.winfo_y()
+        self._generate_tk_images(self.current_height)
+        self.label.config(image=self.tk_images['closed']) # 临时重置为闭嘴图防止闪烁
+        self.window.geometry(f"{self.tk_images['closed'].width()}x{self.tk_images['closed'].height()}+{cur_x}+{cur_y}")
+
+    def _start_move(self, event):
+        self.x = event.x
+        self.y = event.y
+
+    def _do_move(self, event):
+        deltax = event.x - self.x
+        deltay = event.y - self.y
+        x = self.window.winfo_x() + deltax
+        y = self.window.winfo_y() + deltay
+        self.window.geometry(f"+{x}+{y}")
+
+    def _save_position(self, event=None):
+        if self.window:
+            self.settings['avatar_x'] = self.window.winfo_x()
+            self.settings['avatar_y'] = self.window.winfo_y()
+#虚拟主播功能代码结束
 
 class TimedBroadcastApp:
     def __init__(self, root):
@@ -297,15 +499,6 @@ class TimedBroadcastApp:
         self.sr_end_time_var = tk.StringVar(value=self.settings.get("song_request_open_time_end", "19:00:00"))
         self.sr_weekday_var = tk.StringVar(value=self.settings.get("song_request_weekday", "每周:1234567"))
         self.sr_date_range_var = tk.StringVar(value=self.settings.get("song_request_date_range", "2025-01-01 ~ 2099-12-31"))
-
-        # 3. 串流服务变量
-        self.stream_port_var = tk.StringVar(value=self.settings.get("stream_audio_port", "6666"))
-        self.stream_auto_start_var = tk.BooleanVar(value=self.settings.get("stream_audio_enabled", False))
-        self.stream_device_name_var = tk.StringVar(value="正在检测...") # 用于UI显示检测结果
-        
-        self.stream_server_active = False   # 服务运行状态
-        self.stream_thread_started = False  # 线程是否已启动过(防止重复)
-        self.stream_current_port = 6666     # 当前运行端口
         # --- ↑↑↑ 变量初始化结束 ↑↑↑ ---
 
         saved_geometry = self.settings.get("window_geometry")
@@ -320,6 +513,20 @@ class TimedBroadcastApp:
         self.load_lock_password()
 
         self._apply_global_font()
+        images_dir = os.path.join(application_path, "images")
+        if not os.path.exists(images_dir): os.makedirs(images_dir)
+        
+        self.avatar = VirtualAvatar(
+            self.root,
+            os.path.join(images_dir, "closed.png"),
+            os.path.join(images_dir, "open.png"),
+            os.path.join(images_dir, "blink.png"),
+            self.settings # 把设置传进去实现记忆
+        )
+        
+        # 如果上次是开启状态，自动显示
+        if self.settings.get("avatar_enabled", False):
+            self.root.after(1000, self.avatar.show)
         self.check_authorization()
 
         self.create_widgets()
@@ -347,7 +554,6 @@ class TimedBroadcastApp:
         if self.settings.get("song_request_enabled", True):
             self.log("检测到点歌台服务开启，正在启动...")
             self.root.after(1500, self._toggle_song_request_service)
-        self.root.after(2000, self._detect_audio_device)
         # --- ↑↑↑ 自动启动结束 ↑↑↑ ---
 
         if self.settings.get("lock_on_start", False) and self.lock_password_b64:
@@ -705,15 +911,32 @@ class TimedBroadcastApp:
         pitch_entry.insert(0, "0")
         pitch_entry.grid(row=2, column=1, sticky='w', padx=5, pady=5)
         
-        # --- 立即插播按钮 ---
-        intercut_btn = ttk.Button(page_frame, text="立即插播", style="lg.success.TButton", 
+        action_btn_frame = ttk.Frame(page_frame)
+        action_frame_row = 3 # 根据你之前的布局，这里应该是第3行
+        action_btn_frame.grid(row=action_frame_row, column=0, sticky='ew', pady=10)
+        action_btn_frame.columnconfigure(0, weight=3) # 插播按钮占 3/4 宽度
+        action_btn_frame.columnconfigure(1, weight=1) # 导出按钮占 1/4 宽度
+
+        # 1. 立即插播按钮 (保持原有逻辑)
+        intercut_btn = ttk.Button(action_btn_frame, text="立即插播", style="lg.success.TButton", 
                                   command=lambda: self._execute_intercut(
                                       content_text.text.get('1.0', tk.END),
                                       voice_var.get(),
                                       speed_entry.get(),
                                       pitch_entry.get()
                                   ))
-        intercut_btn.grid(row=3, column=0, sticky='ew', ipady=8, pady=10)
+        intercut_btn.grid(row=0, column=0, sticky='ew', ipady=8, padx=(0, 10))
+
+        # 2. [新增] 导出音频按钮
+        export_btn = ttk.Button(action_btn_frame, text="导出WAV", bootstyle="info-outline",
+                                command=lambda: self._export_intercut_audio_handler(
+                                      content_text.text.get('1.0', tk.END),
+                                      voice_var.get(),
+                                      speed_entry.get(),
+                                      pitch_entry.get()
+                                ))
+        export_btn.grid(row=0, column=1, sticky='ew', ipady=8)
+        # --- ↑↑↑ 修改结束 ↑↑↑ ---
         
         return page_frame
             
@@ -736,7 +959,6 @@ class TimedBroadcastApp:
         media_tab = ttk.Frame(notebook, padding=10)
         wallpaper_tab = ttk.Frame(notebook, padding=10)
         timer_tab = ttk.Frame(notebook, padding=10)
-        stream_tab = ttk.Frame(notebook, padding=10)
         song_request_tab = ttk.Frame(notebook, padding=10)
         remote_tab = ttk.Frame(notebook, padding=10)
 
@@ -747,7 +969,6 @@ class TimedBroadcastApp:
         notebook.add(media_tab, text=' 媒体处理 ')
         notebook.add(wallpaper_tab, text=' 网络壁纸 ')
         notebook.add(timer_tab, text=' 计时工具 ')
-        notebook.add(stream_tab, text=' 串流音频 ')
         notebook.add(song_request_tab, text=' 点歌台 ') 
         notebook.add(remote_tab, text=' 远程控制 ')
 
@@ -758,7 +979,6 @@ class TimedBroadcastApp:
         self._build_media_processing_ui(media_tab)
         self._build_wallpaper_ui(wallpaper_tab)
         self._build_timer_ui(timer_tab)
-        self._build_stream_audio_ui(stream_tab)
         self._build_song_request_ui(song_request_tab)
         self._build_remote_control_ui(remote_tab)
 
@@ -4196,365 +4416,6 @@ class TimedBroadcastApp:
 
 # --- ↑↑↑ 点歌台逻辑结束 ↑↑↑ ---
 
-#↓串流全套代码
-    def _build_stream_audio_ui(self, parent_frame):
-        # 使用滚动框架
-        scrolled = ScrolledFrame(parent_frame, autohide=True)
-        scrolled.pack(fill=BOTH, expand=True)
-        container = scrolled.container
-
-        # --- 区域 1: 运行状态 ---
-        status_lf = ttk.LabelFrame(container, text="服务状态", padding=15)
-        status_lf.pack(fill=X, pady=10, padx=5)
-        
-        self.stream_status_label = ttk.Label(status_lf, text="🔴 服务未启动", font=self.font_14_bold, foreground="gray")
-        self.stream_status_label.pack(anchor='w')
-        
-        self.stream_url_label = ttk.Label(status_lf, text="收听地址: -", font=self.font_11, bootstyle="info")
-        self.stream_url_label.pack(anchor='w', pady=(5, 0))
-
-        # --- 区域 2: 音频源检测 ---
-        source_lf = ttk.LabelFrame(container, text="音频源自动检测", padding=15)
-        source_lf.pack(fill=X, pady=10, padx=5)
-        
-        self.stream_device_label = ttk.Label(source_lf, textvariable=self.stream_device_name_var, font=self.font_11)
-        self.stream_device_label.pack(side=LEFT)
-        
-        ttk.Button(source_lf, text="重新检测", bootstyle="outline", command=self._detect_audio_device, width=8).pack(side=RIGHT)
-
-        # --- 区域 3: 配置与启动 ---
-        config_lf = ttk.LabelFrame(container, text="启动设置", padding=15)
-        config_lf.pack(fill=X, pady=10, padx=5)
-        
-        port_frame = ttk.Frame(config_lf)
-        port_frame.pack(fill=X, anchor='w', pady=5)
-        ttk.Label(port_frame, text="监听端口:").pack(side=LEFT)
-        ttk.Entry(port_frame, textvariable=self.stream_port_var, width=8, font=self.font_11).pack(side=LEFT, padx=10)
-        
-        ttk.Checkbutton(config_lf, text="软件启动后自动开启串流", variable=self.stream_auto_start_var, bootstyle="round-toggle", command=self.save_settings).pack(anchor='w', pady=5)
-
-        # --- 区域 4: 操作栏 ---
-        btn_frame = ttk.Frame(container, padding=10)
-        btn_frame.pack(fill=X, pady=10)
-        
-        self.stream_start_btn = ttk.Button(btn_frame, text="▶ 启动串流服务", bootstyle="success", command=self._toggle_stream_service)
-        self.stream_start_btn.pack(side=LEFT, padx=10, ipady=5, expand=True, fill=X)
-        
-        # --- 底部贴士 ---
-        tips_text = "💡 没有声音？\n1. 请确保电脑已安装声卡驱动。\n2. 右键任务栏小喇叭 -> 声音设置 -> 录制 -> 启用 “立体声混音” 设备。\n3. 确保电脑音量未静音。"
-        ttk.Label(container, text=tips_text, font=self.font_9, bootstyle="secondary", justify=LEFT).pack(fill=X, padx=15, pady=20)
-
-        # 初始化检测一次设备
-        self.root.after(500, self._detect_audio_device)
-
-    def _detect_audio_device(self):
-        """自动检测系统内录设备 (修复全局Popen冲突版)"""
-        self.stream_device_name_var.set("正在检测...")
-        self.root.update_idletasks()
-        
-        ffmpeg_exe = os.path.join(application_path, "ffmpeg.exe")
-        # FFmpeg 列出设备命令
-        command = [ffmpeg_exe, "-list_devices", "true", "-f", "dshow", "-i", "dummy"]
-        
-        def worker():
-            found_device = ""
-            debug_info = "" # 用于存储调试信息
-            
-            try:
-                # --- ↓↓↓ 核心修改：删除了 startupinfo 参数，增加了 stdin ↓↓↓ ---
-                # 因为您在文件开头已经全局重写了 subprocess.Popen，这里不需要再传 startupinfo
-                process = subprocess.Popen(
-                    command, 
-                    stderr=subprocess.PIPE, 
-                    stdout=subprocess.PIPE,
-                    stdin=subprocess.DEVNULL # 防止后台进程卡死
-                )
-                _, stderr_data = process.communicate()
-                # --- ↑↑↑ 修改结束 ↑↑↑ ---
-                
-                # 2. 尝试解码
-                output = ""
-                try:
-                    output = stderr_data.decode('mbcs') 
-                except:
-                    try:
-                        output = stderr_data.decode('utf-8')
-                    except:
-                        output = stderr_data.decode('utf-8', errors='ignore')
-                
-                debug_info = output # 保存原始输出供调试
-
-                # 3. 使用正则提取设备名
-                import re
-                # 匹配引号内的内容，且该行后面必须包含 (audio)
-                pattern = re.compile(r'"([^"]+)"\s+\(audio\)')
-                audio_devices = pattern.findall(output)
-
-                # 4. 匹配关键词
-                keywords = ["立体声混音", "Stereo Mix", "What U Hear", "内录", "混音"]
-                
-                for dev in audio_devices:
-                    # 排除掉麦克风
-                    if "麦克风" in dev or "Microphone" in dev:
-                        continue
-                    for kw in keywords:
-                        if kw.lower() in dev.lower():
-                            found_device = dev
-                            break
-                    if found_device: break
-                
-                # 盲猜逻辑
-                if not found_device and audio_devices:
-                    for dev in audio_devices:
-                        if "Stereo" in dev or "Mix" in dev:
-                            found_device = dev
-                            break
-
-            except Exception as e:
-                debug_info = f"Python执行错误: {str(e)}"
-                print(f"设备检测流程出错: {e}")
-
-            # 回到主线程更新UI
-            def update_ui():
-                if found_device:
-                    self.stream_device_name_var.set(f"✅ 已找到: {found_device}")
-                    self.settings["stream_audio_device"] = found_device
-                    self.save_settings()
-                    
-                    if self.stream_auto_start_var.get() and not self.stream_server_active:
-                        self._toggle_stream_service()
-                else:
-                    self.stream_device_name_var.set("❌ 未检测到 (点击查看详情)")
-                    self.settings["stream_audio_device"] = ""
-                    
-                    # --- 如果找不到，绑定点击事件显示调试信息 ---
-                    def show_debug():
-                        messagebox.showerror("检测失败详情", 
-                            f"未能自动匹配到混音设备。\n\nFFmpeg 返回的原始信息:\n{debug_info[-500:]}\n\n(请检查上方信息中是否有'立体声混音'字样)", 
-                            parent=self.root)
-                    
-                    # 临时修改标签绑定，让用户可以点击查看原因
-                    self.stream_device_label.bind("<Button-1>", lambda e: show_debug())
-                    self.stream_device_label.config(cursor="hand2")
-            
-            self.root.after(0, update_ui)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _toggle_stream_service(self):
-        """启动/停止串流服务"""
-        if self.stream_server_active:
-            # --- 停止逻辑 ---
-            self.stream_server_active = False
-            self.stream_status_label.config(text="🔴 服务已停止", foreground="gray")
-            self.stream_url_label.config(text="收听地址: -")
-            self.stream_start_btn.config(text="▶ 启动串流服务", bootstyle="success")
-            self.log("串流音频服务已停止。")
-        else:
-            # --- 启动逻辑 ---
-            device_name = self.settings.get("stream_audio_device", "")
-            if not device_name:
-                messagebox.showerror("无法启动", "未检测到有效的“立体声混音”设备。\n请先在Windows声音设置中启用该设备，然后点击“重新检测”。", parent=self.root)
-                return
-
-            try:
-                port = int(self.stream_port_var.get())
-            except ValueError:
-                messagebox.showerror("错误", "端口号必须是整数", parent=self.root)
-                return
-
-            self.settings.update({
-                "stream_audio_port": str(port),
-                "stream_audio_enabled": self.stream_auto_start_var.get()
-            })
-            self.save_settings()
-
-            # 防止重复启动线程
-            if hasattr(self, 'stream_thread_started') and self.stream_thread_started:
-                if hasattr(self, 'stream_current_port') and self.stream_current_port != port:
-                    messagebox.showwarning("重启生效", "修改端口需要重启软件才能生效，本次将继续使用旧端口。", parent=self.root)
-                    port = self.stream_current_port
-                    self.stream_port_var.set(str(port))
-
-            if not hasattr(self, 'stream_thread_started'):
-                threading.Thread(target=self._run_stream_server, args=(port,), daemon=True).start()
-                self.stream_thread_started = True
-                self.stream_current_port = port
-            
-            self.stream_server_active = True
-            ip = self._get_local_ip()
-            url = f"http://{ip}:{port}"
-            
-            self.stream_status_label.config(text="🟢 正在推流 (系统混音)", foreground="green")
-            self.stream_url_label.config(text=f"收听地址: {url}")
-            self.stream_start_btn.config(text="⏹ 停止服务", bootstyle="danger")
-            
-            self.log(f"串流服务已启动，源设备: {device_name}")
-
-    def _audio_stream_generator(self):
-        """
-        生成器：调用 FFmpeg 捕获系统混音器并实时输出 MP3 流
-        """
-        device_name = self.settings.get("stream_audio_device", "")
-        if not device_name:
-            return None
-
-        ffmpeg_exe = os.path.join(application_path, "ffmpeg.exe")
-        
-        # FFmpeg dshow 录制命令
-        # -f dshow: 使用 DirectShow 接口
-        # -i audio="...": 指定录音设备
-        # -ac 2: 双声道
-        # -ar 44100: 采样率 44.1kHz (兼容性最好)
-        # -f mp3: 强制输出 MP3 格式
-        # -b:a 128k: 比特率
-        # -: 输出到标准输出 (Pipe)
-        command = [
-            ffmpeg_exe,
-            '-f', 'dshow',
-            '-i', f'audio={device_name}',
-            '-ac', '2',
-            '-ar', '44100',
-            '-f', 'mp3',
-            '-b:a', '128k',
-            '-' 
-        ]
-
-        process = None
-        try:
-            process = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL, # 忽略日志防止刷屏
-                bufsize=10**5,
-                startupinfo=startupinfo
-            )
-
-            # 循环读取数据并 yield 给 Flask
-            while self.stream_server_active:
-                data = process.stdout.read(4096)
-                if not data:
-                    break
-                yield data
-                
-        except Exception as e:
-            print(f"推流发生错误: {e}")
-        finally:
-            if process:
-                try: process.terminate()
-                except: pass
-
-    def _run_stream_server(self, port):
-        """后台运行的串流 Flask 服务器"""
-        try:
-            from flask import Flask, Response, stream_with_context, render_template_string
-        except ImportError:
-            return
-
-        app = Flask(__name__)
-        import logging
-        logging.getLogger('werkzeug').setLevel(logging.ERROR)
-
-        # --- 极简播放器页面 ---
-        html_template = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>实时广播收听</title>
-            <style>
-                body { font-family: sans-serif; background: #222; color: #fff; text-align: center; padding-top: 50px; }
-                .container { max-width: 400px; margin: 0 auto; padding: 20px; background: #333; border-radius: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
-                h2 { margin-bottom: 30px; color: #00d2ff; }
-                .btn { display: block; width: 100%; padding: 20px; font-size: 20px; border: none; border-radius: 50px; cursor: pointer; font-weight: bold; transition: 0.3s; }
-                .btn-play { background: #28a745; color: white; }
-                .btn-play:hover { background: #218838; transform: scale(1.05); }
-                .status { margin-top: 20px; font-size: 14px; color: #aaa; }
-                audio { width: 100%; margin-top: 20px; display: none; }
-                
-                /* 频谱动画效果 */
-                .visualizer { display: flex; justify-content: center; height: 50px; gap: 5px; margin-bottom: 30px; }
-                .bar { width: 8px; background: #00d2ff; animation: bounce 1s infinite ease-in-out; }
-                .bar:nth-child(odd) { animation-duration: 0.8s; }
-                .bar:nth-child(2n) { animation-duration: 1.1s; }
-                .bar:nth-child(3n) { animation-duration: 1.3s; }
-                @keyframes bounce { 0%, 100% { height: 10px; } 50% { height: 50px; } }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h2>📻 实时广播收听</h2>
-                
-                <div class="visualizer" id="visualizer" style="opacity: 0;">
-                    <div class="bar"></div><div class="bar"></div><div class="bar"></div>
-                    <div class="bar"></div><div class="bar"></div><div class="bar"></div>
-                </div>
-
-                <button class="btn btn-play" id="playBtn" onclick="startPlay()">▶ 点击开始收听</button>
-                <audio id="player" controls></audio>
-                
-                <div class="status" id="status">状态: 等待连接...</div>
-            </div>
-
-            <script>
-                function startPlay() {
-                    var player = document.getElementById('player');
-                    var btn = document.getElementById('playBtn');
-                    var vis = document.getElementById('visualizer');
-                    var status = document.getElementById('status');
-
-                    // 加时间戳防止缓存
-                    player.src = "/stream.mp3?t=" + new Date().getTime();
-                    
-                    player.play().then(() => {
-                        btn.style.display = 'none'; // 隐藏按钮
-                        player.style.display = 'block'; // 显示原生控制器
-                        vis.style.opacity = '1'; // 显示动画
-                        status.innerText = "状态: 正在播放 (直播流)";
-                        status.style.color = "#28a745";
-                    }).catch(err => {
-                        status.innerText = "播放失败: " + err;
-                        status.style.color = "#dc3545";
-                    });
-                    
-                    // 监听错误
-                    player.onerror = function() {
-                        status.innerText = "连接断开，请刷新重试";
-                        status.style.color = "#dc3545";
-                        vis.style.opacity = '0';
-                    };
-                }
-            </script>
-        </body>
-        </html>
-        """
-
-        @app.route('/')
-        def index():
-            if not self.stream_server_active:
-                return "Stream Service Stopped", 503
-            return render_template_string(html_template)
-
-        @app.route('/stream.mp3')
-        def stream_audio():
-            if not self.stream_server_active:
-                return "Stream Stopped", 404
-            
-            # 核心：返回流式响应
-            return Response(
-                stream_with_context(self._audio_stream_generator()),
-                mimetype='audio/mpeg'
-            )
-
-        try:
-            # 启动服务 (host='0.0.0.0' 允许局域网访问)
-            app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
-        except Exception as e:
-            self.log(f"串流服务异常退出: {e}")
-
-    # --- ↑↑↑ 串流服务逻辑结束 ↑↑↑ ---
-
 # --- 动态语音功能的全套方法 ---
 
     def load_dynamic_voice_tasks(self):
@@ -5876,6 +5737,14 @@ class TimedBroadcastApp:
         self.clear_log_btn = ttk.Button(log_header_frame, text="清除日志", command=self.clear_log,
                                         bootstyle="secondary-outline")
         self.clear_log_btn.pack(side=LEFT, padx=10)
+        self.avatar_btn = ttk.Button(log_header_frame, text="🐰 虚拟主播", 
+                                   command=self.toggle_avatar,
+                                   bootstyle="secondary-outline") # 初始样式
+        self.avatar_btn.pack(side=LEFT, padx=5)
+        
+        # 启动时根据状态刷新按钮样式
+        if self.settings.get("avatar_enabled", False):
+             self.avatar_btn.config(bootstyle="warning")
 
         self.log_text = ScrolledText(log_frame, height=6, font=self.font_11,
                                                   wrap=WORD, state='disabled')
@@ -9797,6 +9666,7 @@ class TimedBroadcastApp:
                     escaped_text = final_text_to_speak.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                     xml_text = f"<rate absspeed='{params.get('speed', '0')}'><pitch middle='{params.get('pitch', '0')}'>{escaped_text}</pitch></rate>"
                     
+                    self.root.after(0, lambda: self.avatar.set_talking(True))
                     speaker.Speak(xml_text, 1 | 2) # SVSF_ASYNC | SVSF_IS_XML
 
                     # --- ↓↓↓ 核心修改：用更可靠的等待机制替换旧的while循环 ↓↓↓ ---
@@ -9814,6 +9684,7 @@ class TimedBroadcastApp:
                         if speaker.WaitUntilDone(100):
                             self.log("语音引擎报告播放完成。")
                             break # 语音已正常结束，跳出循环
+                    self.root.after(0, lambda: self.avatar.set_talking(False))
                         
                         # 如果100毫秒后还没结束，循环会继续，我们就可以在下一次循环开始时
                         # 再次检查紧急停止信号，这保证了高响应性。
@@ -9921,6 +9792,58 @@ class TimedBroadcastApp:
 
         # 3. 将任务放入插播队列，后台的 _intercut_worker 线程会自动接收并处理
         self.intercut_queue.put(task_data)
+
+    def _export_intercut_audio_handler(self, text, voice, speed, pitch):
+        """处理插播页面的导出音频请求"""
+        text_content = text.strip()
+        if not text_content:
+            messagebox.showwarning("内容为空", "请输入要导出的文字内容。", parent=self.root)
+            return
+
+        if not WIN32_AVAILABLE:
+            messagebox.showerror("错误", "导出功能需要 pywin32 库支持。", parent=self.root)
+            return
+
+        # 1. 弹出文件保存对话框
+        default_filename = f"插播_{int(time.time())}.wav"
+        save_path = filedialog.asksaveasfilename(
+            title="导出音频文件",
+            initialfile=default_filename,
+            defaultextension=".wav",
+            filetypes=[("WAV 音频", "*.wav")],
+            parent=self.root
+        )
+        
+        if not save_path:
+            return
+
+        # 2. 准备参数
+        voice_params = {
+            'voice': voice,
+            'speed': speed,
+            'pitch': pitch,
+            'volume': '100'
+        }
+
+        # 3. 启动后台线程进行生成（防止界面卡死）
+        self.log(f"正在导出音频到: {save_path} ...")
+        
+        def run_export():
+            try:
+                # 直接复用你已有的 SAPI 合成函数
+                success = self._synthesize_text_to_wav(text_content, voice_params, save_path)
+                
+                if success:
+                    self.log(f"音频导出成功: {os.path.basename(save_path)}")
+                    self.root.after(0, lambda: messagebox.showinfo("导出成功", f"文件已保存至：\n{save_path}", parent=self.root))
+                else:
+                    self.log("音频导出失败：合成函数返回False")
+                    self.root.after(0, lambda: messagebox.showerror("导出失败", "语音合成引擎发生未知错误。", parent=self.root))
+            except Exception as e:
+                self.log(f"导出音频时发生异常: {e}")
+                self.root.after(0, lambda: messagebox.showerror("导出失败", f"发生错误：{e}", parent=self.root))
+
+        threading.Thread(target=run_export, daemon=True).start()
 
     def on_weather_label_click(self, event=None):
         """处理天气标签点击事件，弹出城市输入框"""
@@ -10459,12 +10382,14 @@ class TimedBroadcastApp:
                 self.log(f"正在播报第 {i+1}/{repeat_count} 遍")
                 self.update_playing_text(f"[{task['name']}] 正在播报第 {i+1}/{repeat_count} 遍...")
 
+                self.root.after(0, lambda: self.avatar.set_talking(True))
                 speech_channel.play(speech_sound)
                 while speech_channel and speech_channel.get_busy():
                     if self._is_interrupted():
                         speech_channel.stop()
                         return
                     time.sleep(0.1)
+                self.root.after(0, lambda: self.avatar.set_talking(False))
 
                 if i < repeat_count - 1:
                     time.sleep(0.5)
@@ -10958,10 +10883,7 @@ class TimedBroadcastApp:
             "song_request_open_time_start": "18:00:00",
             "song_request_open_time_end": "19:00:00",
             "song_request_weekday": "每周:1234567",
-            "song_request_date_range": "2025-01-01 ~ 2099-12-31",
-            "stream_audio_enabled": False,
-            "stream_audio_port": "6666",
-            "stream_audio_device": ""
+            "song_request_date_range": "2025-01-01 ~ 2099-12-31"
         }
         if os.path.exists(SETTINGS_FILE):
             try:
@@ -10973,6 +10895,20 @@ class TimedBroadcastApp:
         else:
             self.settings = defaults
         self.log("系统设置已加载。")
+
+#虚拟主播代码
+    def toggle_avatar(self):
+        if self.avatar.is_visible:
+            self.avatar.hide()
+            self.settings["avatar_enabled"] = False
+            self.avatar_btn.config(bootstyle="secondary-outline") # 灰色轮廓
+            self.log("虚拟主播已隐藏。")
+        else:
+            self.avatar.show()
+            self.settings["avatar_enabled"] = True
+            self.avatar_btn.config(bootstyle="warning") # 亮橙色实心
+            self.log("虚拟主播已显示 (支持滚轮缩放/拖拽)。")
+        self.save_settings()
 
     def save_settings(self):
         if hasattr(self, 'autostart_var'):
@@ -11741,24 +11677,6 @@ class TimedBroadcastApp:
         except Exception as e:
             self.log(f"保存截屏任务失败: {e}")
 
-    def load_execute_tasks(self):
-        if not os.path.exists(EXECUTE_TASK_FILE): return
-        try:
-            with open(EXECUTE_TASK_FILE, 'r', encoding='utf-8') as f:
-                self.execute_tasks = json.load(f)
-            self.log(f"已加载 {len(self.execute_tasks)} 个运行任务")
-            if hasattr(self, 'execute_tree'):
-                self.update_execute_list()
-        except Exception as e:
-            self.log(f"加载运行任务失败: {e}")
-            self.execute_tasks = []
-
-    def save_execute_tasks(self):
-        try:
-            with open(EXECUTE_TASK_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.execute_tasks, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            self.log(f"保存运行任务失败: {e}")
 #增加部分结束
             
 #第12部分
