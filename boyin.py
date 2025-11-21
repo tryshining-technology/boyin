@@ -4248,7 +4248,7 @@ class TimedBroadcastApp:
         self.root.after(500, self._detect_audio_device)
 
     def _detect_audio_device(self):
-        """自动检测系统内录设备 (立体声混音)"""
+        """自动检测系统内录设备 (终极编码修复版)"""
         self.stream_device_name_var.set("正在检测...")
         self.root.update_idletasks()
         
@@ -4259,40 +4259,60 @@ class TimedBroadcastApp:
         def worker():
             found_device = ""
             try:
-                # 注意：FFmpeg 的设备列表输出在 stderr 中
-                result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace', startupinfo=startupinfo)
-                output = result.stderr
+                # 1. 获取原始二进制数据
+                process = subprocess.Popen(
+                    command, 
+                    stderr=subprocess.PIPE, 
+                    stdout=subprocess.PIPE,
+                    startupinfo=startupinfo
+                )
+                _, stderr_data = process.communicate()
                 
-                # 简单的解析逻辑：寻找包含特定关键词的行
-                # 格式通常是: [dshow @ ...]  "立体声混音 (Realtek Audio)"
-                lines = output.split('\n')
-                audio_devices = []
-                is_audio_section = False
+                # 2. 尝试解码 (这是解决问题的关键)
+                output = ""
+                try:
+                    # 优先尝试 Windows 默认编码 (GBK/MBCS)
+                    output = stderr_data.decode('mbcs') 
+                except:
+                    try:
+                        # 如果失败，尝试 UTF-8
+                        output = stderr_data.decode('utf-8')
+                    except:
+                        # 实在不行，忽略错误强制解码
+                        output = stderr_data.decode('utf-8', errors='ignore')
+
+                # 3. 使用正则提取设备名
+                # 目标行格式: ... "立体声混音 (Realtek(R) Audio)" (audio)
+                import re
+                # 匹配引号内的内容，且该行后面必须包含 (audio)
+                pattern = re.compile(r'"([^"]+)"\s+\(audio\)')
                 
-                for line in lines:
-                    if "DirectShow audio devices" in line:
-                        is_audio_section = True
-                        continue
-                    if "DirectShow video devices" in line:
-                        is_audio_section = False
+                audio_devices = pattern.findall(output)
+
+                # 4. 匹配关键词
+                # 增加 "Realtek" 和 "Audio" 作为辅助判断，防止漏网
+                keywords = ["立体声混音", "Stereo Mix", "What U Hear", "内录", "混音"]
+                
+                for dev in audio_devices:
+                    # 排除掉麦克风 (Microphone)
+                    if "麦克风" in dev or "Microphone" in dev:
                         continue
                         
-                    if is_audio_section and line.strip().startswith('"'):
-                        # 提取引号内的设备名
-                        dev_name = line.strip().strip('"')
-                        audio_devices.append(dev_name)
-
-                # 优先匹配关键词
-                keywords = ["立体声混音", "Stereo Mix", "What U Hear", "内录"]
-                for dev in audio_devices:
                     for kw in keywords:
                         if kw.lower() in dev.lower():
                             found_device = dev
                             break
                     if found_device: break
                 
+                # 如果还没找到，但列表里有东西，且包含 "Stereo" 或 "Mix" 字样，尝试盲猜一个
+                if not found_device and audio_devices:
+                    for dev in audio_devices:
+                        if "Stereo" in dev or "Mix" in dev:
+                            found_device = dev
+                            break
+
             except Exception as e:
-                print(f"设备检测失败: {e}")
+                print(f"设备检测流程出错: {e}")
 
             # 回到主线程更新UI
             def update_ui():
@@ -4300,12 +4320,14 @@ class TimedBroadcastApp:
                     self.stream_device_name_var.set(f"✅ 已找到: {found_device}")
                     self.settings["stream_audio_device"] = found_device
                     self.save_settings()
-                    # 如果设置了自动启动，且服务未运行，则尝试启动
+                    
                     if self.stream_auto_start_var.get() and not self.stream_server_active:
                         self._toggle_stream_service()
                 else:
-                    self.stream_device_name_var.set("❌ 未检测到内录设备 (请在系统声音设置中启用)")
-                    self.settings["stream_audio_device"] = "" # 清空无效设备
+                    self.stream_device_name_var.set("❌ 未检测到内录设备 (请检查设置)")
+                    # 调试用：如果没有找到，把所有检测到的设备打印到控制台（如果有控制台的话）
+                    print("检测到的所有音频设备:", audio_devices if 'audio_devices' in locals() else "None")
+                    self.settings["stream_audio_device"] = "" 
             
             self.root.after(0, update_ui)
 
