@@ -190,22 +190,22 @@ EDGE_TTS_VOICES = {
 class VirtualAvatar:
     def __init__(self, root, img_closed_path, img_open_path, img_blink_path, settings_dict):
         self.root = root
-        self.settings = settings_dict # 引用主程序的设置字典，用于读写记忆
+        self.settings = settings_dict 
         self.window = None
         self.label = None
         self.is_visible = False
         self.is_talking = False
         
-        # 图片资源容器
-        self.raw_images = {} # 原始PIL对象 (500x500)
-        self.tk_images = {}  # 当前缩放后的Tk图片对象
+        self.raw_images = {} 
+        self.tk_images = {}  
         self.loaded = False
         
-        # 读取记忆的大小 (如果没有，默认300)
+        # 1. 设置一个特殊的“绿幕”颜色，用于透明抠像
+        # 选用这个颜色是因为通常动漫人物身上不会有这种颜色，避免误删
+        self.TRANSPARENT_COLOR = '#acbdef' 
+        
         self.default_height = 300
         self.current_height = self.settings.get('avatar_height', self.default_height)
-        
-        # 限制最大尺寸 (防失真)
         self.MAX_HEIGHT = 500 
         self.MIN_HEIGHT = 100
 
@@ -216,60 +216,73 @@ class VirtualAvatar:
         try:
             def load_pil(path):
                 if not os.path.exists(path): return None
-                return Image.open(path)
+                return Image.open(path).convert("RGBA") # 强制转换为RGBA模式
 
             self.raw_images['closed'] = load_pil(closed_p)
             self.raw_images['open'] = load_pil(open_p)
             self.raw_images['blink'] = load_pil(blink_p)
             
-            # 容错：如果缺眨眼图，用闭嘴图顶替
             if not self.raw_images['blink'] and self.raw_images['closed']:
                 self.raw_images['blink'] = self.raw_images['closed']
             
             if self.raw_images['closed']:
                 self.loaded = True
             else:
-                print("错误：找不到虚拟主播主图片 (closed.png)")
+                print("错误：找不到虚拟主播主图片")
         except Exception as e:
             print(f"虚拟主播加载失败: {e}")
 
     def _generate_tk_images(self, target_height):
-        """生成当前尺寸的显示图片"""
+        """核心修复：将透明PNG合成到纯色背景上"""
         if not self.loaded: return
-        # 确保不超过原图500px，也不小于100px
         target_height = max(self.MIN_HEIGHT, min(target_height, self.MAX_HEIGHT))
         
         for key, pil_img in self.raw_images.items():
             if pil_img:
+                # 1. 计算缩放尺寸
                 aspect_ratio = pil_img.width / pil_img.height
                 target_width = int(target_height * aspect_ratio)
-                # 使用高质量缩放算法
-                resized = pil_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
-                self.tk_images[key] = ImageTk.PhotoImage(resized)
+                
+                # 2. 高质量缩放
+                resized_rgba = pil_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                
+                # 3. [关键步骤] 创建纯色背景底图 (颜色为 self.TRANSPARENT_COLOR)
+                # 注意：PIL 需要 RGB 格式的颜色元组，我们需要转换一下 hex -> rgb
+                bg_color_rgb = self._hex_to_rgb(self.TRANSPARENT_COLOR)
+                background = Image.new('RGBA', resized_rgba.size, bg_color_rgb + (255,))
+                
+                # 4. 将人物图层叠在纯色背景上 (利用 alpha 通道进行混合)
+                # 这一步消除了半透明边缘的锯齿，让边缘与背景色完美融合
+                composite = Image.alpha_composite(background, resized_rgba)
+                
+                # 5. 转为 Tkinter 可用的格式 (丢弃 Alpha 通道，因为背景已经是实体色了)
+                self.tk_images[key] = ImageTk.PhotoImage(composite.convert('RGB'))
+
+    def _hex_to_rgb(self, hex_color):
+        """辅助函数：将 #RRGGBB 转换为 (R, G, B)"""
+        hex_color = hex_color.lstrip('#')
+        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
     def show(self):
         if not self.loaded or self.window: return
 
-        # 生成图片
+        # 预先处理图片
         self._generate_tk_images(self.current_height)
 
         self.window = tk.Toplevel(self.root)
-        self.window.overrideredirect(True) # 无边框
-        self.window.attributes('-topmost', True) # 置顶
+        self.window.overrideredirect(True) 
+        self.window.attributes('-topmost', True) 
         
-        # 设置透明背景 (Windows黑魔法)
-        bg_color = '#000001'
-        self.window.config(bg=bg_color)
-        self.window.attributes('-transparentcolor', bg_color)
+        # [关键步骤] 设置窗口背景色，并告诉 Windows 这个颜色要变透明
+        self.window.config(bg=self.TRANSPARENT_COLOR)
+        self.window.attributes('-transparentcolor', self.TRANSPARENT_COLOR)
 
-        # 恢复记忆的位置，如果是第一次，则放右下角
+        # 恢复位置逻辑...
         sw = self.window.winfo_screenwidth()
         sh = self.window.winfo_screenheight()
-        
         w = self.tk_images['closed'].width()
         h = self.tk_images['closed'].height()
         
-        # 读取保存的坐标，默认为 -1 表示未保存
         saved_x = self.settings.get('avatar_x', -1)
         saved_y = self.settings.get('avatar_y', -1)
 
@@ -282,16 +295,16 @@ class VirtualAvatar:
 
         self.window.geometry(f"{w}x{h}+{x}+{y}")
 
-        self.label = tk.Label(self.window, image=self.tk_images['closed'], bg=bg_color, bd=0)
+        # Label 背景也要设为透明色
+        self.label = tk.Label(self.window, image=self.tk_images['closed'], 
+                              bg=self.TRANSPARENT_COLOR, bd=0)
         self.label.pack()
 
-        # 事件绑定
         self.window.bind("<Button-1>", self._start_move)
         self.window.bind("<B1-Motion>", self._do_move)
-        self.window.bind("<ButtonRelease-1>", self._save_position) # 拖动结束后保存位置
-        self.window.bind("<MouseWheel>", self._on_zoom) # 滚轮缩放
+        self.window.bind("<ButtonRelease-1>", self._save_position) 
+        self.window.bind("<MouseWheel>", self._on_zoom) 
         
-        # 右键菜单
         self.menu = tk.Menu(self.window, tearoff=0)
         self.menu.add_command(label="恢复默认大小", command=self._reset_size)
         self.menu.add_separator()
@@ -303,16 +316,14 @@ class VirtualAvatar:
 
     def hide(self):
         if self.window:
-            self._save_position() # 关闭前保存状态
+            self._save_position() 
             if self._anim_job: self.window.after_cancel(self._anim_job)
             self.window.destroy()
             self.window = None
             self.is_visible = False
 
     def set_talking(self, status):
-        """控制嘴巴开合的开关"""
         self.is_talking = status
-        # 状态切换时立即重置动画，提高响应感
         if self.window and self._anim_job:
             self.window.after_cancel(self._anim_job)
             self._animate_loop()
@@ -324,22 +335,18 @@ class VirtualAvatar:
         img_key = 'closed'
 
         if self.is_talking:
-            # --- 说话模式 (随机动嘴 + 偶尔眨眼) ---
             r = random.random()
-            if r < 0.1:   img_key = 'blink'   # 10% 眨眼
-            elif r < 0.7: img_key = 'open'    # 60% 张嘴
-            else:         img_key = 'closed'  # 30% 闭嘴
-            next_delay = random.randint(100, 200) # 语速节奏
+            if r < 0.1:   img_key = 'blink'
+            elif r < 0.7: img_key = 'open'
+            else:         img_key = 'closed'
+            next_delay = random.randint(100, 200) 
         else:
-            # --- 待机模式 (呼吸眨眼) ---
-            # 如果当前显示的是眨眼图，说明眨完了，该睁开了
             if self.label.cget('image') == str(self.tk_images.get('blink')):
                 img_key = 'closed'
-                next_delay = random.randint(2000, 5000) # 睁眼 2-5秒
+                next_delay = random.randint(2000, 5000) 
             else:
-                # 否则就是该眨眼了
                 img_key = 'blink'
-                next_delay = 150 # 闭眼 0.15秒
+                next_delay = 150 
 
         if img_key in self.tk_images:
             self.label.config(image=self.tk_images[img_key])
@@ -347,16 +354,11 @@ class VirtualAvatar:
         self._anim_job = self.window.after(next_delay, self._animate_loop)
 
     def _on_zoom(self, event):
-        # 滚轮缩放逻辑
         step = 20
         if event.delta > 0: self.current_height += step
         else:               self.current_height -= step
-        
-        # 限制范围
         self.current_height = max(self.MIN_HEIGHT, min(self.current_height, self.MAX_HEIGHT))
         self._refresh_geometry()
-        
-        # 保存大小设置
         self.settings['avatar_height'] = self.current_height
 
     def _reset_size(self):
@@ -365,11 +367,10 @@ class VirtualAvatar:
         self.settings['avatar_height'] = self.current_height
 
     def _refresh_geometry(self):
-        # 重新生成图片并应用，保持窗口左上角位置不变
         cur_x = self.window.winfo_x()
         cur_y = self.window.winfo_y()
         self._generate_tk_images(self.current_height)
-        self.label.config(image=self.tk_images['closed']) # 临时重置为闭嘴图防止闪烁
+        self.label.config(image=self.tk_images['closed']) 
         self.window.geometry(f"{self.tk_images['closed'].width()}x{self.tk_images['closed'].height()}+{cur_x}+{cur_y}")
 
     def _start_move(self, event):
@@ -928,7 +929,7 @@ class TimedBroadcastApp:
         intercut_btn.grid(row=0, column=0, sticky='ew', ipady=8, padx=(0, 10))
 
         # 2. [新增] 导出音频按钮
-        export_btn = ttk.Button(action_btn_frame, text="导出WAV", bootstyle="info-outline",
+        export_btn = ttk.Button(action_btn_frame, text="导出音频", bootstyle="info-outline",
                                 command=lambda: self._export_intercut_audio_handler(
                                       content_text.text.get('1.0', tk.END),
                                       voice_var.get(),
