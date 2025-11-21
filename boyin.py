@@ -233,9 +233,12 @@ class VirtualAvatar:
             print(f"虚拟主播加载失败: {e}")
 
     def _generate_tk_images(self, target_height):
-        """核心修复：将透明PNG合成到纯色背景上"""
+        """核心修复V2：添加 Alpha 二值化处理，彻底消除毛边"""
         if not self.loaded: return
         target_height = max(self.MIN_HEIGHT, min(target_height, self.MAX_HEIGHT))
+        
+        # 将HEX颜色转为RGB
+        bg_color_rgb = self._hex_to_rgb(self.TRANSPARENT_COLOR)
         
         for key, pil_img in self.raw_images.items():
             if pil_img:
@@ -246,16 +249,24 @@ class VirtualAvatar:
                 # 2. 高质量缩放
                 resized_rgba = pil_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
                 
-                # 3. [关键步骤] 创建纯色背景底图 (颜色为 self.TRANSPARENT_COLOR)
-                # 注意：PIL 需要 RGB 格式的颜色元组，我们需要转换一下 hex -> rgb
-                bg_color_rgb = self._hex_to_rgb(self.TRANSPARENT_COLOR)
+                # --- [关键修复开始] ---
+                # 3. 处理 Alpha 通道：二值化
+                # 提取 Alpha 通道
+                r, g, b, a = resized_rgba.split()
+                # 设定阈值：Alpha > 64 的像素设为全不透明(255)，否则设为全透明(0)
+                # 这个 64 可以调整，越小人物边缘保留越多，越大边缘切削越狠
+                a = a.point(lambda i: 255 if i > 64 else 0)
+                # 将处理过的硬 Alpha 通道放回去
+                resized_rgba.putalpha(a)
+                # --- [关键修复结束] ---
+
+                # 4. 创建纯色背景底图
                 background = Image.new('RGBA', resized_rgba.size, bg_color_rgb + (255,))
                 
-                # 4. 将人物图层叠在纯色背景上 (利用 alpha 通道进行混合)
-                # 这一步消除了半透明边缘的锯齿，让边缘与背景色完美融合
+                # 5. 合成 (此时边缘已经是硬边，不会产生混合杂色)
                 composite = Image.alpha_composite(background, resized_rgba)
                 
-                # 5. 转为 Tkinter 可用的格式 (丢弃 Alpha 通道，因为背景已经是实体色了)
+                # 6. 转为 Tkinter 格式
                 self.tk_images[key] = ImageTk.PhotoImage(composite.convert('RGB'))
 
     def _hex_to_rgb(self, hex_color):
