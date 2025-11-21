@@ -297,6 +297,15 @@ class TimedBroadcastApp:
         self.sr_end_time_var = tk.StringVar(value=self.settings.get("song_request_open_time_end", "19:00:00"))
         self.sr_weekday_var = tk.StringVar(value=self.settings.get("song_request_weekday", "每周:1234567"))
         self.sr_date_range_var = tk.StringVar(value=self.settings.get("song_request_date_range", "2025-01-01 ~ 2099-12-31"))
+
+        # 3. 串流服务变量
+        self.stream_port_var = tk.StringVar(value=self.settings.get("stream_audio_port", "6666"))
+        self.stream_auto_start_var = tk.BooleanVar(value=self.settings.get("stream_audio_enabled", False))
+        self.stream_device_name_var = tk.StringVar(value="正在检测...") # 用于UI显示检测结果
+        
+        self.stream_server_active = False   # 服务运行状态
+        self.stream_thread_started = False  # 线程是否已启动过(防止重复)
+        self.stream_current_port = 6666     # 当前运行端口
         # --- ↑↑↑ 变量初始化结束 ↑↑↑ ---
 
         saved_geometry = self.settings.get("window_geometry")
@@ -338,6 +347,7 @@ class TimedBroadcastApp:
         if self.settings.get("song_request_enabled", True):
             self.log("检测到点歌台服务开启，正在启动...")
             self.root.after(1500, self._toggle_song_request_service)
+        self.root.after(2000, self._detect_audio_device)
         # --- ↑↑↑ 自动启动结束 ↑↑↑ ---
 
         if self.settings.get("lock_on_start", False) and self.lock_password_b64:
@@ -726,6 +736,7 @@ class TimedBroadcastApp:
         media_tab = ttk.Frame(notebook, padding=10)
         wallpaper_tab = ttk.Frame(notebook, padding=10)
         timer_tab = ttk.Frame(notebook, padding=10)
+        stream_tab = ttk.Frame(notebook, padding=10)
         song_request_tab = ttk.Frame(notebook, padding=10)
         remote_tab = ttk.Frame(notebook, padding=10)
 
@@ -736,6 +747,7 @@ class TimedBroadcastApp:
         notebook.add(media_tab, text=' 媒体处理 ')
         notebook.add(wallpaper_tab, text=' 网络壁纸 ')
         notebook.add(timer_tab, text=' 计时工具 ')
+        notebook.add(stream_tab, text=' 串流音频 ')
         notebook.add(song_request_tab, text=' 点歌台 ') 
         notebook.add(remote_tab, text=' 远程控制 ')
 
@@ -746,6 +758,7 @@ class TimedBroadcastApp:
         self._build_media_processing_ui(media_tab)
         self._build_wallpaper_ui(wallpaper_tab)
         self._build_timer_ui(timer_tab)
+        self._build_stream_audio_ui(stream_tab)
         self._build_song_request_ui(song_request_tab)
         self._build_remote_control_ui(remote_tab)
 
@@ -4182,6 +4195,335 @@ class TimedBroadcastApp:
         self.root.after(0, lambda: self.sr_play_btn.config(state=NORMAL, text="▶ 启动队列播放"))
 
 # --- ↑↑↑ 点歌台逻辑结束 ↑↑↑ ---
+
+#↓串流全套代码
+    def _build_stream_audio_ui(self, parent_frame):
+        # 使用滚动框架
+        scrolled = ScrolledFrame(parent_frame, autohide=True)
+        scrolled.pack(fill=BOTH, expand=True)
+        container = scrolled.container
+
+        # --- 区域 1: 运行状态 ---
+        status_lf = ttk.LabelFrame(container, text="服务状态", padding=15)
+        status_lf.pack(fill=X, pady=10, padx=5)
+        
+        self.stream_status_label = ttk.Label(status_lf, text="🔴 服务未启动", font=self.font_14_bold, foreground="gray")
+        self.stream_status_label.pack(anchor='w')
+        
+        self.stream_url_label = ttk.Label(status_lf, text="收听地址: -", font=self.font_11, bootstyle="info")
+        self.stream_url_label.pack(anchor='w', pady=(5, 0))
+
+        # --- 区域 2: 音频源检测 ---
+        source_lf = ttk.LabelFrame(container, text="音频源自动检测", padding=15)
+        source_lf.pack(fill=X, pady=10, padx=5)
+        
+        self.stream_device_label = ttk.Label(source_lf, textvariable=self.stream_device_name_var, font=self.font_11)
+        self.stream_device_label.pack(side=LEFT)
+        
+        ttk.Button(source_lf, text="重新检测", bootstyle="outline", command=self._detect_audio_device, width=8).pack(side=RIGHT)
+
+        # --- 区域 3: 配置与启动 ---
+        config_lf = ttk.LabelFrame(container, text="启动设置", padding=15)
+        config_lf.pack(fill=X, pady=10, padx=5)
+        
+        port_frame = ttk.Frame(config_lf)
+        port_frame.pack(fill=X, anchor='w', pady=5)
+        ttk.Label(port_frame, text="监听端口:").pack(side=LEFT)
+        ttk.Entry(port_frame, textvariable=self.stream_port_var, width=8, font=self.font_11).pack(side=LEFT, padx=10)
+        
+        ttk.Checkbutton(config_lf, text="软件启动后自动开启串流", variable=self.stream_auto_start_var, bootstyle="round-toggle", command=self.save_settings).pack(anchor='w', pady=5)
+
+        # --- 区域 4: 操作栏 ---
+        btn_frame = ttk.Frame(container, padding=10)
+        btn_frame.pack(fill=X, pady=10)
+        
+        self.stream_start_btn = ttk.Button(btn_frame, text="▶ 启动串流服务", bootstyle="success", command=self._toggle_stream_service)
+        self.stream_start_btn.pack(side=LEFT, padx=10, ipady=5, expand=True, fill=X)
+        
+        # --- 底部贴士 ---
+        tips_text = "💡 没有声音？\n1. 请确保电脑已安装声卡驱动。\n2. 右键任务栏小喇叭 -> 声音设置 -> 录制 -> 启用 “立体声混音” 设备。\n3. 确保电脑音量未静音。"
+        ttk.Label(container, text=tips_text, font=self.font_9, bootstyle="secondary", justify=LEFT).pack(fill=X, padx=15, pady=20)
+
+        # 初始化检测一次设备
+        self.root.after(500, self._detect_audio_device)
+
+    def _detect_audio_device(self):
+        """自动检测系统内录设备 (立体声混音)"""
+        self.stream_device_name_var.set("正在检测...")
+        self.root.update_idletasks()
+        
+        ffmpeg_exe = os.path.join(application_path, "ffmpeg.exe")
+        # FFmpeg 列出设备命令
+        command = [ffmpeg_exe, "-list_devices", "true", "-f", "dshow", "-i", "dummy"]
+        
+        def worker():
+            found_device = ""
+            try:
+                # 注意：FFmpeg 的设备列表输出在 stderr 中
+                result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace', startupinfo=startupinfo)
+                output = result.stderr
+                
+                # 简单的解析逻辑：寻找包含特定关键词的行
+                # 格式通常是: [dshow @ ...]  "立体声混音 (Realtek Audio)"
+                lines = output.split('\n')
+                audio_devices = []
+                is_audio_section = False
+                
+                for line in lines:
+                    if "DirectShow audio devices" in line:
+                        is_audio_section = True
+                        continue
+                    if "DirectShow video devices" in line:
+                        is_audio_section = False
+                        continue
+                        
+                    if is_audio_section and line.strip().startswith('"'):
+                        # 提取引号内的设备名
+                        dev_name = line.strip().strip('"')
+                        audio_devices.append(dev_name)
+
+                # 优先匹配关键词
+                keywords = ["立体声混音", "Stereo Mix", "What U Hear", "内录"]
+                for dev in audio_devices:
+                    for kw in keywords:
+                        if kw.lower() in dev.lower():
+                            found_device = dev
+                            break
+                    if found_device: break
+                
+            except Exception as e:
+                print(f"设备检测失败: {e}")
+
+            # 回到主线程更新UI
+            def update_ui():
+                if found_device:
+                    self.stream_device_name_var.set(f"✅ 已找到: {found_device}")
+                    self.settings["stream_audio_device"] = found_device
+                    self.save_settings()
+                    # 如果设置了自动启动，且服务未运行，则尝试启动
+                    if self.stream_auto_start_var.get() and not self.stream_server_active:
+                        self._toggle_stream_service()
+                else:
+                    self.stream_device_name_var.set("❌ 未检测到内录设备 (请在系统声音设置中启用)")
+                    self.settings["stream_audio_device"] = "" # 清空无效设备
+            
+            self.root.after(0, update_ui)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _toggle_stream_service(self):
+        """启动/停止串流服务"""
+        if self.stream_server_active:
+            # --- 停止逻辑 ---
+            self.stream_server_active = False
+            self.stream_status_label.config(text="🔴 服务已停止", foreground="gray")
+            self.stream_url_label.config(text="收听地址: -")
+            self.stream_start_btn.config(text="▶ 启动串流服务", bootstyle="success")
+            self.log("串流音频服务已停止。")
+        else:
+            # --- 启动逻辑 ---
+            device_name = self.settings.get("stream_audio_device", "")
+            if not device_name:
+                messagebox.showerror("无法启动", "未检测到有效的“立体声混音”设备。\n请先在Windows声音设置中启用该设备，然后点击“重新检测”。", parent=self.root)
+                return
+
+            try:
+                port = int(self.stream_port_var.get())
+            except ValueError:
+                messagebox.showerror("错误", "端口号必须是整数", parent=self.root)
+                return
+
+            self.settings.update({
+                "stream_audio_port": str(port),
+                "stream_audio_enabled": self.stream_auto_start_var.get()
+            })
+            self.save_settings()
+
+            # 防止重复启动线程
+            if hasattr(self, 'stream_thread_started') and self.stream_thread_started:
+                if hasattr(self, 'stream_current_port') and self.stream_current_port != port:
+                    messagebox.showwarning("重启生效", "修改端口需要重启软件才能生效，本次将继续使用旧端口。", parent=self.root)
+                    port = self.stream_current_port
+                    self.stream_port_var.set(str(port))
+
+            if not hasattr(self, 'stream_thread_started'):
+                threading.Thread(target=self._run_stream_server, args=(port,), daemon=True).start()
+                self.stream_thread_started = True
+                self.stream_current_port = port
+            
+            self.stream_server_active = True
+            ip = self._get_local_ip()
+            url = f"http://{ip}:{port}"
+            
+            self.stream_status_label.config(text="🟢 正在推流 (系统混音)", foreground="green")
+            self.stream_url_label.config(text=f"收听地址: {url}")
+            self.stream_start_btn.config(text="⏹ 停止服务", bootstyle="danger")
+            
+            self.log(f"串流服务已启动，源设备: {device_name}")
+
+    def _audio_stream_generator(self):
+        """
+        生成器：调用 FFmpeg 捕获系统混音器并实时输出 MP3 流
+        """
+        device_name = self.settings.get("stream_audio_device", "")
+        if not device_name:
+            return None
+
+        ffmpeg_exe = os.path.join(application_path, "ffmpeg.exe")
+        
+        # FFmpeg dshow 录制命令
+        # -f dshow: 使用 DirectShow 接口
+        # -i audio="...": 指定录音设备
+        # -ac 2: 双声道
+        # -ar 44100: 采样率 44.1kHz (兼容性最好)
+        # -f mp3: 强制输出 MP3 格式
+        # -b:a 128k: 比特率
+        # -: 输出到标准输出 (Pipe)
+        command = [
+            ffmpeg_exe,
+            '-f', 'dshow',
+            '-i', f'audio={device_name}',
+            '-ac', '2',
+            '-ar', '44100',
+            '-f', 'mp3',
+            '-b:a', '128k',
+            '-' 
+        ]
+
+        process = None
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, # 忽略日志防止刷屏
+                bufsize=10**5,
+                startupinfo=startupinfo
+            )
+
+            # 循环读取数据并 yield 给 Flask
+            while self.stream_server_active:
+                data = process.stdout.read(4096)
+                if not data:
+                    break
+                yield data
+                
+        except Exception as e:
+            print(f"推流发生错误: {e}")
+        finally:
+            if process:
+                try: process.terminate()
+                except: pass
+
+    def _run_stream_server(self, port):
+        """后台运行的串流 Flask 服务器"""
+        try:
+            from flask import Flask, Response, stream_with_context, render_template_string
+        except ImportError:
+            return
+
+        app = Flask(__name__)
+        import logging
+        logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
+        # --- 极简播放器页面 ---
+        html_template = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>实时广播收听</title>
+            <style>
+                body { font-family: sans-serif; background: #222; color: #fff; text-align: center; padding-top: 50px; }
+                .container { max-width: 400px; margin: 0 auto; padding: 20px; background: #333; border-radius: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
+                h2 { margin-bottom: 30px; color: #00d2ff; }
+                .btn { display: block; width: 100%; padding: 20px; font-size: 20px; border: none; border-radius: 50px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+                .btn-play { background: #28a745; color: white; }
+                .btn-play:hover { background: #218838; transform: scale(1.05); }
+                .status { margin-top: 20px; font-size: 14px; color: #aaa; }
+                audio { width: 100%; margin-top: 20px; display: none; }
+                
+                /* 频谱动画效果 */
+                .visualizer { display: flex; justify-content: center; height: 50px; gap: 5px; margin-bottom: 30px; }
+                .bar { width: 8px; background: #00d2ff; animation: bounce 1s infinite ease-in-out; }
+                .bar:nth-child(odd) { animation-duration: 0.8s; }
+                .bar:nth-child(2n) { animation-duration: 1.1s; }
+                .bar:nth-child(3n) { animation-duration: 1.3s; }
+                @keyframes bounce { 0%, 100% { height: 10px; } 50% { height: 50px; } }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h2>📻 实时广播收听</h2>
+                
+                <div class="visualizer" id="visualizer" style="opacity: 0;">
+                    <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+                    <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+                </div>
+
+                <button class="btn btn-play" id="playBtn" onclick="startPlay()">▶ 点击开始收听</button>
+                <audio id="player" controls></audio>
+                
+                <div class="status" id="status">状态: 等待连接...</div>
+            </div>
+
+            <script>
+                function startPlay() {
+                    var player = document.getElementById('player');
+                    var btn = document.getElementById('playBtn');
+                    var vis = document.getElementById('visualizer');
+                    var status = document.getElementById('status');
+
+                    // 加时间戳防止缓存
+                    player.src = "/stream.mp3?t=" + new Date().getTime();
+                    
+                    player.play().then(() => {
+                        btn.style.display = 'none'; // 隐藏按钮
+                        player.style.display = 'block'; // 显示原生控制器
+                        vis.style.opacity = '1'; // 显示动画
+                        status.innerText = "状态: 正在播放 (直播流)";
+                        status.style.color = "#28a745";
+                    }).catch(err => {
+                        status.innerText = "播放失败: " + err;
+                        status.style.color = "#dc3545";
+                    });
+                    
+                    // 监听错误
+                    player.onerror = function() {
+                        status.innerText = "连接断开，请刷新重试";
+                        status.style.color = "#dc3545";
+                        vis.style.opacity = '0';
+                    };
+                }
+            </script>
+        </body>
+        </html>
+        """
+
+        @app.route('/')
+        def index():
+            if not self.stream_server_active:
+                return "Stream Service Stopped", 503
+            return render_template_string(html_template)
+
+        @app.route('/stream.mp3')
+        def stream_audio():
+            if not self.stream_server_active:
+                return "Stream Stopped", 404
+            
+            # 核心：返回流式响应
+            return Response(
+                stream_with_context(self._audio_stream_generator()),
+                mimetype='audio/mpeg'
+            )
+
+        try:
+            # 启动服务 (host='0.0.0.0' 允许局域网访问)
+            app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
+        except Exception as e:
+            self.log(f"串流服务异常退出: {e}")
+
+    # --- ↑↑↑ 串流服务逻辑结束 ↑↑↑ ---
 
 # --- 动态语音功能的全套方法 ---
 
@@ -10586,7 +10928,10 @@ class TimedBroadcastApp:
             "song_request_open_time_start": "18:00:00",
             "song_request_open_time_end": "19:00:00",
             "song_request_weekday": "每周:1234567",
-            "song_request_date_range": "2025-01-01 ~ 2099-12-31"
+            "song_request_date_range": "2025-01-01 ~ 2099-12-31",
+            "stream_audio_enabled": False,
+            "stream_audio_port": "6666",
+            "stream_audio_device": ""
         }
         if os.path.exists(SETTINGS_FILE):
             try:
