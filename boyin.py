@@ -4248,7 +4248,7 @@ class TimedBroadcastApp:
         self.root.after(500, self._detect_audio_device)
 
     def _detect_audio_device(self):
-        """自动检测系统内录设备 (终极编码修复版)"""
+        """自动检测系统内录设备 (修复全局Popen冲突版)"""
         self.stream_device_name_var.set("正在检测...")
         self.root.update_idletasks()
         
@@ -4258,53 +4258,52 @@ class TimedBroadcastApp:
         
         def worker():
             found_device = ""
+            debug_info = "" # 用于存储调试信息
+            
             try:
-                # 1. 获取原始二进制数据
+                # --- ↓↓↓ 核心修改：删除了 startupinfo 参数，增加了 stdin ↓↓↓ ---
+                # 因为您在文件开头已经全局重写了 subprocess.Popen，这里不需要再传 startupinfo
                 process = subprocess.Popen(
                     command, 
                     stderr=subprocess.PIPE, 
                     stdout=subprocess.PIPE,
-                    startupinfo=startupinfo
+                    stdin=subprocess.DEVNULL # 防止后台进程卡死
                 )
                 _, stderr_data = process.communicate()
+                # --- ↑↑↑ 修改结束 ↑↑↑ ---
                 
-                # 2. 尝试解码 (这是解决问题的关键)
+                # 2. 尝试解码
                 output = ""
                 try:
-                    # 优先尝试 Windows 默认编码 (GBK/MBCS)
                     output = stderr_data.decode('mbcs') 
                 except:
                     try:
-                        # 如果失败，尝试 UTF-8
                         output = stderr_data.decode('utf-8')
                     except:
-                        # 实在不行，忽略错误强制解码
                         output = stderr_data.decode('utf-8', errors='ignore')
+                
+                debug_info = output # 保存原始输出供调试
 
                 # 3. 使用正则提取设备名
-                # 目标行格式: ... "立体声混音 (Realtek(R) Audio)" (audio)
                 import re
                 # 匹配引号内的内容，且该行后面必须包含 (audio)
                 pattern = re.compile(r'"([^"]+)"\s+\(audio\)')
-                
                 audio_devices = pattern.findall(output)
 
                 # 4. 匹配关键词
-                # 增加 "Realtek" 和 "Audio" 作为辅助判断，防止漏网
                 keywords = ["立体声混音", "Stereo Mix", "What U Hear", "内录", "混音"]
                 
                 for dev in audio_devices:
-                    # 排除掉麦克风 (Microphone)
+                    # 排除掉麦克风
                     if "麦克风" in dev or "Microphone" in dev:
                         continue
-                        
                     for kw in keywords:
                         if kw.lower() in dev.lower():
                             found_device = dev
                             break
                     if found_device: break
                 
-                # 如果还没找到，但列表里有东西，且包含 "Stereo" 或 "Mix" 字样，尝试盲猜一个
+                # 盲猜逻辑
                 if not found_device and audio_devices:
                     for dev in audio_devices:
                         if "Stereo" in dev or "Mix" in dev:
@@ -4312,6 +4311,7 @@ class TimedBroadcastApp:
                             break
 
             except Exception as e:
+                debug_info = f"Python执行错误: {str(e)}"
                 print(f"设备检测流程出错: {e}")
 
             # 回到主线程更新UI
@@ -4324,10 +4324,18 @@ class TimedBroadcastApp:
                     if self.stream_auto_start_var.get() and not self.stream_server_active:
                         self._toggle_stream_service()
                 else:
-                    self.stream_device_name_var.set("❌ 未检测到内录设备 (请检查设置)")
-                    # 调试用：如果没有找到，把所有检测到的设备打印到控制台（如果有控制台的话）
-                    print("检测到的所有音频设备:", audio_devices if 'audio_devices' in locals() else "None")
-                    self.settings["stream_audio_device"] = "" 
+                    self.stream_device_name_var.set("❌ 未检测到 (点击查看详情)")
+                    self.settings["stream_audio_device"] = ""
+                    
+                    # --- 如果找不到，绑定点击事件显示调试信息 ---
+                    def show_debug():
+                        messagebox.showerror("检测失败详情", 
+                            f"未能自动匹配到混音设备。\n\nFFmpeg 返回的原始信息:\n{debug_info[-500:]}\n\n(请检查上方信息中是否有'立体声混音'字样)", 
+                            parent=self.root)
+                    
+                    # 临时修改标签绑定，让用户可以点击查看原因
+                    self.stream_device_label.bind("<Button-1>", lambda e: show_debug())
+                    self.stream_device_label.config(cursor="hand2")
             
             self.root.after(0, update_ui)
 
