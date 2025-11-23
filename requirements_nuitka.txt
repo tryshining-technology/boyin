@@ -18,6 +18,7 @@ pystray>=0.19.0
 # --- 视频播放 ---
 python-vlc>=3.0.21203
 pydub
+PyAudio>=0.2.14
 
 # --- 构建工具 ---
 Nuitka==2.8.4 # 新增：用于编译和打包，替代PyInstaller
