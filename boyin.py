@@ -186,6 +186,216 @@ EDGE_TTS_VOICES = {
     '在线-台湾-曉雨 (女)': 'zh-TW-HsiaoYuNeural',
 }
 
+#便利贴代码
+class StickyNote:
+    def __init__(self, root, settings_dict):
+        self.root = root
+        self.settings = settings_dict
+        self.window = None
+        self.text_widget = None
+        self.is_visible = False
+        
+        # 颜色配置
+        self.BG_COLOR = '#fdfdca'
+        self.BAR_COLOR = '#fbfb75'
+        self.FONT_COLOR = '#4a4a4a'
+        
+        # 文件路径
+        self.note_file = os.path.join(application_path, "sticky_note.txt")
+        
+        # 加载内容
+        self.content = ""
+        if os.path.exists(self.note_file):
+            try:
+                with open(self.note_file, 'r', encoding='utf-8') as f:
+                    self.content = f.read()
+            except: pass
+            
+        # 加载上次的透明度 (默认 1.0 不透明)
+        self.current_alpha = self.settings.get('note_alpha', 1.0)
+
+    def show(self):
+        if self.window and self.window.winfo_exists():
+            self.window.lift()
+            return
+
+        self.window = tk.Toplevel(self.root)
+        self.window.overrideredirect(True)
+        self.window.attributes('-topmost', True)
+        self.window.config(bg=self.BG_COLOR)
+        
+        # 应用透明度
+        self.window.attributes('-alpha', self.current_alpha)
+        
+        # 恢复位置和大小
+        sw = self.window.winfo_screenwidth()
+        default_x = sw - 350
+        default_y = 100
+        
+        x = self.settings.get('note_x', default_x)
+        y = self.settings.get('note_y', default_y)
+        w = self.settings.get('note_w', 300)
+        h = self.settings.get('note_h', 300)
+        
+        self.window.geometry(f"{w}x{h}+{x}+{y}")
+
+        # --- 顶部拖拽条 ---
+        header = tk.Frame(self.window, bg=self.BAR_COLOR, height=30, cursor="fleur")
+        header.pack(fill=tk.X, side=tk.TOP)
+        header.pack_propagate(False)
+        
+        title_lbl = tk.Label(header, text=" + 便利贴", bg=self.BAR_COLOR, fg="#888", font=("Arial", 10, "bold"))
+        title_lbl.pack(side=tk.LEFT, padx=10)
+
+        # 关闭按钮
+        close_btn = tk.Label(header, text="×", bg=self.BAR_COLOR, fg="#888", font=("Arial", 16), cursor="hand2")
+        close_btn.pack(side=tk.RIGHT, padx=10)
+        close_btn.bind("<Button-1>", lambda e: self.hide())
+        close_btn.bind("<Enter>", lambda e: close_btn.config(fg="red"))
+        close_btn.bind("<Leave>", lambda e: close_btn.config(fg="#888"))
+
+        # --- 内容文本框 ---
+        app_font_family = self.settings.get("app_font", "Microsoft YaHei")
+        note_font = (app_font_family, 14)
+
+        self.text_widget = tk.Text(self.window, bg=self.BG_COLOR, fg=self.FONT_COLOR,
+                                   font=note_font, bd=0, undo=True, padx=10, pady=5,
+                                   selectbackground="#ffe793", selectforeground="black")
+        self.text_widget.pack(fill=tk.BOTH, expand=True)
+        self.text_widget.insert('1.0', self.content)
+        
+        # --- 右下角手柄 ---
+        grip = tk.Label(self.window, text="◢", bg=self.BG_COLOR, fg="#dcdca0", cursor="sizing")
+        grip.place(relx=1.0, rely=1.0, x=0, y=0, anchor="se")
+
+        # --- 事件绑定 (核心逻辑) ---
+        # 1. 移动
+        for widget in [header, title_lbl]:
+            widget.bind("<Button-1>", self._start_move)
+            widget.bind("<B1-Motion>", self._on_move)
+            widget.bind("<ButtonRelease-1>", self._save_geometry)
+            # 右键菜单绑定到 header
+            widget.bind("<Button-3>", self._show_context_menu)
+        
+        # 2. 调整大小
+        grip.bind("<Button-1>", self._start_resize)
+        grip.bind("<B1-Motion>", self._on_resize)
+        grip.bind("<ButtonRelease-1>", self._save_geometry)
+
+        # 3. 文本框绑定
+        self.text_widget.bind("<KeyRelease>", self._auto_save_text)
+        self.text_widget.bind("<Button-3>", self._show_context_menu) # 文本框也要支持右键
+        
+        self.is_visible = True
+
+    def _show_context_menu(self, event):
+        """显示右键菜单"""
+        menu = tk.Menu(self.window, tearoff=0)
+        menu.add_command(label="👁️ 调节透明度...", command=self._open_opacity_slider)
+        menu.add_separator()
+        menu.add_command(label="🗑️ 清空内容", command=self._clear_content)
+        menu.add_command(label="🙈 隐藏便利贴", command=self.hide)
+        menu.post(event.x_root, event.y_root)
+
+    def _open_opacity_slider(self):
+        """弹出透明度调节滑块"""
+        slider_win = tk.Toplevel(self.window)
+        slider_win.title("透明度")
+        slider_win.geometry("250x80")
+        slider_win.resizable(False, False)
+        slider_win.attributes('-topmost', True)
+        slider_win.transient(self.window)
+        
+        # 计算位置：显示在鼠标附近
+        x = self.window.winfo_pointerx()
+        y = self.window.winfo_pointery()
+        slider_win.geometry(f"+{x}+{y}")
+
+        # 30% - 100% 的滑块
+        scale = ttk.Scale(slider_win, from_=30, to=100, value=self.current_alpha * 100, command=lambda v: self._update_alpha(v))
+        scale.pack(fill=tk.X, padx=20, pady=(20, 5))
+        
+        lbl = ttk.Label(slider_win, text=f"当前: {int(self.current_alpha * 100)}%")
+        lbl.pack(pady=5)
+
+        # 动态更新 Label 和 透明度
+        def on_change(val):
+            alpha_val = float(val) / 100.0
+            self._update_alpha(alpha_val)
+            lbl.config(text=f"当前: {int(float(val))}%")
+        
+        scale.config(command=on_change)
+
+    def _update_alpha(self, val_float):
+        """实时应用透明度并保存"""
+        # 确保不低于 0.3 (30%)
+        final_alpha = max(0.3, min(1.0, float(val_float) if val_float <= 1.0 else float(val_float)/100.0))
+        self.current_alpha = final_alpha
+        if self.window:
+            self.window.attributes('-alpha', final_alpha)
+        # 实时保存到设置
+        self.settings['note_alpha'] = final_alpha
+
+    def _clear_content(self):
+        if self.text_widget:
+            self.text_widget.delete('1.0', tk.END)
+            self._auto_save_text()
+
+    def hide(self):
+        if self.window:
+            self._save_geometry()
+            self.window.destroy()
+            self.window = None
+        self.is_visible = False
+
+    def toggle(self):
+        if self.is_visible:
+            self.hide()
+        else:
+            self.show()
+
+    def _auto_save_text(self, event=None):
+        if not self.text_widget: return
+        content = self.text_widget.get("1.0", "end-1c")
+        if content != self.content:
+            self.content = content
+            try:
+                with open(self.note_file, 'w', encoding='utf-8') as f:
+                    f.write(content)
+            except: pass
+
+    def _save_geometry(self, event=None):
+        if self.window:
+            self.settings['note_x'] = self.window.winfo_x()
+            self.settings['note_y'] = self.window.winfo_y()
+            self.settings['note_w'] = self.window.winfo_width()
+            self.settings['note_h'] = self.window.winfo_height()
+
+    def _start_move(self, event):
+        self._x = event.x
+        self._y = event.y
+
+    def _on_move(self, event):
+        deltax = event.x - self._x
+        deltay = event.y - self._y
+        x = self.window.winfo_x() + deltax
+        y = self.window.winfo_y() + deltay
+        self.window.geometry(f"+{x}+{y}")
+
+    def _start_resize(self, event):
+        self._rx = event.x_root
+        self._ry = event.y_root
+        self._rw = self.window.winfo_width()
+        self._rh = self.window.winfo_height()
+
+    def _on_resize(self, event):
+        delta_w = event.x_root - self._rx
+        delta_h = event.y_root - self._ry
+        new_w = max(150, self._rw + delta_w)
+        new_h = max(100, self._rh + delta_h)
+        self.window.geometry(f"{new_w}x{new_h}")
+#便利贴代码结束
+
 #虚拟主播功能代码
 class VirtualAvatar:
     def __init__(self, root, img_closed_path, img_open_path, img_blink_path, settings_dict):
@@ -527,6 +737,8 @@ class TimedBroadcastApp:
         self._apply_global_font()
         images_dir = os.path.join(application_path, "images")
         if not os.path.exists(images_dir): os.makedirs(images_dir)
+
+        self.sticky_note = StickyNote(self.root, self.settings)
         
         self.avatar = VirtualAvatar(
             self.root,
@@ -5873,9 +6085,13 @@ class TimedBroadcastApp:
         log_header_frame.pack(fill=X)
         log_label = ttk.Label(log_header_frame, text="日志：", font=self.font_11_bold)
         log_label.pack(side=LEFT)
-        self.clear_log_btn = ttk.Button(log_header_frame, text="清除日志", command=self.clear_log,
+        self.clear_log_btn = ttk.Button(log_header_frame, text="🧹 清除日志", command=self.clear_log,
                                         bootstyle="secondary-outline")
         self.clear_log_btn.pack(side=LEFT, padx=10)
+        self.note_btn = ttk.Button(log_header_frame, text="📝 便利贴", 
+                                 command=lambda: self._toggle_sticky_note(),
+                                 bootstyle="secondary-outline")
+        self.note_btn.pack(side=LEFT, padx=(5, 0))
         self.avatar_btn = ttk.Button(log_header_frame, text="🐰 虚拟主播", 
                                    command=self.toggle_avatar,
                                    bootstyle="secondary-outline") # 初始样式
@@ -11034,6 +11250,15 @@ class TimedBroadcastApp:
         else:
             self.settings = defaults
         self.log("系统设置已加载。")
+
+#便利贴代码
+    def _toggle_sticky_note(self):
+        self.sticky_note.toggle()
+        # 更新按钮样式：打开时变亮，关闭时变灰
+        if self.sticky_note.is_visible:
+            self.note_btn.config(bootstyle="warning")
+        else:
+            self.note_btn.config(bootstyle="secondary-outline")
 
 #虚拟主播代码
     def toggle_avatar(self):
