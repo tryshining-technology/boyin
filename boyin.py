@@ -6129,7 +6129,7 @@ class TimedBroadcastApp:
                                  bootstyle="secondary-outline")
         self.note_btn.pack(side=LEFT, padx=5)
         self.is_quick_recording = False # 录音状态标志
-        self.quick_record_btn = ttk.Button(log_header_frame, text="🎙️ 即录即播", 
+        self.quick_record_btn = ttk.Button(log_header_frame, text="🎤 即录即播", 
                                            command=self._toggle_quick_record,
                                            bootstyle="secondary-outline")
         self.quick_record_btn.pack(side=LEFT, padx=5)
@@ -11386,7 +11386,7 @@ class TimedBroadcastApp:
         duration = time.time() - real_start_time
         
         def reset_ui():
-            self.quick_record_btn.config(text="🎙️ 即录即播", bootstyle="secondary-outline", state=NORMAL)
+            self.quick_record_btn.config(text="🎤 即录即播", bootstyle="secondary-outline", state=NORMAL)
 
         # <3秒 丢弃规则
         if duration < 3.0:
