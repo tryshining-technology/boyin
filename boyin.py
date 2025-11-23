@@ -88,17 +88,20 @@ try:
     pygame.mixer.init()
     pygame.mixer.set_num_channels(10)
     AUDIO_AVAILABLE = True
-    PYAUDIO_AVAILABLE = False
+except ImportError:
+    print("警告: pygame 未安装，音频播放功能将不可用。")
+except Exception as e:
+    print(f"警告: pygame 初始化失败 - {e}，音频播放功能将不可用。")
+
+PYAUDIO_AVAILABLE = False
 try:
     import pyaudio
     import wave
     PYAUDIO_AVAILABLE = True
 except ImportError:
     print("警告: pyaudio 未安装，即录即播功能将不可用。")
-except ImportError:
-    print("警告: pygame 未安装，音频播放功能将不可用。")
 except Exception as e:
-    print(f"警告: pygame 初始化失败 - {e}，音频播放功能将不可用。")
+    print(f"警告: pyaudio 初始化检测失败 - {e}")
 
 PSUTIL_AVAILABLE = False
 try:
