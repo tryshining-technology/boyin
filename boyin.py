@@ -398,9 +398,10 @@ class StickyNote:
 
 #虚拟主播功能代码
 class VirtualAvatar:
-    def __init__(self, root, img_closed_path, img_open_path, img_blink_path, settings_dict):
+    def __init__(self, root, img_closed_path, img_open_path, img_blink_path, settings_dict, on_state_change=None):
         self.root = root
-        self.settings = settings_dict 
+        self.settings = settings_dict
+        self.on_state_change = on_state_change
         self.window = None
         self.label = None
         self.is_visible = False
@@ -535,6 +536,9 @@ class VirtualAvatar:
         self.is_visible = True
         self._animate_loop()
 
+        if self.on_state_change:
+            self.on_state_change(True)
+
     def hide(self):
         if self.window:
             self._save_position() 
@@ -542,6 +546,8 @@ class VirtualAvatar:
             self.window.destroy()
             self.window = None
             self.is_visible = False
+            if self.on_state_change:
+                self.on_state_change(False)
 
     def set_talking(self, status):
         self.is_talking = status
@@ -748,7 +754,8 @@ class TimedBroadcastApp:
             os.path.join(images_dir, "closed.png"),
             os.path.join(images_dir, "open.png"),
             os.path.join(images_dir, "blink.png"),
-            self.settings # 把设置传进去实现记忆
+            self.settings,
+            self._on_avatar_state_change
         )
         
         # 如果上次是开启状态，自动显示
@@ -961,7 +968,7 @@ class TimedBroadcastApp:
         self.status_labels = []
         status_texts = ["当前时间", "系统状态", "播放状态", "任务数量", "待办事项"]
 
-        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251116", font=self.font_11,
+        copyright_label = ttk.Label(self.status_frame, text="© 创翔科技 ver20251123", font=self.font_11,
                                     bootstyle=(SECONDARY, INVERSE), padding=(15, 0))
         copyright_label.pack(side=RIGHT, padx=2)
 
@@ -10770,9 +10777,9 @@ class TimedBroadcastApp:
         # 实例选项保持干净，不包含任何UA设置
         vlc_instance_options = [
             '--no-xlib', 
-            '--network-caching=5000'
-            '--live-caching=3000'
-            '--avcodec-hw=auto'
+            '--network-caching=5000',
+            '--live-caching=3000',
+            '--avcodec-hw=auto',
             '--hls-segment-threads=2'
         ]
         
@@ -11269,18 +11276,24 @@ class TimedBroadcastApp:
             self.sticky_note.toggle()
 
 #虚拟主播代码
+    def _on_avatar_state_change(self, is_visible):
+        """当虚拟主播显示/隐藏时触发的回调"""
+        if hasattr(self, 'avatar_btn'):
+            # 如果显示，变亮色(warning)；如果隐藏，变灰色轮廓(secondary-outline)
+            style = "warning" if is_visible else "secondary-outline"
+            self.avatar_btn.config(bootstyle=style)
+        
+        # 同步保存状态到设置
+        self.settings['avatar_enabled'] = is_visible
+        self.save_settings()
+
     def toggle_avatar(self):
         if self.avatar.is_visible:
             self.avatar.hide()
-            self.settings["avatar_enabled"] = False
-            self.avatar_btn.config(bootstyle="secondary-outline") # 灰色轮廓
             self.log("虚拟主播已隐藏。")
         else:
             self.avatar.show()
-            self.settings["avatar_enabled"] = True
-            self.avatar_btn.config(bootstyle="warning") # 亮橙色实心
             self.log("虚拟主播已显示 (支持滚轮缩放/拖拽)。")
-        self.save_settings()
 
     def save_settings(self):
         if hasattr(self, 'autostart_var'):
