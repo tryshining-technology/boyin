@@ -186,7 +186,7 @@ EDGE_TTS_VOICES = {
     '在线-台湾-曉雨 (女)': 'zh-TW-HsiaoYuNeural',
 }
 
-# 便利贴代码 (Win7 经典黄·防白屏修复版)
+# 便利贴代码 (Win7 完美复刻版)
 class StickyNote:
     def __init__(self, root, settings_dict, on_state_change=None):
         self.root = root
@@ -196,12 +196,17 @@ class StickyNote:
         self.text_widget = None
         self.is_visible = False
         
-        # --- [关键修改] 调深颜色，确保不泛白 ---
-        # 经典的便利贴黄
-        self.BG_COLOR = '#fff2ab'   # 主体背景色 (饱满的黄色)
-        self.BAR_COLOR = '#fce883'  # 标题栏颜色 (稍深)
-        self.FONT_COLOR = '#454545' # 深灰色字体 (像铅笔字迹)
-        self.SELECT_BG = '#c9bd6f'  # 选中文本的背景色
+        # --- [配色方案优化] 纯正 Win7 风格 ---
+        # 1. 标题栏：略深一点的黄色，用于提示这是可拖拽区域
+        self.BAR_COLOR = '#fbfb75' 
+        # 2. 正文背景：标准的便签黄
+        self.BG_COLOR = '#fdfd96'   
+        # 3. 字体颜色：深灰，模仿铅笔/墨水质感
+        self.FONT_COLOR = '#404040' 
+        # 4. 选中文本背景：深黄色高亮
+        self.SELECT_BG = '#dcc855'  
+        # 5. 右下角手柄符号颜色：深黄色 (背景色与正文保持一致)
+        self.GRIP_FG = '#d4d46a'    
         
         # 文件路径
         self.note_file = os.path.join(application_path, "sticky_note.txt")
@@ -225,9 +230,8 @@ class StickyNote:
         self.window.overrideredirect(True)
         self.window.attributes('-topmost', True)
         
-        # [修复] 强制应用背景色，防止被主题覆盖
+        # 强制应用背景色
         self.window.configure(bg=self.BG_COLOR)
-        
         self.window.attributes('-alpha', self.current_alpha)
         
         sw = self.window.winfo_screenwidth()
@@ -241,48 +245,50 @@ class StickyNote:
         
         self.window.geometry(f"{w}x{h}+{x}+{y}")
 
-        # 获取设置字体
         app_font_family = self.settings.get("app_font", "Microsoft YaHei")
         
-        # --- 顶部拖拽条 ---
-        # [修复] 显式指定 highlightthickness=0 去除可能的白边
-        header = tk.Frame(self.window, bg=self.BAR_COLOR, height=30, cursor="fleur", highlightthickness=0)
+        # --- 1. 顶部标题栏 (BAR_COLOR) ---
+        header = tk.Frame(self.window, bg=self.BAR_COLOR, height=28, cursor="fleur", highlightthickness=0)
         header.pack(fill=tk.X, side=tk.TOP)
         header.pack_propagate(False)
         
         header_font = (app_font_family, 10, "bold")
-        title_lbl = tk.Label(header, text=" + 便利贴", bg=self.BAR_COLOR, fg="#666", font=header_font)
-        title_lbl.pack(side=tk.LEFT, padx=10)
+        # 标题文字颜色设为深灰，融合感更强
+        title_lbl = tk.Label(header, text=" + 便利贴", bg=self.BAR_COLOR, fg="#777", font=header_font)
+        title_lbl.pack(side=tk.LEFT, padx=8)
 
-        close_btn = tk.Label(header, text="×", bg=self.BAR_COLOR, fg="#666", font=("Arial", 16), cursor="hand2")
+        # 关闭按钮
+        close_btn = tk.Label(header, text="×", bg=self.BAR_COLOR, fg="#777", font=("Arial", 16), cursor="hand2")
         close_btn.pack(side=tk.RIGHT, padx=10)
+        # 鼠标悬停变红，离开变回深灰
         close_btn.bind("<Button-1>", lambda e: self.hide())
-        close_btn.bind("<Enter>", lambda e: close_btn.config(fg="red"))
-        close_btn.bind("<Leave>", lambda e: close_btn.config(fg="#666"))
+        close_btn.bind("<Enter>", lambda e: close_btn.config(fg="#e81123")) 
+        close_btn.bind("<Leave>", lambda e: close_btn.config(fg="#777"))
 
-        # --- 内容文本框 ---
+        # --- 2. 内容区域 (BG_COLOR) ---
         note_font = (app_font_family, 14)
 
-        # [修复] 使用标准 tk.Text，并强制配置颜色
         self.text_widget = tk.Text(self.window, 
                                    bg=self.BG_COLOR, 
                                    fg=self.FONT_COLOR,
                                    font=note_font, 
                                    bd=0, 
-                                   highlightthickness=0, # 关键：去除默认的白色/灰色边框
+                                   highlightthickness=0, # 彻底去除边框
                                    undo=True, 
                                    padx=15, pady=10,
                                    selectbackground=self.SELECT_BG, 
                                    selectforeground="white")
         self.text_widget.pack(fill=tk.BOTH, expand=True)
         self.text_widget.insert('1.0', self.content)
+        self.text_widget.configure(bg=self.BG_COLOR) # 双重保险
         
-        # [双重保险] 再次强制设置颜色，对抗 ttkbootstrap 的后加载样式
-        self.text_widget.configure(bg=self.BG_COLOR)
+        # --- 3. 右下角手柄 (背景透明化处理) ---
+        # 技巧：Background 设为 BG_COLOR，Foreground (符号) 设为深黄 GRIP_FG
+        # 这样看起来就像是纸张背景上的一个印记，没有方形色块
+        grip = tk.Label(self.window, text="◢", bg=self.BG_COLOR, fg=self.GRIP_FG, cursor="sizing", font=("Arial", 14))
         
-        # --- 右下角手柄 ---
-        grip = tk.Label(self.window, text="◢", bg=self.BG_COLOR, fg="#dcdca0", cursor="sizing")
-        grip.place(relx=1.0, rely=1.0, x=0, y=0, anchor="se")
+        # 使用 place 放置在绝对右下角，不占用 Text 控件空间
+        grip.place(relx=1.0, rely=1.0, x=-2, y=-2, anchor="se")
 
         # --- 事件绑定 ---
         for widget in [header, title_lbl]:
@@ -313,10 +319,7 @@ class StickyNote:
     def _open_opacity_slider(self):
         slider_win = tk.Toplevel(self.window)
         slider_win.title("透明度")
-        
-        # 保持之前修复的 120 高度
         slider_win.geometry("250x120")
-        
         slider_win.resizable(False, False)
         slider_win.attributes('-topmost', True)
         slider_win.transient(self.window)
