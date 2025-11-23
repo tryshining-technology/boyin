@@ -88,6 +88,13 @@ try:
     pygame.mixer.init()
     pygame.mixer.set_num_channels(10)
     AUDIO_AVAILABLE = True
+    PYAUDIO_AVAILABLE = False
+try:
+    import pyaudio
+    import wave
+    PYAUDIO_AVAILABLE = True
+except ImportError:
+    print("警告: pyaudio 未安装，即录即播功能将不可用。")
 except ImportError:
     print("警告: pygame 未安装，音频播放功能将不可用。")
 except Exception as e:
@@ -186,7 +193,7 @@ EDGE_TTS_VOICES = {
     '在线-台湾-曉雨 (女)': 'zh-TW-HsiaoYuNeural',
 }
 
-# 便利贴代码 (Win7 完美复刻版)
+# 便利贴代码 (Canvas 重构·绝对防白版)
 class StickyNote:
     def __init__(self, root, settings_dict, on_state_change=None):
         self.root = root
@@ -196,22 +203,15 @@ class StickyNote:
         self.text_widget = None
         self.is_visible = False
         
-        # --- [配色方案优化] 纯正 Win7 风格 ---
-        # 1. 标题栏：略深一点的黄色，用于提示这是可拖拽区域
-        self.BAR_COLOR = '#fbfb75' 
-        # 2. 正文背景：标准的便签黄
-        self.BG_COLOR = '#fdfd96'   
-        # 3. 字体颜色：深灰，模仿铅笔/墨水质感
-        self.FONT_COLOR = '#404040' 
-        # 4. 选中文本背景：深黄色高亮
-        self.SELECT_BG = '#dcc855'  
-        # 5. 右下角手柄符号颜色：深黄色 (背景色与正文保持一致)
-        self.GRIP_FG = '#d4d46a'    
+        # --- Win7 经典黄色配色 ---
+        self.BG_COLOR = '#fbfb76'   # 正文背景 (经典黄)
+        self.BAR_COLOR = '#fdfd96'  # 标题栏 (稍亮一点，营造层次感)
+        self.FONT_COLOR = '#404040' # 文字颜色
+        self.SELECT_BG = '#dcc855'  # 选中高亮
+        self.GRIP_FG = '#b5b500'    # 右下角手柄颜色 (深黄)
         
-        # 文件路径
         self.note_file = os.path.join(application_path, "sticky_note.txt")
         
-        # 加载内容
         self.content = ""
         if os.path.exists(self.note_file):
             try:
@@ -246,67 +246,82 @@ class StickyNote:
         self.window.geometry(f"{w}x{h}+{x}+{y}")
 
         app_font_family = self.settings.get("app_font", "Microsoft YaHei")
-        
-        # --- 1. 顶部标题栏 (BAR_COLOR) ---
-        header = tk.Frame(self.window, bg=self.BAR_COLOR, height=28, cursor="fleur", highlightthickness=0)
-        header.pack(fill=tk.X, side=tk.TOP)
-        header.pack_propagate(False)
-        
         header_font = (app_font_family, 10, "bold")
-        # 标题文字颜色设为深灰，融合感更强
-        title_lbl = tk.Label(header, text=" + 便利贴", bg=self.BAR_COLOR, fg="#777", font=header_font)
-        title_lbl.pack(side=tk.LEFT, padx=8)
-
-        # 关闭按钮
-        close_btn = tk.Label(header, text="×", bg=self.BAR_COLOR, fg="#777", font=("Arial", 16), cursor="hand2")
-        close_btn.pack(side=tk.RIGHT, padx=10)
-        # 鼠标悬停变红，离开变回深灰
-        close_btn.bind("<Button-1>", lambda e: self.hide())
-        close_btn.bind("<Enter>", lambda e: close_btn.config(fg="#e81123")) 
-        close_btn.bind("<Leave>", lambda e: close_btn.config(fg="#777"))
-
-        # --- 2. 内容区域 (BG_COLOR) ---
         note_font = (app_font_family, 14)
+        
+        # --- 1. 标题栏 (改用 Canvas) ---
+        # Canvas 绝对不会被主题覆盖背景色
+        self.header_canvas = tk.Canvas(self.window, bg=self.BAR_COLOR, height=28, 
+                                       highlightthickness=0, cursor="fleur")
+        self.header_canvas.pack(fill=tk.X, side=tk.TOP)
+        
+        # 绘制标题文字
+        self.header_canvas.create_text(10, 14, text="+ 便利贴", fill="#555", 
+                                       anchor="w", font=header_font, tags="move_tag")
+        
+        # 绘制关闭按钮 X
+        # 既然是画出来的，我们可以控制它的点击区域
+        self.close_btn_id = self.header_canvas.create_text(w-15, 14, text="×", fill="#666", 
+                                                           font=("Arial", 18), anchor="center", tags="close_tag")
 
+        # --- 2. 内容区域 (Text) ---
         self.text_widget = tk.Text(self.window, 
                                    bg=self.BG_COLOR, 
                                    fg=self.FONT_COLOR,
                                    font=note_font, 
                                    bd=0, 
-                                   highlightthickness=0, # 彻底去除边框
+                                   highlightthickness=0, 
                                    undo=True, 
                                    padx=15, pady=10,
                                    selectbackground=self.SELECT_BG, 
                                    selectforeground="white")
         self.text_widget.pack(fill=tk.BOTH, expand=True)
         self.text_widget.insert('1.0', self.content)
-        self.text_widget.configure(bg=self.BG_COLOR) # 双重保险
         
-        # --- 3. 右下角手柄 (背景透明化处理) ---
-        # 技巧：Background 设为 BG_COLOR，Foreground (符号) 设为深黄 GRIP_FG
-        # 这样看起来就像是纸张背景上的一个印记，没有方形色块
-        grip = tk.Label(self.window, text="◢", bg=self.BG_COLOR, fg=self.GRIP_FG, cursor="sizing", font=("Arial", 14))
+        # --- 3. 右下角手柄 (改用 Canvas) ---
+        # 创建一个透明(即背景色相同)的小画布放在右下角
+        self.grip_canvas = tk.Canvas(self.window, bg=self.BG_COLOR, width=16, height=16, 
+                                     highlightthickness=0, cursor="sizing")
+        self.grip_canvas.place(relx=1.0, rely=1.0, anchor="se")
         
-        # 使用 place 放置在绝对右下角，不占用 Text 控件空间
-        grip.place(relx=1.0, rely=1.0, x=-2, y=-2, anchor="se")
+        # 画出三角形符号
+        self.grip_canvas.create_text(8, 8, text="◢", fill=self.GRIP_FG, font=("Arial", 12))
 
         # --- 事件绑定 ---
-        for widget in [header, title_lbl]:
-            widget.bind("<Button-1>", self._start_move)
-            widget.bind("<B1-Motion>", self._on_move)
-            widget.bind("<ButtonRelease-1>", self._save_geometry)
-            widget.bind("<Button-3>", self._show_context_menu)
         
-        grip.bind("<Button-1>", self._start_resize)
-        grip.bind("<B1-Motion>", self._on_resize)
-        grip.bind("<ButtonRelease-1>", self._save_geometry)
+        # 移动逻辑 (绑定到整个Header Canvas)
+        self.header_canvas.bind("<Button-1>", self._start_move)
+        self.header_canvas.bind("<B1-Motion>", self._on_move)
+        self.header_canvas.bind("<ButtonRelease-1>", self._save_geometry)
+        self.header_canvas.bind("<Button-3>", self._show_context_menu)
 
+        # 关闭按钮逻辑 (手动检测点击坐标，或者简单点直接绑定点击事件)
+        # 这里为了简单，直接绑定 Canvas 的点击，但在回调里判断是不是点到了 X
+        self.header_canvas.tag_bind("close_tag", "<Button-1>", lambda e: self.hide())
+        self.header_canvas.tag_bind("close_tag", "<Enter>", lambda e: self.header_canvas.itemconfig(self.close_btn_id, fill="#e81123"))
+        self.header_canvas.tag_bind("close_tag", "<Leave>", lambda e: self.header_canvas.itemconfig(self.close_btn_id, fill="#666"))
+        
+        # 调整大小逻辑
+        self.grip_canvas.bind("<Button-1>", self._start_resize)
+        self.grip_canvas.bind("<B1-Motion>", self._on_resize)
+        self.grip_canvas.bind("<ButtonRelease-1>", self._save_geometry)
+
+        # 文本框逻辑
         self.text_widget.bind("<KeyRelease>", self._auto_save_text)
         self.text_widget.bind("<Button-3>", self._show_context_menu)
         
+        # 窗口大小改变时，更新关闭按钮位置
+        self.window.bind("<Configure>", self._on_window_resize)
+
         self.is_visible = True
         if self.on_state_change:
             self.on_state_change(True)
+
+    def _on_window_resize(self, event):
+        # 仅当宽度改变时，移动关闭按钮的位置
+        if event.widget == self.window:
+            w = self.window.winfo_width()
+            self.header_canvas.coords(self.close_btn_id, w-15, 14)
 
     def _show_context_menu(self, event):
         menu = tk.Menu(self.window, tearoff=0)
@@ -877,11 +892,13 @@ class TimedBroadcastApp:
         self.lock_password_b64 = self._load_from_registry("LockPasswordB64") or ""
 
     def create_folder_structure(self):
+        self.quick_record_folder = os.path.join(AUDIO_FOLDER, "即录即播")
         folders_to_create = [
             PROMPT_FOLDER, AUDIO_FOLDER, BGM_FOLDER, 
             VOICE_SCRIPT_FOLDER, SCREENSHOT_FOLDER,
             WALLPAPER_CACHE_FOLDER,
-            DYNAMIC_VOICE_CACHE_FOLDER
+            DYNAMIC_VOICE_CACHE_FOLDER,
+            self.quick_record_folder
         ]
         for folder in folders_to_create:
             if not os.path.exists(folder):
@@ -6116,6 +6133,11 @@ class TimedBroadcastApp:
                                  command=lambda: self._toggle_sticky_note(),
                                  bootstyle="secondary-outline")
         self.note_btn.pack(side=LEFT, padx=(5, 0))
+        self.is_quick_recording = False # 录音状态标志
+        self.quick_record_btn = ttk.Button(log_header_frame, text="🎙️ 即录即播", 
+                                           command=self._toggle_quick_record,
+                                           bootstyle="secondary-outline")
+        self.quick_record_btn.pack(side=LEFT, padx=5)
         self.avatar_btn = ttk.Button(log_header_frame, text="🐰 虚拟主播", 
                                    command=self.toggle_avatar,
                                    bootstyle="secondary-outline") # 初始样式
@@ -10793,8 +10815,7 @@ class TimedBroadcastApp:
             '--no-xlib', 
             '--network-caching=5000',
             '--live-caching=3000',
-            '--avcodec-hw=auto',
-            '--hls-segment-threads=2'
+            '--avcodec-hw=auto'
         ]
         
         content_path = task.get('content', '')
@@ -11288,6 +11309,136 @@ class TimedBroadcastApp:
         """便利贴按钮点击事件"""
         if hasattr(self, 'sticky_note'):
             self.sticky_note.toggle()
+
+#即录即播代码
+    def _toggle_quick_record(self):
+        if not PYAUDIO_AVAILABLE:
+            messagebox.showerror("组件缺失", "未检测到 PyAudio 库，无法录音。\n请安装: pip install pyaudio", parent=self.root)
+            return
+
+        if not self.is_quick_recording:
+            # --- 准备开始录音 ---
+            try:
+                # 简单测试麦克风是否可用
+                p = pyaudio.PyAudio()
+                if p.get_device_count() < 1:
+                    messagebox.showerror("错误", "未检测到麦克风设备！", parent=self.root)
+                    p.terminate()
+                    return
+                p.terminate()
+            except Exception as e:
+                messagebox.showerror("错误", f"无法启动音频设备: {e}", parent=self.root)
+                return
+
+            self.is_quick_recording = True
+            
+            # [UI反馈] 按钮变红，文字变化
+            self.quick_record_btn.config(text="⏹ 停止并广播", bootstyle="danger")
+            self.log("🎙️ 开始录制临时通知...")
+            
+            # 启动后台录音线程
+            threading.Thread(target=self._quick_record_worker, daemon=True).start()
+        
+        else:
+            # --- 停止录音 ---
+            self.is_quick_recording = False
+            # 按钮暂时变灰，防止重复点击，等待后台线程处理完毕
+            self.quick_record_btn.config(text="⏳ 处理中...", state=DISABLED)
+
+    def _quick_record_worker(self):
+        CHUNK = 1024
+        FORMAT = pyaudio.paInt16
+        CHANNELS = 1
+        RATE = 44100
+        
+        frames = []
+        p = pyaudio.PyAudio()
+        stream = None
+        
+        start_time = time.time()
+        
+        try:
+            stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+            
+            # 循环录制，直到主线程标志位变为 False
+            while self.is_quick_recording:
+                data = stream.read(CHUNK)
+                frames.append(data)
+                
+        except Exception as e:
+            self.log(f"录音过程出错: {e}")
+            self.root.after(0, lambda: messagebox.showerror("录音错误", str(e), parent=self.root))
+        finally:
+            if stream:
+                stream.stop_stream()
+                stream.close()
+            p.terminate()
+
+        # --- 录音结束后的处理 ---
+        duration = time.time() - start_time
+        
+        def reset_ui():
+            # 恢复按钮初始状态
+            self.quick_record_btn.config(text="🎙️ 即录即播", bootstyle="secondary-outline", state=NORMAL)
+
+        # [规则] 小于3秒丢弃
+        if duration < 3.0:
+            self.log(f"录音时长过短 ({duration:.1f}秒 < 3秒)，已丢弃。")
+            self.root.after(0, lambda: messagebox.showwarning("录音太短", "录音时长需超过 3 秒才会被广播。\n本次操作已取消。", parent=self.root))
+            self.root.after(0, reset_ui)
+            return
+
+        # [保存] 生成文件名和路径
+        timestamp_str = datetime.now().strftime('%Y%m%d%H%M')
+        filename = f"{timestamp_str}录音节目.wav"
+        filepath = os.path.join(self.quick_record_folder, filename)
+
+        try:
+            wf = wave.open(filepath, 'wb')
+            wf.setnchannels(CHANNELS)
+            wf.setsampwidth(p.get_sample_size(FORMAT))
+            wf.setframerate(RATE)
+            wf.writeframes(b''.join(frames))
+            wf.close()
+            self.log(f"录音已保存: {filename}")
+            
+            # --- [核心] 自动添加到任务列表并播放 ---
+            task_name = filename.replace(".wav", "")
+            
+            # 构造任务对象
+            new_task = {
+                'name': f"📢 {task_name}", # 加个图标方便识别
+                'type': 'audio',
+                'audio_type': 'single',
+                'content': filepath,
+                'volume': '100',           # 默认最大音量
+                'interval_type': 'first',
+                'interval_first': '1',     # 播一遍
+                'delay': 'ontime',         # 标记为高优先级
+                'time': datetime.now().strftime('%H:%M:%S'), # 记录生成时间
+                'weekday': "每周:1234567", 
+                'date_range': "2025-01-01 ~ 2099-12-31",
+                'status': '启用',
+                'last_run': {}
+            }
+            
+            # 在主线程更新数据，避免线程安全问题
+            def add_and_play():
+                self.tasks.append(new_task)
+                self.update_task_list()
+                self.save_tasks()
+                
+                # 触发立即插播
+                self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task, "manual_quick_record")))
+                self.log(f"已自动添加并开始广播: {task_name}")
+                reset_ui()
+
+            self.root.after(0, add_and_play)
+
+        except Exception as e:
+            self.log(f"保存录音文件失败: {e}")
+            self.root.after(0, lambda: messagebox.showerror("保存失败", str(e), parent=self.root))
+            self.root.after(0, reset_ui)
 
 #虚拟主播代码
     def _on_avatar_state_change(self, is_visible):
