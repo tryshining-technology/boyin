@@ -188,9 +188,11 @@ EDGE_TTS_VOICES = {
 
 #便利贴代码
 class StickyNote:
-    def __init__(self, root, settings_dict):
+    # 修复1：增加 on_state_change 参数
+    def __init__(self, root, settings_dict, on_state_change=None):
         self.root = root
         self.settings = settings_dict
+        self.on_state_change = on_state_change  # 修复2：保存回调函数
         self.window = None
         self.text_widget = None
         self.is_visible = False
@@ -287,6 +289,10 @@ class StickyNote:
         self.text_widget.bind("<Button-3>", self._show_context_menu) # 文本框也要支持右键
         
         self.is_visible = True
+        
+        # 修复3：显示时调用回调，更新主界面按钮状态
+        if self.on_state_change:
+            self.on_state_change(True)
 
     def _show_context_menu(self, event):
         """显示右键菜单"""
@@ -347,6 +353,10 @@ class StickyNote:
             self.window.destroy()
             self.window = None
         self.is_visible = False
+        
+        # 修复4：隐藏时调用回调，更新主界面按钮状态
+        if self.on_state_change:
+            self.on_state_change(False)
 
     def toggle(self):
         if self.is_visible:
