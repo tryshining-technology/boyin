@@ -6123,11 +6123,11 @@ class TimedBroadcastApp:
         log_label.pack(side=LEFT)
         self.clear_log_btn = ttk.Button(log_header_frame, text="🧹 清除日志", command=self.clear_log,
                                         bootstyle="secondary-outline")
-        self.clear_log_btn.pack(side=LEFT, padx=10)
+        self.clear_log_btn.pack(side=LEFT, padx=5)
         self.note_btn = ttk.Button(log_header_frame, text="📝 便利贴", 
                                  command=lambda: self._toggle_sticky_note(),
                                  bootstyle="secondary-outline")
-        self.note_btn.pack(side=LEFT, padx=(5, 0))
+        self.note_btn.pack(side=LEFT, padx=5)
         self.is_quick_recording = False # 录音状态标志
         self.quick_record_btn = ttk.Button(log_header_frame, text="🎙️ 即录即播", 
                                            command=self._toggle_quick_record,
@@ -11312,9 +11312,8 @@ class TimedBroadcastApp:
             return
 
         if not self.is_quick_recording:
-            # --- 准备开始录音 ---
+            # --- 阶段1：准备启动 ---
             try:
-                # 简单测试麦克风是否可用
                 p = pyaudio.PyAudio()
                 if p.get_device_count() < 1:
                     messagebox.showerror("错误", "未检测到麦克风设备！", parent=self.root)
@@ -11327,17 +11326,16 @@ class TimedBroadcastApp:
 
             self.is_quick_recording = True
             
-            # [UI反馈] 按钮变红，文字变化
-            self.quick_record_btn.config(text="⏹ 停止并广播", bootstyle="danger")
-            self.log("🎙️ 开始录制临时通知...")
+            # [修改点1] 点击后先显示“准备中”，不要立即变黄误导用户
+            self.quick_record_btn.config(text="⏳ 启动中...", state=DISABLED, bootstyle="secondary-outline")
             
-            # 启动后台录音线程
+            # 启动后台线程
             threading.Thread(target=self._quick_record_worker, daemon=True).start()
         
         else:
-            # --- 停止录音 ---
+            # --- 阶段3：停止录音 ---
             self.is_quick_recording = False
-            # 按钮暂时变灰，防止重复点击，等待后台线程处理完毕
+            # 按钮变灰，防止重复点击
             self.quick_record_btn.config(text="⏳ 处理中...", state=DISABLED)
 
     def _quick_record_worker(self):
@@ -11347,43 +11345,57 @@ class TimedBroadcastApp:
         RATE = 44100
         
         frames = []
-        p = pyaudio.PyAudio()
+        p = None
         stream = None
         
-        start_time = time.time()
-        
         try:
+            p = pyaudio.PyAudio()
+            # 打开音频流（这一步最耗时，可能卡1-2秒）
             stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
             
-            # 循环录制，直到主线程标志位变为 False
+            # [修改点2] 硬件也就绪了！现在才通知主界面变黄，告诉用户“可以说话了”
+            def notify_ready():
+                if self.is_quick_recording: # 双重检查，防止启动期间用户强退
+                    self.quick_record_btn.config(text="⏹ 停止并广播", state=NORMAL, bootstyle="warning")
+                    self.log("🎙️ 录音开始，请说话...")
+            
+            self.root.after(0, notify_ready)
+
+            # [修改点3] 计时器要从真正开始录制时才开始算
+            real_start_time = time.time()
+            
+            # 开始循环录制
             while self.is_quick_recording:
-                data = stream.read(CHUNK)
+                data = stream.read(CHUNK, exception_on_overflow=False)
                 frames.append(data)
                 
         except Exception as e:
             self.log(f"录音过程出错: {e}")
             self.root.after(0, lambda: messagebox.showerror("录音错误", str(e), parent=self.root))
+            # 出错恢复
+            self.is_quick_recording = False
         finally:
             if stream:
                 stream.stop_stream()
                 stream.close()
-            p.terminate()
+            if p:
+                p.terminate()
 
         # --- 录音结束后的处理 ---
-        duration = time.time() - start_time
+        # 计算时长 (基于实际录制时间)
+        duration = time.time() - real_start_time
         
         def reset_ui():
-            # 恢复按钮初始状态
-            self.quick_record_btn.config(text="🎤 即录即播", bootstyle="secondary-outline", state=NORMAL)
+            self.quick_record_btn.config(text="🎙️ 即录即播", bootstyle="secondary-outline", state=NORMAL)
 
-        # [规则] 小于3秒丢弃
+        # <3秒 丢弃规则
         if duration < 3.0:
             self.log(f"录音时长过短 ({duration:.1f}秒 < 3秒)，已丢弃。")
-            self.root.after(0, lambda: messagebox.showwarning("录音太短", "录音时长需超过 3 秒才会被广播。\n本次操作已取消。", parent=self.root))
+            self.root.after(0, lambda: messagebox.showwarning("录音太短", "录音时长需超过 3 秒才会被广播。\n防止误触，本次操作已取消。", parent=self.root))
             self.root.after(0, reset_ui)
             return
 
-        # [保存] 生成文件名和路径
+        # 保存文件
         timestamp_str = datetime.now().strftime('%Y%m%d%H%M')
         filename = f"{timestamp_str}录音节目.wav"
         filepath = os.path.join(self.quick_record_folder, filename)
@@ -11397,33 +11409,29 @@ class TimedBroadcastApp:
             wf.close()
             self.log(f"录音已保存: {filename}")
             
-            # --- [核心] 自动添加到任务列表并播放 ---
             task_name = filename.replace(".wav", "")
             
-            # 构造任务对象
+            # 构造任务
             new_task = {
-                'name': f"📢 {task_name}", # 加个图标方便识别
+                'name': f"📢 {task_name}",
                 'type': 'audio',
                 'audio_type': 'single',
                 'content': filepath,
-                'volume': '100',           # 默认最大音量
+                'volume': '100',
                 'interval_type': 'first',
-                'interval_first': '1',     # 播一遍
-                'delay': 'ontime',         # 标记为高优先级
-                'time': datetime.now().strftime('%H:%M:%S'), # 记录生成时间
+                'interval_first': '1',
+                'delay': 'ontime',
+                'time': datetime.now().strftime('%H:%M:%S'),
                 'weekday': "每周:1234567", 
                 'date_range': "2025-01-01 ~ 2099-12-31",
                 'status': '启用',
                 'last_run': {}
             }
             
-            # 在主线程更新数据，避免线程安全问题
             def add_and_play():
                 self.tasks.append(new_task)
                 self.update_task_list()
                 self.save_tasks()
-                
-                # 触发立即插播
                 self.playback_command_queue.put(('PLAY_INTERRUPT', (new_task, "manual_quick_record")))
                 self.log(f"已自动添加并开始广播: {task_name}")
                 reset_ui()
