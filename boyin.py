@@ -738,7 +738,10 @@ class TimedBroadcastApp:
         images_dir = os.path.join(application_path, "images")
         if not os.path.exists(images_dir): os.makedirs(images_dir)
 
-        self.sticky_note = StickyNote(self.root, self.settings)
+        self.sticky_note = StickyNote(self.root, self.settings, self._on_sticky_note_state_change)
+        
+        if self.settings.get('sticky_note_enabled', False):
+            self.root.after(800, self.sticky_note.show)
         
         self.avatar = VirtualAvatar(
             self.root,
@@ -11252,13 +11255,18 @@ class TimedBroadcastApp:
         self.log("系统设置已加载。")
 
 #便利贴代码
+    def _on_sticky_note_state_change(self, is_visible):
+        """当便利贴显示/隐藏时触发的回调"""
+        if hasattr(self, 'note_btn'):
+            style = "warning" if is_visible else "secondary-outline"
+            self.note_btn.config(bootstyle=style)
+        self.settings['sticky_note_enabled'] = is_visible
+        self.save_settings()
+
     def _toggle_sticky_note(self):
-        self.sticky_note.toggle()
-        # 更新按钮样式：打开时变亮，关闭时变灰
-        if self.sticky_note.is_visible:
-            self.note_btn.config(bootstyle="warning")
-        else:
-            self.note_btn.config(bootstyle="secondary-outline")
+        """便利贴按钮点击事件"""
+        if hasattr(self, 'sticky_note'):
+            self.sticky_note.toggle()
 
 #虚拟主播代码
     def toggle_avatar(self):
