@@ -6142,6 +6142,9 @@ class TimedBroadcastApp:
         if self.settings.get("avatar_enabled", False):
              self.avatar_btn.config(bootstyle="warning")
 
+        if self.settings.get("sticky_note_enabled", False):
+             self.note_btn.config(bootstyle="warning")
+
         self.log_text = ScrolledText(log_frame, height=6, font=self.font_11,
                                                   wrap=WORD, state='disabled')
         self.log_text.pack(fill=BOTH, expand=True)
