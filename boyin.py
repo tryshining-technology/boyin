@@ -3481,8 +3481,36 @@ class TimedBroadcastApp:
             self._stop_remote_service()
             messagebox.showinfo("提示", "远程控制服务已因超时自动暂停。", parent=self.root)
 
+    def _handle_uploaded_file(self, filepath, filename):
+        """处理局域网上传的文件：弹出询问是否播放"""
+        # 窗口置顶，确保管理员能看到
+        self.root.attributes('-topmost', True)
+        self.root.attributes('-topmost', False)
+        self.root.focus_force()
+        
+        # 播放提示音 (可选)
+        if WIN32_AVAILABLE: ctypes.windll.user32.MessageBeep(0xFFFFFFFF)
+
+        if messagebox.askyesno("收到新文件", f"局域网用户上传了音频文件：\n\n{filename}\n\n是否立即插队播放？", parent=self.root):
+            # 构造播放任务
+            task = {
+                'name': f"快传插播: {filename}",
+                'type': 'audio',
+                'audio_type': 'single',
+                'content': filepath,
+                'volume': '100',
+                'interval_type': 'first',
+                'interval_first': '1',
+                'delay': 'ontime'
+            }
+            self.log(f"正在播放局域网快传文件: {filename}")
+            self.playback_command_queue.put(('PLAY_INTERRUPT', (task, "manual_upload")))
+        else:
+            self.log(f"已接收文件但不播放: {filename}")
+            messagebox.showinfo("提示", f"文件已保存至：\n{filepath}", parent=self.root)
+
     def _run_flask_server(self, port):
-        """后台运行的 Flask Web 服务器 (修复语音列表版)"""
+        """后台运行的 Flask Web 服务器 (集成WiFi快传 + 修正插播次数)"""
         try:
             from flask import Flask, jsonify, render_template_string, request, Response
             from functools import wraps
@@ -3492,11 +3520,12 @@ class TimedBroadcastApp:
 
         app = Flask(__name__)
         
+        # 禁用 Flask 的默认控制台日志，保持主界面清爽
         import logging
         log = logging.getLogger('werkzeug')
         log.setLevel(logging.ERROR)
 
-        # --- 1. 权限验证装饰器 (保持不变) ---
+        # --- 1. 权限验证装饰器 ---
         def check_auth(username, password):
             return username == self.settings.get('remote_username') and \
                    password == self.settings.get('remote_password')
@@ -3518,152 +3547,216 @@ class TimedBroadcastApp:
                 return f(*args, **kwargs)
             return decorated
 
-        # --- 2. 前端 HTML 模板 (核心修改：JS动态加载语音) ---
+        # --- 2. 前端 HTML 模板 (含 WiFi 快传 + 1次播放修改) ---
         html_template = """
         <!DOCTYPE html>
         <html>
         <head>
             <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
             <title>移动播控台</title>
             <style>
-                :root { --primary: #007bff; --danger: #dc3545; --success: #28a745; --bg: #f4f6f9; --card: #ffffff; }
+                :root { --primary: #007bff; --danger: #dc3545; --success: #28a745; --warning: #ffc107; --info: #17a2b8; --bg: #f4f6f9; --card: #ffffff; }
                 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); margin: 0; padding: 15px; color: #333; }
-                .container { max-width: 1000px; margin: 0 auto; }
-                @media (min-width: 800px) { .grid-layout { display: grid; grid-template-columns: 1fr 1.2fr; gap: 20px; } }
-                .card { background: var(--card); border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 15px; }
+                .container { max-width: 800px; margin: 0 auto; }
+                .card { background: var(--card); border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 15px; }
                 h2 { margin-top: 0; font-size: 1.1rem; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; color: #555; }
-                .status-box { background: #e9ecef; padding: 12px; border-radius: 8px; text-align: center; margin-bottom: 15px; font-weight: bold; color: #495057; font-size: 0.9rem; }
-                .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; color: white; cursor: pointer; margin-bottom: 10px; -webkit-tap-highlight-color: transparent; }
+                .status-box { background: #e9ecef; padding: 12px; border-radius: 8px; text-align: center; margin-bottom: 15px; font-weight: bold; font-size: 1rem; color: #495057; }
+                
+                .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; color: white; cursor: pointer; margin-bottom: 10px; transition: 0.2s; -webkit-tap-highlight-color: transparent; }
+                .btn:active { transform: scale(0.98); opacity: 0.9; }
+                .btn:disabled { background: #ccc !important; cursor: not-allowed; }
+                
                 .btn-danger { background: var(--danger); }
                 .btn-success { background: var(--success); }
                 .btn-primary { background: var(--primary); }
+                .btn-warning { background: var(--warning); color: #212529; }
                 .btn-outline { background: transparent; border: 2px solid var(--primary); color: var(--primary); }
-                select, input, textarea { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; margin-bottom: 10px; font-family: inherit; }
-                textarea { resize: vertical; min-height: 80px; }
+                
+                select, input[type="text"], textarea { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; margin-bottom: 10px; font-family: inherit; }
+                input[type="file"] { margin-bottom: 10px; width: 100%; padding: 10px; border: 1px dashed #ccc; border-radius: 8px; }
+                
                 .row { display: flex; gap: 10px; }
                 .col { flex: 1; }
-                label { display: block; margin-bottom: 5px; font-size: 0.9rem; color: #666; }
                 .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; padding: 10px 20px; border-radius: 20px; display: none; z-index: 9999; font-size: 14px; }
+                
+                .progress-container { width: 100%; background-color: #f0f0f0; border-radius: 4px; margin-bottom: 10px; display: none; }
+                .progress-bar { width: 0%; height: 6px; background-color: #28a745; border-radius: 4px; transition: width 0.3s; }
             </style>
         </head>
         <body>
             <div class="toast" id="toast">操作成功</div>
             <div class="container">
-                <div class="grid-layout">
-                    <div class="left-panel">
-                        <div class="card">
-                            <h2>📡 状态与控制</h2>
-                            <div class="status-box" id="status_text">连接中...</div>
-                            <div class="row">
-                                <button class="btn btn-danger col" onclick="api('stop')">⏹ 停止</button>
-                                <button class="btn btn-outline col" onclick="api('mute')" id="mute_btn">🔇 静音</button>
-                            </div>
-                        </div>
-                        <div class="card">
-                            <h2>▶️ 节目点播</h2>
-                            <select id="task_select">
-                                {% for task in tasks %}
-                                <option value="{{ task.name }}">{{ task.name }}</option>
-                                {% endfor %}
-                            </select>
-                            <button class="btn btn-success" onclick="playSelected()">立即插队播放</button>
-                        </div>
-                    </div>
-                    <div class="right-panel">
-                        <div class="card">
-                            <h2>💬 实时语音插播</h2>
-                            <textarea id="tts_text" placeholder="在此输入通知内容..."></textarea>
-                            <div class="row">
-                                <div class="col">
-                                    <label>播音员 (本地)</label>
-                                    <select id="tts_voice">
-                                        <option value="">加载中...</option>
-                                    </select>
-                                </div>
-                                <div class="col">
-                                    <label>播放次数</label>
-                                    <input type="number" id="tts_repeat" value="2" min="1" max="10">
-                                </div>
-                            </div>
-                            <button class="btn btn-primary" onclick="sendTTS()">🚀 发送语音插播</button>
-                        </div>
+                
+                <!-- 状态与控制 -->
+                <div class="card">
+                    <h2>📡 状态与控制</h2>
+                    <div class="status-box" id="status_text">连接中...</div>
+                    <div class="row">
+                        <button class="btn btn-danger col" onclick="api('stop')">⏹ 停止播放</button>
+                        <button class="btn btn-outline col" onclick="api('mute')" id="mute_btn">🔇 一键静音</button>
                     </div>
                 </div>
+
+                <!-- WiFi 快传 (新增) -->
+                <div class="card">
+                    <h2>📂 局域网文件快传</h2>
+                    <input type="file" id="fileInput" accept=".mp3,.wav,.ogg,.flac,.m4a">
+                    <div class="progress-container" id="progressWrap">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+                    <button class="btn btn-warning" onclick="uploadFile()" id="uploadBtn">🚀 上传并提示播放</button>
+                    <div style="font-size:12px; color:#999; text-align:center;">支持 MP3/WAV 等格式，上传后需电脑端确认</div>
+                </div>
+
+                <!-- 语音插播 -->
+                <div class="card">
+                    <h2>💬 实时语音插播</h2>
+                    <textarea id="tts_text" rows="3" placeholder="在此输入通知内容..."></textarea>
+                    <div class="row">
+                        <div class="col">
+                            <select id="tts_voice"><option>加载语音...</option></select>
+                        </div>
+                        <!-- 修改：这里不需要输入次数了，默认就是1次 -->
+                        <button class="btn btn-primary col" onclick="sendTTS()">立即插播</button>
+                    </div>
+                </div>
+
+                <!-- 节目点播 -->
+                <div class="card">
+                    <h2>▶️ 节目点播</h2>
+                    <select id="task_select">
+                        {% for task in tasks %}
+                        <option value="{{ task.name }}">{{ task.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <button class="btn btn-success" onclick="playSelected()">立即插队播放</button>
+                </div>
+
             </div>
+
             <script>
-                function showToast(msg) {
-                    const t = document.getElementById('toast');
-                    t.innerText = msg;
-                    t.style.display = 'block';
-                    setTimeout(() => t.style.display = 'none', 2500);
+                const toast = document.getElementById('toast');
+                function showToast(msg) { 
+                    toast.innerText = msg; 
+                    toast.style.display = 'block'; 
+                    setTimeout(() => toast.style.display = 'none', 2500); 
                 }
+
                 function api(action, data={}) {
                     fetch('/api/' + action, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify(data)
-                    }).then(res => {
-                        if(res.status === 401) { location.reload(); return; }
-                        if(res.status === 503) { showToast("服务已暂停"); return; }
-                        return res.json();
-                    }).then(res => {
-                        if(res) { showToast(res.message); updateStatus(); }
-                    }).catch(err => showToast("连接失败"));
+                    }).then(r => {
+                        if(r.status === 401) { location.reload(); return; }
+                        return r.json();
+                    }).then(d => { 
+                        showToast(d.message); 
+                        updateStatus(); 
+                    }).catch(() => showToast("连接失败"));
                 }
+
+                // --- 文件上传逻辑 ---
+                function uploadFile() {
+                    const fileInput = document.getElementById('fileInput');
+                    const file = fileInput.files[0];
+                    if (!file) return showToast("请先选择文件");
+                    if (file.size > 100 * 1024 * 1024) return showToast("文件过大 (限100MB)");
+
+                    const btn = document.getElementById('uploadBtn');
+                    const pWrap = document.getElementById('progressWrap');
+                    const pBar = document.getElementById('progressBar');
+
+                    btn.disabled = true;
+                    btn.innerText = "正在上传...";
+                    pWrap.style.display = 'block';
+                    pBar.style.width = '0%';
+
+                    const formData = new FormData();
+                    formData.append('file', file);
+
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', '/api/upload_file', true);
+
+                    xhr.upload.onprogress = function(e) {
+                        if (e.lengthComputable) {
+                            const percent = (e.loaded / e.total) * 100;
+                            pBar.style.width = percent + '%';
+                        }
+                    };
+
+                    xhr.onload = function() {
+                        btn.disabled = false;
+                        btn.innerText = "🚀 上传并提示播放";
+                        setTimeout(() => { pWrap.style.display = 'none'; pBar.style.width = '0%'; }, 1000);
+
+                        if (xhr.status === 200) {
+                            const resp = JSON.parse(xhr.responseText);
+                            if (resp.success) {
+                                showToast("✅ 上传成功，请在电脑端确认");
+                                fileInput.value = ''; 
+                            } else {
+                                showToast("❌ " + resp.message);
+                            }
+                        } else {
+                            showToast("❌ 上传出错");
+                        }
+                    };
+
+                    xhr.onerror = function() {
+                        btn.disabled = false;
+                        btn.innerText = "🚀 上传并提示播放";
+                        showToast("❌ 网络错误");
+                    };
+
+                    xhr.send(formData);
+                }
+
+                // --- 其他逻辑 ---
                 function playSelected() {
                     const name = document.getElementById('task_select').value;
-                    if(!name) return;
-                    if(confirm('确定要立即播放 "' + name + '" 吗？')) { api('play', {name: name}); }
+                    if(confirm('确定要播放 "' + name + '" 吗？')) api('play', {name: name});
                 }
+
                 function sendTTS() {
                     const text = document.getElementById('tts_text').value;
-                    if(!text) return alert("请输入内容");
+                    if(!text) return showToast("请输入内容");
                     const voice = document.getElementById('tts_voice').value;
-                    const repeat = document.getElementById('tts_repeat').value;
-                    api('intercut', { text: text, voice_name: voice, repeat: parseInt(repeat) });
+                    // 修改：强制 repeat 为 1
+                    api('intercut', { text: text, voice_name: voice, repeat: 1 });
                 }
+
                 function updateStatus() {
-                    fetch('/api/status').then(res => res.json()).then(data => {
-                        document.getElementById('status_text').innerText = data.status;
-                        const muteBtn = document.getElementById('mute_btn');
-                        if(data.is_muted) {
-                            muteBtn.innerText = "🔈 取消静音";
-                            muteBtn.style.background = "#ffc107";
-                            muteBtn.style.color = "#000";
-                            muteBtn.style.border = "none";
+                    fetch('/api/status').then(r => r.json()).then(d => {
+                        document.getElementById('status_text').innerText = d.status;
+                        const btn = document.getElementById('mute_btn');
+                        if(d.is_muted) {
+                            btn.innerText = "🔈 取消静音";
+                            btn.style.background = "#ffc107";
+                            btn.style.border = "none";
+                            btn.style.color = "#000";
                         } else {
-                            muteBtn.innerText = "🔇 一键静音";
-                            muteBtn.style.background = "transparent";
-                            muteBtn.style.color = "#007bff";
-                            muteBtn.style.border = "2px solid #007bff";
+                            btn.innerText = "🔇 一键静音";
+                            btn.style.background = "transparent";
+                            btn.style.border = "2px solid #007bff";
+                            btn.style.color = "#007bff";
                         }
-                    }).catch(e => {});
+                    }).catch(() => {});
                 }
-                
-                // --- 新增：加载真实语音列表 ---
+
                 function loadVoices() {
-                    fetch('/api/voices').then(res => res.json()).then(data => {
-                        const select = document.getElementById('tts_voice');
-                        select.innerHTML = "";
-                        if (data.voices.length === 0) {
-                            const option = document.createElement('option');
-                            option.text = "无本地语音";
-                            select.add(option);
-                        } else {
-                            data.voices.forEach(v => {
-                                const option = document.createElement('option');
-                                option.value = v;
-                                option.text = v;
-                                select.add(option);
-                            });
-                        }
+                    fetch('/api/voices').then(r => r.json()).then(d => {
+                        const sel = document.getElementById('tts_voice');
+                        sel.innerHTML = "";
+                        if(d.voices.length === 0) sel.add(new Option("无本地语音", ""));
+                        d.voices.forEach(v => sel.add(new Option(v, v)));
                     });
                 }
 
                 setInterval(updateStatus, 3000);
                 updateStatus();
-                loadVoices(); // 页面加载时获取语音列表
+                loadVoices();
             </script>
         </body>
         </html>
@@ -3677,11 +3770,9 @@ class TimedBroadcastApp:
             valid_tasks = [t for t in self.tasks if t.get('status') == '启用']
             return render_template_string(html_template, tasks=valid_tasks)
 
-        # --- 新增：获取本地语音列表接口 ---
         @app.route('/api/voices')
         @requires_auth
         def api_voices():
-            # 调用主程序已有的方法获取 SAPI 列表
             voices = self.get_available_voices()
             return jsonify({'voices': voices})
 
@@ -3722,11 +3813,10 @@ class TimedBroadcastApp:
         def api_intercut():
             data = request.json
             text = data.get('text')
-            # 这里接收的是前端传来的真实语音名称
             voice_name = data.get('voice_name') 
+            # 修改：默认为1，如果前端没传也为1
             repeat = data.get('repeat', 1)
             
-            # 构造任务数据
             task_data = {
                 'text': text,
                 'params': {'voice': voice_name, 'speed': '0', 'pitch': '0', 'volume': '100'},
@@ -3739,6 +3829,43 @@ class TimedBroadcastApp:
                 self.intercut_queue.put(task_data)
             
             return jsonify({'message': '插播指令已发送'})
+
+        # --- 新增：文件上传处理 ---
+        @app.route('/api/upload_file', methods=['POST'])
+        @requires_auth
+        def api_upload_file():
+            if 'file' not in request.files:
+                return jsonify({'success': False, 'message': '无文件数据'})
+            
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({'success': False, 'message': '未选择文件'})
+            
+            if file:
+                try:
+                    original_name = file.filename
+                    # 安全文件名处理
+                    safe_name = re.sub(r'[\\/*?:"<>|]', "", original_name)
+                    if not safe_name: safe_name = f"upload_{int(time.time())}.mp3"
+                    
+                    save_path = os.path.join(AUDIO_FOLDER, safe_name)
+                    
+                    # 避免重名覆盖
+                    if os.path.exists(save_path):
+                        name, ext = os.path.splitext(safe_name)
+                        save_path = os.path.join(AUDIO_FOLDER, f"{name}_{int(time.time())}{ext}")
+                    
+                    file.save(save_path)
+                    
+                    # 调用主线程回调 (需要在 Main Class 中定义 _handle_uploaded_file)
+                    self.root.after(0, lambda: self._handle_uploaded_file(save_path, original_name))
+                    
+                    return jsonify({'success': True, 'message': '上传成功'})
+                except Exception as e:
+                    self.log(f"WiFi快传失败: {e}")
+                    return jsonify({'success': False, 'message': str(e)})
+            
+            return jsonify({'success': False, 'message': '未知错误'})
 
         try:
             app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
