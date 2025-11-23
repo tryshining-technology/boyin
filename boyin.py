@@ -186,21 +186,21 @@ EDGE_TTS_VOICES = {
     '在线-台湾-曉雨 (女)': 'zh-TW-HsiaoYuNeural',
 }
 
-#便利贴代码
+# 便利贴代码
 class StickyNote:
-    # 修复1：增加 on_state_change 参数
     def __init__(self, root, settings_dict, on_state_change=None):
         self.root = root
         self.settings = settings_dict
-        self.on_state_change = on_state_change  # 修复2：保存回调函数
+        self.on_state_change = on_state_change
         self.window = None
         self.text_widget = None
         self.is_visible = False
         
-        # 颜色配置
-        self.BG_COLOR = '#fdfdca'
-        self.BAR_COLOR = '#fbfb75'
-        self.FONT_COLOR = '#4a4a4a'
+        # --- [修改] Win7 经典黄色风格配色 ---
+        self.BG_COLOR = '#fef79e'   # 暖黄色背景
+        self.BAR_COLOR = '#ede47b'  # 稍深一点的标题栏
+        self.FONT_COLOR = '#4a4a4a' # 深灰色文字，比纯黑更柔和
+        self.SELECT_BG = '#d1c658'  # 选中文本的背景色
         
         # 文件路径
         self.note_file = os.path.join(application_path, "sticky_note.txt")
@@ -241,56 +241,57 @@ class StickyNote:
         
         self.window.geometry(f"{w}x{h}+{x}+{y}")
 
+        # 获取全局字体设置
+        app_font_family = self.settings.get("app_font", "Microsoft YaHei")
+        
         # --- 顶部拖拽条 ---
+        # 使用更深的黄色作为标题栏
         header = tk.Frame(self.window, bg=self.BAR_COLOR, height=30, cursor="fleur")
         header.pack(fill=tk.X, side=tk.TOP)
         header.pack_propagate(False)
         
-        title_lbl = tk.Label(header, text=" + 便利贴", bg=self.BAR_COLOR, fg="#888", font=("Arial", 10, "bold"))
+        # 使用全局字体
+        header_font = (app_font_family, 10, "bold")
+        # 标题栏文字颜色稍微深一点，增加质感
+        title_lbl = tk.Label(header, text=" + 便利贴", bg=self.BAR_COLOR, fg="#555", font=header_font)
         title_lbl.pack(side=tk.LEFT, padx=10)
 
         # 关闭按钮
-        close_btn = tk.Label(header, text="×", bg=self.BAR_COLOR, fg="#888", font=("Arial", 16), cursor="hand2")
+        close_btn = tk.Label(header, text="×", bg=self.BAR_COLOR, fg="#666", font=("Arial", 16), cursor="hand2")
         close_btn.pack(side=tk.RIGHT, padx=10)
         close_btn.bind("<Button-1>", lambda e: self.hide())
         close_btn.bind("<Enter>", lambda e: close_btn.config(fg="red"))
-        close_btn.bind("<Leave>", lambda e: close_btn.config(fg="#888"))
+        close_btn.bind("<Leave>", lambda e: close_btn.config(fg="#666"))
 
         # --- 内容文本框 ---
-        app_font_family = self.settings.get("app_font", "Microsoft YaHei")
         note_font = (app_font_family, 14)
 
         self.text_widget = tk.Text(self.window, bg=self.BG_COLOR, fg=self.FONT_COLOR,
                                    font=note_font, bd=0, undo=True, padx=10, pady=5,
-                                   selectbackground="#ffe793", selectforeground="black")
+                                   selectbackground=self.SELECT_BG, selectforeground="white")
         self.text_widget.pack(fill=tk.BOTH, expand=True)
         self.text_widget.insert('1.0', self.content)
         
         # --- 右下角手柄 ---
-        grip = tk.Label(self.window, text="◢", bg=self.BG_COLOR, fg="#dcdca0", cursor="sizing")
+        # 手柄颜色调深一点，让它可见但又不突兀
+        grip = tk.Label(self.window, text="◢", bg=self.BG_COLOR, fg="#e0d060", cursor="sizing")
         grip.place(relx=1.0, rely=1.0, x=0, y=0, anchor="se")
 
-        # --- 事件绑定 (核心逻辑) ---
-        # 1. 移动
+        # --- 事件绑定 ---
         for widget in [header, title_lbl]:
             widget.bind("<Button-1>", self._start_move)
             widget.bind("<B1-Motion>", self._on_move)
             widget.bind("<ButtonRelease-1>", self._save_geometry)
-            # 右键菜单绑定到 header
             widget.bind("<Button-3>", self._show_context_menu)
         
-        # 2. 调整大小
         grip.bind("<Button-1>", self._start_resize)
         grip.bind("<B1-Motion>", self._on_resize)
         grip.bind("<ButtonRelease-1>", self._save_geometry)
 
-        # 3. 文本框绑定
         self.text_widget.bind("<KeyRelease>", self._auto_save_text)
-        self.text_widget.bind("<Button-3>", self._show_context_menu) # 文本框也要支持右键
+        self.text_widget.bind("<Button-3>", self._show_context_menu)
         
         self.is_visible = True
-        
-        # 修复3：显示时调用回调，更新主界面按钮状态
         if self.on_state_change:
             self.on_state_change(True)
 
@@ -307,24 +308,24 @@ class StickyNote:
         """弹出透明度调节滑块"""
         slider_win = tk.Toplevel(self.window)
         slider_win.title("透明度")
-        slider_win.geometry("250x80")
+        
+        # 窗口高度增加到 120，防止文字被切
+        slider_win.geometry("250x120")
+        
         slider_win.resizable(False, False)
         slider_win.attributes('-topmost', True)
         slider_win.transient(self.window)
         
-        # 计算位置：显示在鼠标附近
         x = self.window.winfo_pointerx()
         y = self.window.winfo_pointery()
         slider_win.geometry(f"+{x}+{y}")
 
-        # 30% - 100% 的滑块
         scale = ttk.Scale(slider_win, from_=30, to=100, value=self.current_alpha * 100, command=lambda v: self._update_alpha(v))
         scale.pack(fill=tk.X, padx=20, pady=(20, 5))
         
         lbl = ttk.Label(slider_win, text=f"当前: {int(self.current_alpha * 100)}%")
         lbl.pack(pady=5)
 
-        # 动态更新 Label 和 透明度
         def on_change(val):
             alpha_val = float(val) / 100.0
             self._update_alpha(alpha_val)
@@ -333,13 +334,10 @@ class StickyNote:
         scale.config(command=on_change)
 
     def _update_alpha(self, val_float):
-        """实时应用透明度并保存"""
-        # 确保不低于 0.3 (30%)
         final_alpha = max(0.3, min(1.0, float(val_float) if val_float <= 1.0 else float(val_float)/100.0))
         self.current_alpha = final_alpha
         if self.window:
             self.window.attributes('-alpha', final_alpha)
-        # 实时保存到设置
         self.settings['note_alpha'] = final_alpha
 
     def _clear_content(self):
@@ -353,8 +351,6 @@ class StickyNote:
             self.window.destroy()
             self.window = None
         self.is_visible = False
-        
-        # 修复4：隐藏时调用回调，更新主界面按钮状态
         if self.on_state_change:
             self.on_state_change(False)
 
@@ -404,7 +400,7 @@ class StickyNote:
         new_w = max(150, self._rw + delta_w)
         new_h = max(100, self._rh + delta_h)
         self.window.geometry(f"{new_w}x{new_h}")
-#便利贴代码结束
+# 便利贴代码结束
 
 #虚拟主播功能代码
 class VirtualAvatar:
