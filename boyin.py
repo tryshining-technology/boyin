@@ -196,7 +196,7 @@ EDGE_TTS_VOICES = {
     '在线-台湾-曉雨 (女)': 'zh-TW-HsiaoYuNeural',
 }
 
-# 便利贴代码 (Canvas 重构·绝对防白版)
+# 便利贴代码 (Win7 完美复刻版)
 class StickyNote:
     def __init__(self, root, settings_dict, on_state_change=None):
         self.root = root
@@ -206,15 +206,22 @@ class StickyNote:
         self.text_widget = None
         self.is_visible = False
         
-        # --- Win7 经典黄色配色 ---
-        self.BG_COLOR = '#fbfb76'   # 正文背景 (经典黄)
-        self.BAR_COLOR = '#fdfd96'  # 标题栏 (稍亮一点，营造层次感)
-        self.FONT_COLOR = '#404040' # 文字颜色
-        self.SELECT_BG = '#dcc855'  # 选中高亮
-        self.GRIP_FG = '#b5b500'    # 右下角手柄颜色 (深黄)
+        # --- [配色方案优化] 纯正 Win7 风格 ---
+        # 1. 标题栏：略深一点的黄色，用于提示这是可拖拽区域
+        self.BAR_COLOR = '#fbfb75' 
+        # 2. 正文背景：标准的便签黄
+        self.BG_COLOR = '#fdfd96'   
+        # 3. 字体颜色：深灰，模仿铅笔/墨水质感
+        self.FONT_COLOR = '#404040' 
+        # 4. 选中文本背景：深黄色高亮
+        self.SELECT_BG = '#dcc855'  
+        # 5. 右下角手柄符号颜色：深黄色 (背景色与正文保持一致)
+        self.GRIP_FG = '#d4d46a'    
         
+        # 文件路径
         self.note_file = os.path.join(application_path, "sticky_note.txt")
         
+        # 加载内容
         self.content = ""
         if os.path.exists(self.note_file):
             try:
@@ -249,82 +256,67 @@ class StickyNote:
         self.window.geometry(f"{w}x{h}+{x}+{y}")
 
         app_font_family = self.settings.get("app_font", "Microsoft YaHei")
+        
+        # --- 1. 顶部标题栏 (BAR_COLOR) ---
+        header = tk.Frame(self.window, bg=self.BAR_COLOR, height=28, cursor="fleur", highlightthickness=0)
+        header.pack(fill=tk.X, side=tk.TOP)
+        header.pack_propagate(False)
+        
         header_font = (app_font_family, 10, "bold")
-        note_font = (app_font_family, 14)
-        
-        # --- 1. 标题栏 (改用 Canvas) ---
-        # Canvas 绝对不会被主题覆盖背景色
-        self.header_canvas = tk.Canvas(self.window, bg=self.BAR_COLOR, height=28, 
-                                       highlightthickness=0, cursor="fleur")
-        self.header_canvas.pack(fill=tk.X, side=tk.TOP)
-        
-        # 绘制标题文字
-        self.header_canvas.create_text(10, 14, text="+ 便利贴", fill="#555", 
-                                       anchor="w", font=header_font, tags="move_tag")
-        
-        # 绘制关闭按钮 X
-        # 既然是画出来的，我们可以控制它的点击区域
-        self.close_btn_id = self.header_canvas.create_text(w-15, 14, text="×", fill="#666", 
-                                                           font=("Arial", 18), anchor="center", tags="close_tag")
+        # 标题文字颜色设为深灰，融合感更强
+        title_lbl = tk.Label(header, text=" + 便利贴", bg=self.BAR_COLOR, fg="#777", font=header_font)
+        title_lbl.pack(side=tk.LEFT, padx=8)
 
-        # --- 2. 内容区域 (Text) ---
+        # 关闭按钮
+        close_btn = tk.Label(header, text="×", bg=self.BAR_COLOR, fg="#777", font=("Arial", 16), cursor="hand2")
+        close_btn.pack(side=tk.RIGHT, padx=10)
+        # 鼠标悬停变红，离开变回深灰
+        close_btn.bind("<Button-1>", lambda e: self.hide())
+        close_btn.bind("<Enter>", lambda e: close_btn.config(fg="#e81123")) 
+        close_btn.bind("<Leave>", lambda e: close_btn.config(fg="#777"))
+
+        # --- 2. 内容区域 (BG_COLOR) ---
+        note_font = (app_font_family, 14)
+
         self.text_widget = tk.Text(self.window, 
                                    bg=self.BG_COLOR, 
                                    fg=self.FONT_COLOR,
                                    font=note_font, 
                                    bd=0, 
-                                   highlightthickness=0, 
+                                   highlightthickness=0, # 彻底去除边框
                                    undo=True, 
                                    padx=15, pady=10,
                                    selectbackground=self.SELECT_BG, 
                                    selectforeground="white")
         self.text_widget.pack(fill=tk.BOTH, expand=True)
         self.text_widget.insert('1.0', self.content)
+        self.text_widget.configure(bg=self.BG_COLOR) # 双重保险
         
-        # --- 3. 右下角手柄 (改用 Canvas) ---
-        # 创建一个透明(即背景色相同)的小画布放在右下角
-        self.grip_canvas = tk.Canvas(self.window, bg=self.BG_COLOR, width=16, height=16, 
-                                     highlightthickness=0, cursor="sizing")
-        self.grip_canvas.place(relx=1.0, rely=1.0, anchor="se")
+        # --- 3. 右下角手柄 (背景透明化处理) ---
+        # 技巧：Background 设为 BG_COLOR，Foreground (符号) 设为深黄 GRIP_FG
+        # 这样看起来就像是纸张背景上的一个印记，没有方形色块
+        grip = tk.Label(self.window, text="◢", bg=self.BG_COLOR, fg=self.GRIP_FG, cursor="sizing", font=("Arial", 14))
         
-        # 画出三角形符号
-        self.grip_canvas.create_text(8, 8, text="◢", fill=self.GRIP_FG, font=("Arial", 12))
+        # 使用 place 放置在绝对右下角，不占用 Text 控件空间
+        grip.place(relx=1.0, rely=1.0, x=-2, y=-2, anchor="se")
 
         # --- 事件绑定 ---
+        for widget in [header, title_lbl]:
+            widget.bind("<Button-1>", self._start_move)
+            widget.bind("<B1-Motion>", self._on_move)
+            widget.bind("<ButtonRelease-1>", self._save_geometry)
+            widget.bind("<Button-3>", self._show_context_menu)
         
-        # 移动逻辑 (绑定到整个Header Canvas)
-        self.header_canvas.bind("<Button-1>", self._start_move)
-        self.header_canvas.bind("<B1-Motion>", self._on_move)
-        self.header_canvas.bind("<ButtonRelease-1>", self._save_geometry)
-        self.header_canvas.bind("<Button-3>", self._show_context_menu)
+        grip.bind("<Button-1>", self._start_resize)
+        grip.bind("<B1-Motion>", self._on_resize)
+        grip.bind("<ButtonRelease-1>", self._save_geometry)
 
-        # 关闭按钮逻辑 (手动检测点击坐标，或者简单点直接绑定点击事件)
-        # 这里为了简单，直接绑定 Canvas 的点击，但在回调里判断是不是点到了 X
-        self.header_canvas.tag_bind("close_tag", "<Button-1>", lambda e: self.hide())
-        self.header_canvas.tag_bind("close_tag", "<Enter>", lambda e: self.header_canvas.itemconfig(self.close_btn_id, fill="#e81123"))
-        self.header_canvas.tag_bind("close_tag", "<Leave>", lambda e: self.header_canvas.itemconfig(self.close_btn_id, fill="#666"))
-        
-        # 调整大小逻辑
-        self.grip_canvas.bind("<Button-1>", self._start_resize)
-        self.grip_canvas.bind("<B1-Motion>", self._on_resize)
-        self.grip_canvas.bind("<ButtonRelease-1>", self._save_geometry)
-
-        # 文本框逻辑
         self.text_widget.bind("<KeyRelease>", self._auto_save_text)
         self.text_widget.bind("<Button-3>", self._show_context_menu)
         
-        # 窗口大小改变时，更新关闭按钮位置
-        self.window.bind("<Configure>", self._on_window_resize)
-
         self.is_visible = True
         if self.on_state_change:
             self.on_state_change(True)
-
-    def _on_window_resize(self, event):
-        # 仅当宽度改变时，移动关闭按钮的位置
-        if event.widget == self.window:
-            w = self.window.winfo_width()
-            self.header_canvas.coords(self.close_btn_id, w-15, 14)
 
     def _show_context_menu(self, event):
         menu = tk.Menu(self.window, tearoff=0)
@@ -11382,7 +11374,7 @@ class TimedBroadcastApp:
         
         def reset_ui():
             # 恢复按钮初始状态
-            self.quick_record_btn.config(text="🎙️ 即录即播", bootstyle="secondary-outline", state=NORMAL)
+            self.quick_record_btn.config(text="🎤 即录即播", bootstyle="secondary-outline", state=NORMAL)
 
         # [规则] 小于3秒丢弃
         if duration < 3.0:
