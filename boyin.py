@@ -315,7 +315,16 @@ class MiniDashboard:
     def show(self):
         if self.window: return
         
-        # 1. 获取用户字体，统一字号为 10
+        # 1. 获取屏幕宽度
+        sw = self.app.root.winfo_screenwidth()
+
+        # --- [智能宽度] ---
+        if sw > 2000:
+            target_w = 330  # 4K/2K 宽一点
+        else:
+            target_w = 250  # 1080P 紧凑点
+        
+        # 获取用户字体
         current_font_family = self.app.settings.get("app_font", "Microsoft YaHei")
         self.unified_font = (current_font_family, 10) 
 
@@ -325,11 +334,9 @@ class MiniDashboard:
         self.window.attributes('-topmost', True)
         self.window.config(bg=self.COLOR_BG)
         
-        target_w = 260 
-        
         # --- UI 构建 ---
         
-        # 1. 顶部拖拽条
+        # 顶部拖拽条
         drag_bar = tk.Frame(self.window, bg=self.COLOR_BAR, height=30, cursor="fleur")
         drag_bar.pack(fill=X, side=TOP)
         drag_bar.pack_propagate(False)
@@ -340,7 +347,7 @@ class MiniDashboard:
         
         self._bind_drag_events(drag_bar)
 
-        # 2. 模拟时钟
+        # 模拟时钟
         clock_frame = tk.Frame(self.window, bg=self.COLOR_BG, pady=5)
         clock_frame.pack(fill=X)
         self.clock = AnalogClock(clock_frame, size=200, bg_color=self.COLOR_CLOCK_BG) 
@@ -348,20 +355,20 @@ class MiniDashboard:
         self.clock.draw_face()
         self.clock.start()
 
-        # 3. 日期显示 (格式：2025年11月24日 星期一)
+        # 日期显示
         self.date_label = tk.Label(self.window, text="", 
                                    font=self.unified_font,
                                    bg=self.COLOR_BG, fg=self.COLOR_TEXT)
         self.date_label.pack(fill=X, pady=(5, 0))
 
-        # 4. 天气信息
+        # 天气信息
         self.weather_label = tk.Label(self.window, text="获取天气中...", 
                                       font=self.unified_font, 
                                       bg=self.COLOR_BG, fg=self.COLOR_TEXT,
                                       wraplength=target_w - 20) 
         self.weather_label.pack(fill=X, pady=(2, 0), padx=10)
 
-        # 5. 播放信息
+        # 播放信息
         info_frame = tk.Frame(self.window, bg=self.COLOR_INFO_BG, padx=10, pady=8)
         info_frame.pack(fill=X, padx=15, pady=10)
         
@@ -371,7 +378,7 @@ class MiniDashboard:
                                    wraplength=target_w - 40)
         self.play_label.pack(fill=X)
 
-        # 6. 控制按钮
+        # 控制按钮
         btn_frame = tk.Frame(self.window, bg=self.COLOR_BG, pady=5)
         btn_frame.pack(fill=X, padx=5, pady=(0, 15))
         
@@ -392,11 +399,19 @@ class MiniDashboard:
                   relief="flat", font=self.unified_font,
                   command=self.restore_main).grid(row=0, column=2, sticky="ew", padx=3)
 
-        # --- 高度自适应 ---
+        # --- [智能高度计算] ---
         self.window.update_idletasks() 
         req_h = self.window.winfo_reqheight()
-        final_h = req_h + 50 
-        sw = self.app.root.winfo_screenwidth()
+        
+        # 根据屏幕宽度判断缓冲高度
+        if sw > 2000:
+            h_padding = 80  # 4K/2K 容易被切，多留点
+        else:
+            h_padding = 15  # 1080P 计算较准，稍微留一点即可
+            
+        final_h = req_h + h_padding
+        
+        # 位置
         x_pos = sw - target_w - 80 
         y_pos = 80
         self.window.geometry(f"{target_w}x{final_h}+{x_pos}+{y_pos}")
@@ -417,26 +432,21 @@ class MiniDashboard:
     def _update_info_loop(self):
         if not self.window or not self.window.winfo_exists(): return
         
-        # 实时获取设置的字体
         current_font = self.app.settings.get("app_font", "Microsoft YaHei")
         self.unified_font = (current_font, 10)
         
-        # 1. 更新日期 + 星期
         now = datetime.now()
         week_map = {"1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "日"}
         day_of_week = week_map.get(str(now.isoweekday()), '')
         
-        # 格式：2025年11月24日 星期一
         date_str = now.strftime(f'%Y年%m月%d日  星期{day_of_week}')
         self.date_label.config(text=date_str, font=self.unified_font)
 
-        # 2. 更新天气
         if hasattr(self.app, 'main_weather_label'):
             weather_text = self.app.main_weather_label.cget("text")
             weather_text = weather_text.replace("天气: ", "")
             self.weather_label.config(text=weather_text, font=self.unified_font)
         
-        # 3. 更新播放状态
         if hasattr(self.app, 'playing_label'):
             play_text = self.app.playing_label.cget("text")
             if "] " in play_text:
