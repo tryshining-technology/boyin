@@ -11704,7 +11704,7 @@ class TimedBroadcastApp:
         self.log("系统设置已加载。")
 
 #模拟模式按钮代码
-def _switch_to_mini_mode(self):
+    def _switch_to_mini_mode(self):
         """切换到迷你模式：隐藏主窗口，显示迷你悬浮窗"""
         self.root.withdraw() # 隐藏主窗口
         self.mini_dashboard.show() # 显示迷你窗
