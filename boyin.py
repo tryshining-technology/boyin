@@ -303,95 +303,103 @@ class MiniDashboard:
     def __init__(self, app_instance):
         self.app = app_instance
         self.window = None
-        self.bg_color = "#e0e0e0" 
-        self.fg_color = "#333333"
+        
+        # --- 🎨 莫兰迪灰蓝配色 ---
+        self.COLOR_BG = "#f1f2f6"       # 窗口主背景
+        self.COLOR_BAR = "#dfe4ea"      # 顶部拖拽条
+        self.COLOR_CLOCK_BG = "#ffffff" # 时钟表盘
+        self.COLOR_INFO_BG = "#ffffff"  # 信息框背景
+        self.COLOR_TEXT = "#2f3542"     # 主要文字
+        self.COLOR_ACCENT = "#57606f"   # 次要文字
 
     def show(self):
         if self.window: return
         
-        # 1. 获取用户字体
+        # 1. 获取用户字体，统一字号为 10
         current_font_family = self.app.settings.get("app_font", "Microsoft YaHei")
-        
-        # 定义样式
-        font_title = (current_font_family, 9)
-        font_weather = (current_font_family, 10, "bold")
-        font_info = (current_font_family, 9)
-        font_btn = (current_font_family, 9)
+        self.unified_font = (current_font_family, 10) 
 
         # 2. 创建窗口
         self.window = tk.Toplevel(self.app.root)
         self.window.overrideredirect(True)
         self.window.attributes('-topmost', True)
-        self.window.config(bg=self.bg_color)
+        self.window.config(bg=self.COLOR_BG)
         
         target_w = 260 
         
         # --- UI 构建 ---
         
-        # 顶部拖拽条
-        drag_bar = tk.Frame(self.window, bg="#bdc3c7", height=30, cursor="fleur")
+        # 1. 顶部拖拽条
+        drag_bar = tk.Frame(self.window, bg=self.COLOR_BAR, height=30, cursor="fleur")
         drag_bar.pack(fill=X, side=TOP)
         drag_bar.pack_propagate(False)
         
         title_lbl = tk.Label(drag_bar, text="::: 迷你模式 :::", 
-                             bg="#bdc3c7", fg="#2d3436", font=font_title)
+                             bg=self.COLOR_BAR, fg=self.COLOR_ACCENT, font=self.unified_font)
         title_lbl.pack(expand=True, fill=BOTH)
         
         self._bind_drag_events(drag_bar)
 
-        # 模拟时钟
-        clock_frame = tk.Frame(self.window, bg=self.bg_color, pady=10)
+        # 2. 模拟时钟
+        clock_frame = tk.Frame(self.window, bg=self.COLOR_BG, pady=5)
         clock_frame.pack(fill=X)
-        self.clock = AnalogClock(clock_frame, size=200, bg_color="#ffffff") 
+        self.clock = AnalogClock(clock_frame, size=200, bg_color=self.COLOR_CLOCK_BG) 
         self.clock.pack()
         self.clock.draw_face()
         self.clock.start()
 
-        # 天气信息
-        self.weather_label = tk.Label(self.window, text="获取天气中...", 
-                                      font=font_weather, 
-                                      bg=self.bg_color, fg=self.fg_color,
-                                      wraplength=target_w - 20) 
-        self.weather_label.pack(fill=X, pady=(5, 0), padx=10)
+        # 3. 日期显示 (格式：2025年11月24日 星期一)
+        self.date_label = tk.Label(self.window, text="", 
+                                   font=self.unified_font,
+                                   bg=self.COLOR_BG, fg=self.COLOR_TEXT)
+        self.date_label.pack(fill=X, pady=(5, 0))
 
-        # 播放信息
-        info_frame = tk.Frame(self.window, bg="#dcdcdc", padx=10, pady=8)
+        # 4. 天气信息
+        self.weather_label = tk.Label(self.window, text="获取天气中...", 
+                                      font=self.unified_font, 
+                                      bg=self.COLOR_BG, fg=self.COLOR_TEXT,
+                                      wraplength=target_w - 20) 
+        self.weather_label.pack(fill=X, pady=(2, 0), padx=10)
+
+        # 5. 播放信息
+        info_frame = tk.Frame(self.window, bg=self.COLOR_INFO_BG, padx=10, pady=8)
         info_frame.pack(fill=X, padx=15, pady=10)
         
         self.play_label = tk.Label(info_frame, text="待机中", 
-                                   font=font_info, 
-                                   bg="#dcdcdc", fg="#0056b3", 
+                                   font=self.unified_font, 
+                                   bg=self.COLOR_INFO_BG, fg="#1e90ff", 
                                    wraplength=target_w - 40)
         self.play_label.pack(fill=X)
 
-        # 控制按钮 (直接硬编码 Emoji)
-        btn_frame = tk.Frame(self.window, bg=self.bg_color, pady=5)
+        # 6. 控制按钮
+        btn_frame = tk.Frame(self.window, bg=self.COLOR_BG, pady=5)
         btn_frame.pack(fill=X, padx=5, pady=(0, 15))
         
         btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
         btn_frame.columnconfigure(2, weight=1)
         
-        tk.Button(btn_frame, text="⏹ 停止", bg="#ff7675", fg="white", 
-                  relief="flat", font=font_btn,
-                  command=self.app.stop_current_playback).grid(row=0, column=0, sticky="ew", padx=2)
+        tk.Button(btn_frame, text="⏹ 停止", bg="#ff6b6b", fg="white", 
+                  relief="flat", font=self.unified_font,
+                  command=self.app.stop_current_playback).grid(row=0, column=0, sticky="ew", padx=3)
         
-        self.mute_btn = tk.Button(btn_frame, text="🔇 静音", bg="#74b9ff", fg="white", 
-                                  relief="flat", font=font_btn,
+        self.mute_btn = tk.Button(btn_frame, text="🔇 静音", bg="#54a0ff", fg="white", 
+                                  relief="flat", font=self.unified_font,
                                   command=self.toggle_mute_proxy)
-        self.mute_btn.grid(row=0, column=1, sticky="ew", padx=2)
+        self.mute_btn.grid(row=0, column=1, sticky="ew", padx=3)
         
         tk.Button(btn_frame, text="❐ 恢复", bg="#a29bfe", fg="white", 
-                  relief="flat", font=font_btn,
-                  command=self.restore_main).grid(row=0, column=2, sticky="ew", padx=2)
+                  relief="flat", font=self.unified_font,
+                  command=self.restore_main).grid(row=0, column=2, sticky="ew", padx=3)
 
-        # 自适应高度
+        # --- 高度自适应 ---
         self.window.update_idletasks() 
         req_h = self.window.winfo_reqheight()
+        final_h = req_h + 50 
         sw = self.app.root.winfo_screenwidth()
         x_pos = sw - target_w - 80 
         y_pos = 80
-        self.window.geometry(f"{target_w}x{req_h}+{x_pos}+{y_pos}")
+        self.window.geometry(f"{target_w}x{final_h}+{x_pos}+{y_pos}")
 
         self._update_info_loop()
 
@@ -403,26 +411,37 @@ class MiniDashboard:
 
     def toggle_mute_proxy(self):
         self.app.toggle_mute_all()
-        current_font = self.app.settings.get("app_font", "Microsoft YaHei")
-        # 直接使用 Emoji
         txt = "🔈 有声" if self.app.is_muted else "🔇 静音"
-        self.mute_btn.config(text=txt, font=(current_font, 9))
+        self.mute_btn.config(text=txt, font=self.unified_font)
 
     def _update_info_loop(self):
         if not self.window or not self.window.winfo_exists(): return
         
+        # 实时获取设置的字体
         current_font = self.app.settings.get("app_font", "Microsoft YaHei")
+        self.unified_font = (current_font, 10)
         
+        # 1. 更新日期 + 星期
+        now = datetime.now()
+        week_map = {"1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "日"}
+        day_of_week = week_map.get(str(now.isoweekday()), '')
+        
+        # 格式：2025年11月24日 星期一
+        date_str = now.strftime(f'%Y年%m月%d日  星期{day_of_week}')
+        self.date_label.config(text=date_str, font=self.unified_font)
+
+        # 2. 更新天气
         if hasattr(self.app, 'main_weather_label'):
             weather_text = self.app.main_weather_label.cget("text")
             weather_text = weather_text.replace("天气: ", "")
-            self.weather_label.config(text=weather_text, font=(current_font, 10, "bold"))
+            self.weather_label.config(text=weather_text, font=self.unified_font)
         
+        # 3. 更新播放状态
         if hasattr(self.app, 'playing_label'):
             play_text = self.app.playing_label.cget("text")
             if "] " in play_text:
                 play_text = play_text.split("] ")[1]
-            self.play_label.config(text=play_text, font=(current_font, 9))
+            self.play_label.config(text=play_text, font=self.unified_font)
             
         self.window.after(1000, self._update_info_loop)
 
