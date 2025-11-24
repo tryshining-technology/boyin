@@ -298,96 +298,104 @@ class AnalogClock(tk.Canvas):
         self.after(1000, self.update_clock)
 
 
-# --- [修改版] 迷你模式窗口管理器 (DPI 智能倍率版) ---
+# --- 迷你模式窗口管理器 ---
 class MiniDashboard:
     def __init__(self, app_instance):
         self.app = app_instance
         self.window = None
-        
-        # [修改 3] 底色加深，不再是惨白，改成更有质感的深灰
         self.bg_color = "#e0e0e0" 
         self.fg_color = "#333333"
 
     def show(self):
         if self.window: return
         
-        sw = self.app.root.winfo_screenwidth()
+        # 1. 获取用户字体
+        current_font_family = self.app.settings.get("app_font", "Microsoft YaHei")
         
-        # [修改 2] 移除手动 DPI 计算，防止双重缩放导致爆版
-        # 设定一个更宽的逻辑尺寸，确保三个按钮能放下
-        win_w, win_h = 260, 420 
-        
+        # 定义样式
+        font_title = (current_font_family, 9)
+        font_weather = (current_font_family, 10, "bold")
+        font_info = (current_font_family, 9)
+        font_btn = (current_font_family, 9)
+
+        # 2. 创建窗口
         self.window = tk.Toplevel(self.app.root)
         self.window.overrideredirect(True)
         self.window.attributes('-topmost', True)
         self.window.config(bg=self.bg_color)
         
-        # 位置默认在右上角
-        self.window.geometry(f"{win_w}x{win_h}+{sw-win_w-50}+50")
+        target_w = 260 
         
         # --- UI 构建 ---
         
-        # 1. 顶部拖拽条 (加高一点，方便点击)
+        # 顶部拖拽条
         drag_bar = tk.Frame(self.window, bg="#bdc3c7", height=30, cursor="fleur")
         drag_bar.pack(fill=X, side=TOP)
-        drag_bar.pack_propagate(False) # 固定高度
+        drag_bar.pack_propagate(False)
         
-        title_lbl = tk.Label(drag_bar, text="::: 迷你模式 (按住拖动) :::", bg="#bdc3c7", fg="#2d3436", font=("Microsoft YaHei", 9))
+        title_lbl = tk.Label(drag_bar, text="::: 迷你模式 :::", 
+                             bg="#bdc3c7", fg="#2d3436", font=font_title)
         title_lbl.pack(expand=True, fill=BOTH)
         
-        # [修改 1] 递归绑定拖拽事件，确保点文字也能拖
         self._bind_drag_events(drag_bar)
 
-        # 2. 模拟时钟 (白色背景，与灰色窗口形成反差)
+        # 模拟时钟
         clock_frame = tk.Frame(self.window, bg=self.bg_color, pady=10)
         clock_frame.pack(fill=X)
-        # 时钟大小设为 200，适配加宽的窗口
         self.clock = AnalogClock(clock_frame, size=200, bg_color="#ffffff") 
         self.clock.pack()
         self.clock.draw_face()
         self.clock.start()
 
-        # 3. 天气信息
+        # 天气信息
         self.weather_label = tk.Label(self.window, text="获取天气中...", 
-                                      font=("Microsoft YaHei", 10, "bold"), 
-                                      bg=self.bg_color, fg=self.fg_color)
-        self.weather_label.pack(fill=X, pady=(5, 0))
+                                      font=font_weather, 
+                                      bg=self.bg_color, fg=self.fg_color,
+                                      wraplength=target_w - 20) 
+        self.weather_label.pack(fill=X, pady=(5, 0), padx=10)
 
-        # 4. 播放信息 (增加高度和宽度限制)
+        # 播放信息
         info_frame = tk.Frame(self.window, bg="#dcdcdc", padx=10, pady=8)
         info_frame.pack(fill=X, padx=15, pady=10)
         
         self.play_label = tk.Label(info_frame, text="待机中", 
-                                   font=("Microsoft YaHei", 9), 
+                                   font=font_info, 
                                    bg="#dcdcdc", fg="#0056b3", 
-                                   wraplength=220) # 限制换行宽度，防止撑开
+                                   wraplength=target_w - 40)
         self.play_label.pack(fill=X)
 
-        # 5. 控制按钮 (改用 Grid 布局，保证三个按钮平均分布，不会被切掉)
+        # 控制按钮 (直接硬编码 Emoji)
         btn_frame = tk.Frame(self.window, bg=self.bg_color, pady=5)
-        btn_frame.pack(fill=X, padx=5, pady=10)
+        btn_frame.pack(fill=X, padx=5, pady=(0, 15))
         
-        # 配置 Grid 列权重，让它们平分宽度
         btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
         btn_frame.columnconfigure(2, weight=1)
         
-        btn_font = ("Microsoft YaHei", 9)
-        
-        tk.Button(btn_frame, text="⏹ 停止", bg="#ff7675", fg="white", relief="flat", font=btn_font,
+        tk.Button(btn_frame, text="⏹ 停止", bg="#ff7675", fg="white", 
+                  relief="flat", font=font_btn,
                   command=self.app.stop_current_playback).grid(row=0, column=0, sticky="ew", padx=2)
         
-        self.mute_btn = tk.Button(btn_frame, text="🔇 静音", bg="#74b9ff", fg="white", relief="flat", font=btn_font,
-                  command=self.toggle_mute_proxy)
+        self.mute_btn = tk.Button(btn_frame, text="🔇 静音", bg="#74b9ff", fg="white", 
+                                  relief="flat", font=font_btn,
+                                  command=self.toggle_mute_proxy)
         self.mute_btn.grid(row=0, column=1, sticky="ew", padx=2)
         
-        tk.Button(btn_frame, text="❐ 恢复", bg="#a29bfe", fg="white", relief="flat", font=btn_font,
+        tk.Button(btn_frame, text="❐ 恢复", bg="#a29bfe", fg="white", 
+                  relief="flat", font=font_btn,
                   command=self.restore_main).grid(row=0, column=2, sticky="ew", padx=2)
+
+        # 自适应高度
+        self.window.update_idletasks() 
+        req_h = self.window.winfo_reqheight()
+        sw = self.app.root.winfo_screenwidth()
+        x_pos = sw - target_w - 80 
+        y_pos = 80
+        self.window.geometry(f"{target_w}x{req_h}+{x_pos}+{y_pos}")
 
         self._update_info_loop()
 
     def _bind_drag_events(self, widget):
-        """辅助函数：把拖动事件绑定到组件及其所有子组件"""
         widget.bind("<Button-1>", self.start_move)
         widget.bind("<B1-Motion>", self.do_move)
         for child in widget.winfo_children():
@@ -395,25 +403,26 @@ class MiniDashboard:
 
     def toggle_mute_proxy(self):
         self.app.toggle_mute_all()
+        current_font = self.app.settings.get("app_font", "Microsoft YaHei")
+        # 直接使用 Emoji
         txt = "🔈 有声" if self.app.is_muted else "🔇 静音"
-        self.mute_btn.config(text=txt)
+        self.mute_btn.config(text=txt, font=(current_font, 9))
 
     def _update_info_loop(self):
         if not self.window or not self.window.winfo_exists(): return
         
+        current_font = self.app.settings.get("app_font", "Microsoft YaHei")
+        
         if hasattr(self.app, 'main_weather_label'):
             weather_text = self.app.main_weather_label.cget("text")
             weather_text = weather_text.replace("天气: ", "")
-            # 简单截断防止太长
-            if len(weather_text) > 20: weather_text = weather_text[:20] + "..."
-            self.weather_label.config(text=weather_text)
+            self.weather_label.config(text=weather_text, font=(current_font, 10, "bold"))
         
         if hasattr(self.app, 'playing_label'):
             play_text = self.app.playing_label.cget("text")
-            # 去掉前缀，让显示更简洁
             if "] " in play_text:
                 play_text = play_text.split("] ")[1]
-            self.play_label.config(text=play_text)
+            self.play_label.config(text=play_text, font=(current_font, 9))
             
         self.window.after(1000, self._update_info_loop)
 
@@ -428,7 +437,6 @@ class MiniDashboard:
         self.y = event.y
 
     def do_move(self, event):
-        # 计算移动距离
         deltax = event.x - self.x
         deltay = event.y - self.y
         x = self.window.winfo_x() + deltax
@@ -1065,107 +1073,47 @@ class TimedBroadcastApp:
         self.mini_dashboard = MiniDashboard(self)
 
     def _apply_global_font(self):
-        # 1. 获取用户设置的字体 (通常是 "Microsoft YaHei")
-        user_font = self.settings.get("app_font", "Microsoft YaHei")
-        
-        # 2. 最终要应用的字体变量
-        final_font_family = user_font
-        
-        # --- Win7 专属兼容逻辑 ---
-        IS_WIN7 = False
+        font_name = self.settings.get("app_font", "Microsoft YaHei")
         try:
-            if sys.getwindowsversion().major < 10:
-                IS_WIN7 = True
-        except: pass
+            if font_name not in font.families():
+                #self.log(f"警告：字体 '{font_name}' 未在系统中找到，已回退至默认字体。")
+                font_name = "Microsoft YaHei"
+                self.settings["app_font"] = font_name
+        except Exception:
+            font_name = "Microsoft YaHei"
+        self.log(f"应用全局字体: {font_name}")
 
-        if IS_WIN7:
-            # 定义虚拟字体名称
-            composite_name = "Win7CompositeFont"
-            
-            # 获取系统所有可用字体列表
-            available_fonts = font.families()
-            
-            # 检查 Emoji 字体是否存在
-            has_emoji = "Segoe UI Emoji" in available_fonts
-            
-            # [核心修复1] Win7下，"Microsoft YaHei" 有时无法识别，需尝试映射为中文 "微软雅黑"
-            # 我们构建一个字体列表，Tcl 会按顺序尝试
-            font_candidates = []
-            
-            # 1. 用户选的字体 (如果是英文雅黑，尝试加中文雅黑)
-            font_candidates.append(f"{{{user_font}}}")
-            if user_font == "Microsoft YaHei" and "微软雅黑" in available_fonts:
-                font_candidates.append("{微软雅黑}")
-            
-            # 2. 备用中文字体 (防止前面的都挂了变成宋体)
-            if "Microsoft YaHei UI" in available_fonts:
-                font_candidates.append("{Microsoft YaHei UI}")
-            
-            # 3. Emoji 字体 (放在最后兜底)
-            if has_emoji:
-                font_candidates.append("{Segoe UI Emoji}")
-            
-            # 4. 最后的保底
-            font_candidates.append("{Arial}")
-
-            # 拼接成 Tcl 格式字符串: "{Microsoft YaHei} {微软雅黑} {Segoe UI Emoji}"
-            family_def = " ".join(font_candidates)
-            
-            try:
-                # 检查是否已存在，存在则配置，不存在则创建
-                if composite_name in self.root.tk.call("font", "names"):
-                    self.root.tk.call("font", "configure", composite_name, "-family", family_def)
-                    self.log(f"Win7字体补丁: 更新为 {family_def}")
-                else:
-                    self.root.tk.call("font", "create", composite_name, "-family", family_def)
-                    self.log(f"Win7字体补丁: 创建为 {family_def}")
-                
-                # 只有 Tcl 命令成功执行，才将最终字体指向这个虚拟字体
-                final_font_family = composite_name
-                
-            except Exception as e:
-                print(f"Win7字体设置失败: {e}")
-                # 如果失败，回退到用户设置的字体，保证至少能看
-                final_font_family = user_font
-
-        # --- 3. 应用字体设置 ---
-        self.log(f"正在应用字体: {final_font_family}")
-
-        self.font_8 = (final_font_family, 8)
-        self.font_9 = (final_font_family, 9)
-        self.font_10 = (final_font_family, 10)
-        self.font_11 = (final_font_family, 11)
-        self.font_11_bold = (final_font_family, 11, 'bold')
-        self.font_12 = (final_font_family, 12)
-        self.font_12_bold = (final_font_family, 12, 'bold')
-        self.font_13_bold = (final_font_family, 13, 'bold')
-        self.font_14_bold = (final_font_family, 14, 'bold')
-        self.font_22_bold = (final_font_family, 22, 'bold')
+        self.font_8 = (font_name, 8)
+        self.font_9 = (font_name, 9)
+        self.font_10 = (font_name, 10)
+        self.font_11 = (font_name, 11)
+        self.font_11_bold = (font_name, 11, 'bold')
+        self.font_12 = (font_name, 12)
+        self.font_12_bold = (font_name, 12, 'bold')
+        self.font_13_bold = (font_name, 13, 'bold')
+        self.font_14_bold = (font_name, 14, 'bold')
+        self.font_22_bold = (font_name, 22, 'bold')
 
         self.root.option_add("*Font", self.font_11)
-        
         style = ttk.Style.get_instance()
-        # 暴力覆盖所有常见样式
-        style.configure(".", font=self.font_11) 
         style.configure("TButton", font=self.font_11)
         style.configure("TLabel", font=self.font_11)
         style.configure("TCheckbutton", font=self.font_11)
         style.configure("TRadiobutton", font=self.font_11)
         style.configure("TCombobox", font=self.font_11)
         style.configure("TEntry", font=self.font_11)
-        style.configure("TLabelframe.Label", font=self.font_12_bold)
-        
         font_obj = font.Font(font=self.font_11)
         row_height = font_obj.metrics("linespace") + 10
         style.configure("Treeview", font=self.font_11, rowheight=row_height)
         style.configure("Treeview.Heading", font=self.font_11_bold)
-        
-        # 刷新 Text 组件
+        style.configure("TLabelframe.Label", font=self.font_12_bold)
+
         if hasattr(self, 'log_text') and self.log_text.winfo_exists():
              self.log_text.text.configure(font=self.font_11)
         
         if hasattr(self, 'sticky_note') and self.sticky_note.text_widget:
-             self.sticky_note.text_widget.configure(font=(final_font_family, 14))
+             # 便利贴字号大一点
+             self.sticky_note.text_widget.configure(font=(font_name, 14))
 
     def _save_to_registry(self, key_name, value):
         if not WIN32_AVAILABLE: return False
