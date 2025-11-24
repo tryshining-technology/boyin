@@ -298,19 +298,18 @@ class AnalogClock(tk.Canvas):
         self.after(1000, self.update_clock)
 
 
-# --- 迷你模式窗口管理器 ---
 class MiniDashboard:
     def __init__(self, app_instance):
         self.app = app_instance
         self.window = None
         
-        # --- 🎨 莫兰迪灰蓝配色 ---
-        self.COLOR_BG = "#f1f2f6"       # 窗口主背景
-        self.COLOR_BAR = "#dfe4ea"      # 顶部拖拽条
-        self.COLOR_CLOCK_BG = "#ffffff" # 时钟表盘
-        self.COLOR_INFO_BG = "#ffffff"  # 信息框背景
-        self.COLOR_TEXT = "#2f3542"     # 主要文字
-        self.COLOR_ACCENT = "#57606f"   # 次要文字
+        # --- 🎨 高级灰配色 (解决背景太白的问题) ---
+        self.COLOR_BG = "#dcdde1"       # 窗口背景 (明显的浅灰色)
+        self.COLOR_BAR = "#bdc3c7"      # 顶部拖拽条 (深一点的灰)
+        self.COLOR_CLOCK_BG = "#ffffff" # 时钟表盘 (纯白，形成反差)
+        self.COLOR_INFO_BG = "#ffffff"  # 信息框背景 (纯白卡片)
+        self.COLOR_TEXT = "#2f3640"     # 主要文字 (深黑灰)
+        self.COLOR_ACCENT = "#7f8fa6"   # 顶部标题文字颜色
 
     def show(self):
         if self.window: return
@@ -318,11 +317,11 @@ class MiniDashboard:
         # 1. 获取屏幕宽度
         sw = self.app.root.winfo_screenwidth()
 
-        # --- [智能宽度] ---
+        # [智能宽度]
         if sw > 2000:
-            target_w = 330  # 4K/2K 宽一点
+            target_w = 330
         else:
-            target_w = 250  # 1080P 紧凑点
+            target_w = 250
         
         # 获取用户字体
         current_font_family = self.app.settings.get("app_font", "Microsoft YaHei")
@@ -336,18 +335,18 @@ class MiniDashboard:
         
         # --- UI 构建 ---
         
-        # 顶部拖拽条
+        # 1. 顶部拖拽条
         drag_bar = tk.Frame(self.window, bg=self.COLOR_BAR, height=30, cursor="fleur")
         drag_bar.pack(fill=X, side=TOP)
         drag_bar.pack_propagate(False)
         
-        title_lbl = tk.Label(drag_bar, text="::: 迷你模式 :::", 
-                             bg=self.COLOR_BAR, fg=self.COLOR_ACCENT, font=self.unified_font)
+        title_lbl = tk.Label(drag_bar, text="::: 迷你模式 (按住拖动) :::", 
+                             bg=self.COLOR_BAR, fg="#2d3436", font=self.unified_font)
         title_lbl.pack(expand=True, fill=BOTH)
         
         self._bind_drag_events(drag_bar)
 
-        # 模拟时钟
+        # 2. 模拟时钟 (背景是纯白，外面是灰色)
         clock_frame = tk.Frame(self.window, bg=self.COLOR_BG, pady=5)
         clock_frame.pack(fill=X)
         self.clock = AnalogClock(clock_frame, size=200, bg_color=self.COLOR_CLOCK_BG) 
@@ -355,37 +354,21 @@ class MiniDashboard:
         self.clock.draw_face()
         self.clock.start()
 
-        # 日期显示
+        # 3. 日期显示
         self.date_label = tk.Label(self.window, text="", 
                                    font=self.unified_font,
                                    bg=self.COLOR_BG, fg=self.COLOR_TEXT)
-        self.date_label.pack(fill=X, pady=(5, 0))
+        self.date_label.pack(fill=X, pady=(5, 5))
 
-        # 天气信息
-        self.weather_label = tk.Label(self.window, text="获取天气中...", 
-                                      font=self.unified_font, 
-                                      bg=self.COLOR_BG, fg=self.COLOR_TEXT,
-                                      wraplength=target_w - 20) 
-        self.weather_label.pack(fill=X, pady=(2, 0), padx=10)
-
-        # 播放信息
-        info_frame = tk.Frame(self.window, bg=self.COLOR_INFO_BG, padx=10, pady=8)
-        info_frame.pack(fill=X, padx=15, pady=10)
-        
-        self.play_label = tk.Label(info_frame, text="待机中", 
-                                   font=self.unified_font, 
-                                   bg=self.COLOR_INFO_BG, fg="#1e90ff", 
-                                   wraplength=target_w - 40)
-        self.play_label.pack(fill=X)
-
-        # 控制按钮
+        # 4. [控制按钮] (位置：中间)
         btn_frame = tk.Frame(self.window, bg=self.COLOR_BG, pady=5)
-        btn_frame.pack(fill=X, padx=5, pady=(0, 15))
+        btn_frame.pack(fill=X, padx=5, pady=(0, 5))
         
         btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
         btn_frame.columnconfigure(2, weight=1)
         
+        # 按钮颜色保持鲜艳，以便在灰色背景上突出
         tk.Button(btn_frame, text="⏹ 停止", bg="#ff6b6b", fg="white", 
                   relief="flat", font=self.unified_font,
                   command=self.app.stop_current_playback).grid(row=0, column=0, sticky="ew", padx=3)
@@ -399,19 +382,34 @@ class MiniDashboard:
                   relief="flat", font=self.unified_font,
                   command=self.restore_main).grid(row=0, column=2, sticky="ew", padx=3)
 
-        # --- [智能高度计算] ---
+        # 5. 天气信息
+        self.weather_label = tk.Label(self.window, text="获取天气中...", 
+                                      font=self.unified_font, 
+                                      bg=self.COLOR_BG, fg=self.COLOR_TEXT,
+                                      wraplength=target_w - 20) 
+        self.weather_label.pack(fill=X, pady=(2, 0), padx=10)
+
+        # 6. 播放信息 (纯白卡片，带 padding)
+        info_frame = tk.Frame(self.window, bg=self.COLOR_INFO_BG, padx=10, pady=8)
+        info_frame.pack(fill=X, padx=15, pady=(10, 15))
+        
+        self.play_label = tk.Label(info_frame, text="待机中", 
+                                   font=self.unified_font, 
+                                   bg=self.COLOR_INFO_BG, fg="#1e90ff", 
+                                   wraplength=target_w - 40)
+        self.play_label.pack(fill=X)
+
+        # --- 高度自适应 ---
         self.window.update_idletasks() 
         req_h = self.window.winfo_reqheight()
         
-        # 根据屏幕宽度判断缓冲高度
         if sw > 2000:
-            h_padding = 80  # 4K/2K 容易被切，多留点
+            h_padding = 80 
         else:
-            h_padding = 15  # 1080P 计算较准，稍微留一点即可
+            h_padding = 15
             
         final_h = req_h + h_padding
         
-        # 位置
         x_pos = sw - target_w - 80 
         y_pos = 80
         self.window.geometry(f"{target_w}x{final_h}+{x_pos}+{y_pos}")
