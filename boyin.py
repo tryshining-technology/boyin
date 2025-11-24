@@ -6108,6 +6108,12 @@ class TimedBroadcastApp:
         scrollbar.pack(side=RIGHT, fill=Y)
         self.task_tree.configure(yscrollcommand=scrollbar.set)
 
+#新增冲突检测颜色
+        # 严重冲突 (准时 vs 准时): 浅红色背景
+        self.task_tree.tag_configure('conflict_severe', background='#ffe6e6') 
+        # 轻微冲突 (包含延时任务): 浅黄色背景
+        self.task_tree.tag_configure('conflict_warning', background='#fff9c4')
+
         self.task_tree.bind("<Button-3>", self.show_context_menu)
         self.task_tree.bind("<Double-1>", self.on_double_click_edit)
         self._enable_drag_selection(self.task_tree)
@@ -9434,65 +9440,141 @@ class TimedBroadcastApp:
 
         self.center_window(dialog, parent=self.root)
 
+#新增冲突检测核心代码
+    def _calculate_conflicts(self):
+        """
+        遍历任务列表，返回一个字典 {task_index: 'tag_name'}
+        仅检测“启用”状态的任务。
+        """
+        conflict_map = {} # 存储结构: {索引: 'conflict_severe' 或 'conflict_warning'}
+        active_indices = [i for i, t in enumerate(self.tasks) if t.get('status') == '启用']
+
+        for i in range(len(active_indices)):
+            idx_a = active_indices[i]
+            task_a = self.tasks[idx_a]
+            
+            for j in range(i + 1, len(active_indices)):
+                idx_b = active_indices[j]
+                task_b = self.tasks[idx_b]
+
+                # 1. [时间检测] 是否有相同的时间点?
+                times_a = set(t.strip() for t in task_a.get('time', '').split(',') if t.strip())
+                times_b = set(t.strip() for t in task_b.get('time', '').split(',') if t.strip())
+                if not times_a.intersection(times_b):
+                    continue # 时间无交集，绝对不冲突，跳过
+
+                # 2. [日期范围检测] 
+                # 简单逻辑：如果 A结束 < B开始 或 B结束 < A开始，则无交集
+                try:
+                    start_a, end_a = [d.strip() for d in task_a.get('date_range', '2000-01-01~2099-12-31').split('~')]
+                    start_b, end_b = [d.strip() for d in task_b.get('date_range', '2000-01-01~2099-12-31').split('~')]
+                    if end_a < start_b or end_b < start_a:
+                        continue # 日期无交集，跳过
+                except: pass # 格式错误时不跳过，保守处理视为可能冲突
+
+                # 3. [周/月规则检测]
+                rule_a = task_a.get('weekday', '')
+                rule_b = task_b.get('weekday', '')
+                
+                has_rule_overlap = False
+                # 如果类型相同（都是每周或都是每月）
+                if rule_a[:2] == rule_b[:2]: 
+                    # 提取数字部分求交集
+                    set_a = set(rule_a.split(':')[1].replace(',', '')) # 兼容 "12345" 和 "01,15"
+                    set_b = set(rule_b.split(':')[1].replace(',', ''))
+                    if set_a.intersection(set_b):
+                        has_rule_overlap = True
+                else:
+                    # 类型不同（一个每周一个每月），视为复杂情况，保守判定为冲突
+                    has_rule_overlap = True
+                
+                if not has_rule_overlap:
+                    continue
+
+                # --- 到这里说明：时间、日期、周期 三者都有交集！判定为冲突！---
+
+                # 4. [判定严重等级]
+                # 如果两个都是“准时”或“立即”，则谁也不让谁 -> 严重 (红)
+                # 如果其中有一个是“延时”，说明可以排队 -> 警告 (黄)
+                # 注意：动态语音(dynamic_voice)默认视为准时任务处理
+                delay_a = task_a.get('delay', 'ontime')
+                delay_b = task_b.get('delay', 'ontime')
+                
+                is_severe = (delay_a != 'delay') and (delay_b != 'delay')
+                
+                tag = 'conflict_severe' if is_severe else 'conflict_warning'
+
+                # 记录冲突 (红色优先级高于黄色)
+                if conflict_map.get(idx_a) != 'conflict_severe':
+                    conflict_map[idx_a] = tag
+                if conflict_map.get(idx_b) != 'conflict_severe':
+                    conflict_map[idx_b] = tag
+
+        return conflict_map
+
     def update_task_list(self):
         if not hasattr(self, 'task_tree') or not self.task_tree.winfo_exists(): return
+        
+        # 1. 先计算所有冲突
+        conflict_map = self._calculate_conflicts()
+
         selection = self.task_tree.selection()
         self.task_tree.delete(*self.task_tree.get_children())
-        for task in self.tasks:
+        
+        for index, task in enumerate(self.tasks):
             task_type = task.get('type')
 
+            # --- 原有的内容格式化逻辑 (保持不变) ---
             if task_type == 'bell_schedule':
                 name = "🔔 " + task.get('name', '铃声计划')
                 time_count = len(task.get('generated_times', []))
                 content_preview = f"包含 {time_count} 个时间点"
-                self.task_tree.insert('', END, values=(
-                    name,
-                    task.get('status', ''),
-                    "多个",
-                    "准时",
-                    content_preview,
-                    task.get('volume', ''),
-                    task.get('weekday', ''),
-                    task.get('date_range', '')
-                ))
+                # 打铃计划通常包含多个时间点，暂不参与单点冲突高亮，或者你可以让它参与
+                # 这里为了简单，如果打铃计划本身被标记冲突，也显示
             else:
+                name = task.get('name', '')
                 content = task.get('content', '')
                 content_preview = "" 
                 
-                # --- ↓↓↓ 核心修改：增加对自定义列表的显示支持 ↓↓↓ ---
                 if task.get('audio_type') == 'playlist':
                     count = len(task.get('custom_playlist', []))
                     content_preview = f"自定义列表 (共 {count} 首)"
-                # --- ↑↑↑ 修改结束 ---
-                
                 elif task_type == 'voice':
                     source_text = task.get('source_text', '')
                     clean_content = source_text.replace('\n', ' ').replace('\r', '')
                     content_preview = (clean_content[:30] + '...') if len(clean_content) > 30 else clean_content
-                elif content: # 对 audio (single/folder) 和 video 类型生效
+                elif content:
                     is_url = content.lower().startswith(('http://', 'https://', 'rtsp://', 'rtmp://', 'mms://'))
                     if is_url:
                         content_preview = (content[:40] + '...') if len(content) > 40 else content
                     else:
                         content_preview = os.path.basename(content)
 
-                display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
-                self.task_tree.insert('', END, values=(
-                    task.get('name', ''),
-                    task.get('status', ''),
-                    task.get('time', ''),
-                    display_mode,
-                    content_preview, 
-                    task.get('volume', ''),
-                    task.get('weekday', ''),
-                    task.get('date_range', '')
-                ))
+            display_mode = "准时" if task.get('delay') == 'ontime' else "延时"
+            
+            # --- ↓↓↓ [修改] 获取该行的冲突标签 ↓↓↓ ---
+            row_tags = ()
+            if index in conflict_map:
+                row_tags = (conflict_map[index],)
+            # -------------------------------------
+
+            self.task_tree.insert('', END, values=(
+                name, # 使用上面处理过的 name 变量
+                task.get('status', ''),
+                task.get('time', ''),
+                display_mode,
+                content_preview, 
+                task.get('volume', ''),
+                task.get('weekday', ''),
+                task.get('date_range', '')
+            ), tags=row_tags) # <--- 关键：把 tags 传进去
 
         if selection:
             try:
                 valid_selection = [s for s in selection if self.task_tree.exists(s)]
                 if valid_selection: self.task_tree.selection_set(valid_selection)
             except tk.TclError: pass
+            
         self.stats_label.config(text=f"节目单：{len(self.tasks)}")
         if hasattr(self, 'status_labels'): self.status_labels[3].config(text=f"任务数量: {len(self.tasks)}")
 
