@@ -433,23 +433,50 @@ class MiniDashboard:
         current_font = self.app.settings.get("app_font", "Microsoft YaHei")
         self.unified_font = (current_font, 10)
         
+        # 1. 日期
         now = datetime.now()
         week_map = {"1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "日"}
         day_of_week = week_map.get(str(now.isoweekday()), '')
-        
         date_str = now.strftime(f'%Y年%m月%d日  星期{day_of_week}')
         self.date_label.config(text=date_str, font=self.unified_font)
 
+        # 2. 天气
         if hasattr(self.app, 'main_weather_label'):
             weather_text = self.app.main_weather_label.cget("text")
             weather_text = weather_text.replace("天气: ", "")
             self.weather_label.config(text=weather_text, font=self.unified_font)
         
+        # 3. 播放信息 (最简逻辑版)
         if hasattr(self.app, 'playing_label'):
-            play_text = self.app.playing_label.cget("text")
-            if "] " in play_text:
-                play_text = play_text.split("] ")[1]
-            self.play_label.config(text=play_text, font=self.unified_font)
+            full_text = self.app.playing_label.cget("text")
+            display_text = full_text
+            
+            if "] " in full_text:
+                try:
+                    # 分割："[任务名]" 和 "内容..."
+                    parts = full_text.split("] ", 1)
+                    task_name_raw = parts[0].replace("[", "")
+                    content_part = parts[1]
+                    
+                    # 清理内容后缀 (去掉 " (播放中)" 等状态词)
+                    if " (" in content_part:
+                        content_part = content_part.rsplit(" (", 1)[0]
+                    
+                    # 默认显示内容(文件名)，并只取文件名部分，不显示路径
+                    display_text = os.path.basename(content_part)
+                    
+                    # 去列表查找任务类型
+                    for t in self.app.tasks:
+                        if t.get('name') == task_name_raw:
+                            t_type = t.get('type')
+                            # 只有这三种类型，强制显示任务名，其他都显示文件名
+                            if t_type in ['voice', 'dynamic_voice', 'bell_schedule']:
+                                display_text = f"[{task_name_raw}]"
+                            break
+                            
+                except: pass
+
+            self.play_label.config(text=display_text, font=self.unified_font)
             
         self.window.after(1000, self._update_info_loop)
 
