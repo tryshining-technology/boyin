@@ -196,6 +196,268 @@ EDGE_TTS_VOICES = {
     '在线-台湾-曉雨 (女)': 'zh-TW-HsiaoYuNeural',
 }
 
+#迷你模式时钟组件
+class AnalogClock(tk.Canvas):
+    def __init__(self, parent, size=200, bg_color="#ffffff", **kwargs):
+        # size 是逻辑尺寸，我们不需要在这里乘倍率，因为 Canvas 的缩放由外部控制
+        super().__init__(parent, width=size, height=size, bg=bg_color, highlightthickness=0, **kwargs)
+        self.logical_size = size
+        self.center_x = size // 2
+        self.center_y = size // 2
+        # 半径留边距
+        self.radius = self.center_x - (10 * 1) # 这里的1是基础倍率，稍后绘图时会自动处理
+        self.running = False
+
+    def start(self):
+        self.running = True
+        self.update_clock()
+
+    def stop(self):
+        self.running = False
+
+    def draw_face(self):
+        # 重新获取当前的实际宽高（因为 pack 可能会调整大小）
+        w = self.winfo_width()
+        h = self.winfo_height()
+        # 如果窗口还没显示，用传入的尺寸
+        if w <= 1: w = self.logical_size
+        if h <= 1: h = self.logical_size
+            
+        self.center_x = w // 2
+        self.center_y = h // 2
+        self.radius = min(self.center_x, self.center_y) - 5
+
+        self.delete("face") # 清除旧表盘
+        
+        # 表盘外圈
+        self.create_oval(self.center_x - self.radius, self.center_y - self.radius,
+                         self.center_x + self.radius, self.center_y + self.radius,
+                         width=2, outline="#bdc3c7", tags="face")
+        # 刻度
+        import math
+        for i in range(60):
+            angle = math.radians(i * 6 - 90)
+            if i % 5 == 0: # 整点
+                r1 = self.radius - 10
+                r2 = self.radius
+                width = 3
+            else: # 分刻度
+                r1 = self.radius - 5
+                r2 = self.radius
+                width = 1
+            x1 = self.center_x + r1 * math.cos(angle)
+            y1 = self.center_y + r1 * math.sin(angle)
+            x2 = self.center_x + r2 * math.cos(angle)
+            y2 = self.center_y + r2 * math.sin(angle)
+            self.create_line(x1, y1, x2, y2, width=width, fill="#7f8c8d", tags="face")
+
+    def update_clock(self):
+        if not self.running: return
+        self.delete("hands") 
+        
+        # 确保中心点正确（适应窗口大小变化）
+        w = self.winfo_width()
+        if w > 1:
+            self.center_x = w // 2
+            self.center_y = self.winfo_height() // 2
+            self.radius = min(self.center_x, self.center_y) - 5
+
+        now = datetime.now()
+        h = now.hour % 12
+        m = now.minute
+        s = now.second
+        
+        import math
+        sec_angle = math.radians(s * 6 - 90)
+        min_angle = math.radians(m * 6 + s * 0.1 - 90)
+        hour_angle = math.radians(h * 30 + m * 0.5 - 90)
+
+        # 指针长度比例
+        h_len = self.radius * 0.5
+        m_len = self.radius * 0.7
+        s_len = self.radius * 0.85
+
+        # 时针
+        self.create_line(self.center_x, self.center_y,
+                         self.center_x + h_len * math.cos(hour_angle),
+                         self.center_y + h_len * math.sin(hour_angle),
+                         width=5, fill="#2c3e50", capstyle=tk.ROUND, tags="hands")
+        # 分针
+        self.create_line(self.center_x, self.center_y,
+                         self.center_x + m_len * math.cos(min_angle),
+                         self.center_y + m_len * math.sin(min_angle),
+                         width=3, fill="#34495e", capstyle=tk.ROUND, tags="hands")
+        # 秒针
+        self.create_line(self.center_x, self.center_y,
+                         self.center_x + s_len * math.cos(sec_angle),
+                         self.center_y + s_len * math.sin(sec_angle),
+                         width=1, fill="#e74c3c", tags="hands")
+        # 中心点
+        self.create_oval(self.center_x-3, self.center_y-3, self.center_x+3, self.center_y+3, fill="#e74c3c", outline="", tags="hands")
+
+        self.after(1000, self.update_clock)
+
+
+# --- [修改版] 迷你模式窗口管理器 (DPI 智能倍率版) ---
+class MiniDashboard:
+    def __init__(self, app_instance):
+        self.app = app_instance
+        self.window = None
+        self.bg_color = "#f0f0f0"
+        self.scale_factor = 1.0 # 默认倍率
+
+    def get_dpi_scale(self):
+        """计算当前屏幕的缩放倍率"""
+        try:
+            # 获取屏幕每英寸的像素点数
+            dpi = self.app.root.winfo_fpixels('1i')
+            # 标准是96 DPI，计算倍率
+            factor = dpi / 96.0
+            # 限制最小1.0，防止在低分屏变得太小
+            return max(1.0, factor)
+        except:
+            return 1.0
+
+    def show(self):
+        if self.window: return
+        
+        # 1. 获取智能缩放倍率
+        self.scale_factor = self.get_dpi_scale()
+        # 打印一下倍率方便调试（可选）
+        # print(f"Current DPI Scale: {self.scale_factor}")
+
+        # 2. 基础尺寸 (基于 1080P 100% 缩放设计的基准值)
+        base_w, base_h = 220, 380
+        base_clock_size = 180
+        
+        # 3. 应用倍率
+        # int() 确保像素是整数
+        win_w = int(base_w * self.scale_factor)
+        win_h = int(base_h * self.scale_factor)
+        clock_size = int(base_clock_size * self.scale_factor)
+        
+        # 字体大小不需要乘倍率，因为 Tkinter 的 point (负数) 字体会自动缩放
+        # 但为了保险，我们用 int(size) 微调，或者如果觉得字体小，可以手动乘一点点系数
+        # 这里我们假设 tkinter 的字体自适应工作正常，只微调布局间距
+        
+        sw = self.app.root.winfo_screenwidth()
+        
+        self.window = tk.Toplevel(self.app.root)
+        self.window.overrideredirect(True)
+        self.window.attributes('-topmost', True)
+        self.window.config(bg=self.bg_color)
+        
+        # 定位到右上角 (留出一点边距)
+        margin_right = int(100 * self.scale_factor)
+        margin_top = int(50 * self.scale_factor)
+        self.window.geometry(f"{win_w}x{win_h}+{sw-win_w-margin_right}+{margin_top}")
+        
+        # --- UI 构建 ---
+        
+        # 1. 顶部拖拽条
+        drag_bar_h = int(20 * self.scale_factor)
+        drag_bar = tk.Frame(self.window, bg="#dfe6e9", height=drag_bar_h, cursor="fleur")
+        drag_bar.pack(fill=X, side=TOP)
+        # 使用 font=("Arial", -12) 负数表示像素高度，确保跟随缩放
+        lbl_font_size = int(10 * self.scale_factor)
+        tk.Label(drag_bar, text="::: 迷你模式 :::", bg="#dfe6e9", fg="#636e72", 
+                 font=("Arial", lbl_font_size)).pack()
+        
+        drag_bar.bind("<Button-1>", self.start_move)
+        drag_bar.bind("<B1-Motion>", self.do_move)
+
+        # 2. 模拟时钟
+        # 给 Frame 一点 padding，让时钟不贴边
+        pad_y = int(5 * self.scale_factor)
+        clock_frame = tk.Frame(self.window, bg=self.bg_color, pady=pad_y)
+        clock_frame.pack(fill=X)
+        
+        self.clock = AnalogClock(clock_frame, size=clock_size, bg_color=self.bg_color)
+        self.clock.pack()
+        # 必须 update 一下让 Canvas 知道自己真实的大小，才能画准表盘
+        self.clock.update() 
+        self.clock.draw_face()
+        self.clock.start()
+
+        # 3. 天气信息
+        weather_font_size = int(10 * self.scale_factor)
+        self.weather_label = tk.Label(self.window, text="获取天气中...", 
+                                      font=("Microsoft YaHei", weather_font_size), 
+                                      bg=self.bg_color, fg="#2d3436")
+        self.weather_label.pack(fill=X, pady=(0, int(2 * self.scale_factor)))
+
+        # 4. 播放信息
+        info_pad = int(5 * self.scale_factor)
+        info_frame = tk.Frame(self.window, bg="#dfe6e9", padx=info_pad, pady=info_pad)
+        info_frame.pack(fill=X, padx=int(10 * self.scale_factor), pady=info_pad)
+        
+        play_font_size = int(9 * self.scale_factor)
+        self.play_label = tk.Label(info_frame, text="待机中", 
+                                   font=("Microsoft YaHei", play_font_size), 
+                                   bg="#dfe6e9", fg="#0984e3", 
+                                   wraplength=win_w - 30)
+        self.play_label.pack()
+
+        # 5. 控制按钮
+        btn_pady = int(15 * self.scale_factor)
+        btn_frame = tk.Frame(self.window, bg=self.bg_color, pady=btn_pady)
+        btn_frame.pack(fill=X)
+        
+        # 按钮字体
+        btn_font = ("Microsoft YaHei", int(9 * self.scale_factor))
+        
+        tk.Button(btn_frame, text="⏹ 停止", bg="#ff7675", fg="white", relief="flat", font=btn_font,
+                  command=self.app.stop_current_playback).pack(side=LEFT, padx=4, expand=True, fill=X)
+        
+        self.mute_btn = tk.Button(btn_frame, text="🔇 静音", bg="#74b9ff", fg="white", relief="flat", font=btn_font,
+                  command=self.toggle_mute_proxy)
+        self.mute_btn.pack(side=LEFT, padx=4, expand=True, fill=X)
+        
+        tk.Button(btn_frame, text="❐ 恢复", bg="#a29bfe", fg="white", relief="flat", font=btn_font,
+                  command=self.restore_main).pack(side=LEFT, padx=4, expand=True, fill=X)
+
+        self._update_info_loop()
+
+    def toggle_mute_proxy(self):
+        self.app.toggle_mute_all()
+        txt = "🔈 有声" if self.app.is_muted else "🔇 静音"
+        self.mute_btn.config(text=txt)
+
+    def _update_info_loop(self):
+        if not self.window or not self.window.winfo_exists(): return
+        
+        if hasattr(self.app, 'main_weather_label'):
+            weather_text = self.app.main_weather_label.cget("text")
+            weather_text = weather_text.replace("天气: ", "")
+            # 如果是小倍率且文字太长，简化显示
+            if self.scale_factor <= 1.2 and len(weather_text) > 15:
+                 try:
+                     parts = weather_text.split(' ')
+                     weather_text = f"{parts[0]} {parts[2]}" # 城市 + 温度
+                 except: pass
+            self.weather_label.config(text=weather_text)
+        
+        if hasattr(self.app, 'playing_label'):
+            play_text = self.app.playing_label.cget("text")
+            self.play_label.config(text=play_text)
+            
+        self.window.after(1000, self._update_info_loop)
+
+    def restore_main(self):
+        if self.clock: self.clock.stop()
+        if self.window: self.window.destroy()
+        self.window = None
+        self.app.root.deiconify() 
+
+    def start_move(self, event):
+        self.x = event.x
+        self.y = event.y
+
+    def do_move(self, event):
+        x = self.window.winfo_x() + (event.x - self.x)
+        y = self.window.winfo_y() + (event.y - self.y)
+        self.window.geometry(f"+{x}+{y}")
+
 # 便利贴代码 (Win7 完美复刻版)
 class StickyNote:
     def __init__(self, root, settings_dict, on_state_change=None):
@@ -823,41 +1085,102 @@ class TimedBroadcastApp:
         if self.auth_info['status'] == 'Trial':
             self.root.after(500, self.show_trial_nag_screen)
 
+        self.mini_dashboard = MiniDashboard(self)
+
     def _apply_global_font(self):
-        font_name = self.settings.get("app_font", "Microsoft YaHei")
+        # 1. 获取用户选择的目标字体（例如：微软雅黑、宋体、楷体...）
+        target_font_name = self.settings.get("app_font", "Microsoft YaHei")
+        
+        # 2. 默认情况下，最终应用的就是用户选的这个字体
+        final_font_family = target_font_name
+        
+        # --- Win7 兼容性处理 ---
+        IS_WIN7 = False
         try:
-            if font_name not in font.families():
-                #self.log(f"警告：字体 '{font_name}' 未在系统中找到，已回退至默认字体。")
-                font_name = "Microsoft YaHei"
-                self.settings["app_font"] = font_name
-        except Exception:
-            font_name = "Microsoft YaHei"
-        self.log(f"应用全局字体: {font_name}")
+            if sys.getwindowsversion().major < 10:
+                IS_WIN7 = True
+        except: pass
 
-        self.font_8 = (font_name, 8)
-        self.font_9 = (font_name, 9)
-        self.font_10 = (font_name, 10)
-        self.font_11 = (font_name, 11)
-        self.font_11_bold = (font_name, 11, 'bold')
-        self.font_12 = (font_name, 12)
-        self.font_12_bold = (font_name, 12, 'bold')
-        self.font_13_bold = (font_name, 13, 'bold')
-        self.font_14_bold = (font_name, 14, 'bold')
-        self.font_22_bold = (font_name, 22, 'bold')
+        if IS_WIN7:
+            # 定义虚拟字体的名称
+            composite_font_name = "Win7CompositeFont"
+            
+            # 检查系统中是否有 Segoe UI Emoji (黑白Emoji支持库)
+            # 注意：font.families() 在这里调用可能会有轻微延迟，但只在切换字体时发生，可以接受
+            system_fonts = font.families()
+            
+            if "Segoe UI Emoji" in system_fonts:
+                try:
+                    # 构造 Tcl 字体族列表： "{用户选的字体} {Segoe UI Emoji}"
+                    # 加上花括号是为了处理字体名称中有空格的情况
+                    new_family_def = f"{{{target_font_name}}} {{Segoe UI Emoji}}"
+                    
+                    # 检查这个虚拟字体是否已经存在
+                    current_defined_fonts = self.root.tk.call("font", "names")
+                    
+                    if composite_font_name in current_defined_fonts:
+                        # 【关键逻辑】如果已存在，就“更新”它的定义
+                        # 这样所有使用这个字体的组件会自动刷新成新字体，同时保留 Emoji
+                        self.root.tk.call("font", "configure", composite_font_name, "-family", new_family_def)
+                        self.log(f"Win7模式：已更新复合字体为 {new_family_def}")
+                    else:
+                        # 如果不存在，就“创建”它
+                        self.root.tk.call("font", "create", composite_font_name, "-family", new_family_def)
+                        self.log("Win7模式：已创建复合字体回退机制。")
+                    
+                    # 最终让界面使用的是这个“壳”的名字
+                    final_font_family = composite_font_name
+                    
+                except Exception as e:
+                    print(f"复合字体设置失败: {e}")
+                    # 失败了就回退到用户选的字体，放弃 Emoji
+                    final_font_family = target_font_name
+            else:
+                # 没装 Emoji 字体，也没办法，直接用用户选的
+                pass
 
+        # --- 3. 将最终确定的字体应用到全局变量 ---
+        self.log(f"应用全局字体: {target_font_name} (实际渲染: {final_font_family})")
+
+        self.font_8 = (final_font_family, 8)
+        self.font_9 = (final_font_family, 9)
+        self.font_10 = (final_font_family, 10)
+        self.font_11 = (final_font_family, 11)
+        self.font_11_bold = (final_font_family, 11, 'bold')
+        self.font_12 = (final_font_family, 12)
+        self.font_12_bold = (final_font_family, 12, 'bold')
+        self.font_13_bold = (final_font_family, 13, 'bold')
+        self.font_14_bold = (final_font_family, 14, 'bold')
+        self.font_22_bold = (final_font_family, 22, 'bold')
+
+        # --- 4. 刷新所有样式 ---
         self.root.option_add("*Font", self.font_11)
+        
         style = ttk.Style.get_instance()
+        style.configure(".", font=self.font_11) 
         style.configure("TButton", font=self.font_11)
         style.configure("TLabel", font=self.font_11)
         style.configure("TCheckbutton", font=self.font_11)
         style.configure("TRadiobutton", font=self.font_11)
         style.configure("TCombobox", font=self.font_11)
         style.configure("TEntry", font=self.font_11)
+        
         font_obj = font.Font(font=self.font_11)
         row_height = font_obj.metrics("linespace") + 10
         style.configure("Treeview", font=self.font_11, rowheight=row_height)
         style.configure("Treeview.Heading", font=self.font_11_bold)
         style.configure("TLabelframe.Label", font=self.font_12_bold)
+        
+        # [重要] 刷新非 ttk 组件 (Text 控件不会自动监听 style 变化，必须手动 config)
+        # 刷新日志框
+        if hasattr(self, 'log_text') and self.log_text.winfo_exists():
+             self.log_text.text.configure(font=self.font_11)
+        
+        # 刷新便利贴 (如果已打开)
+        if hasattr(self, 'sticky_note') and self.sticky_note.window and self.sticky_note.text_widget:
+             # 便利贴字号稍微大一点
+             note_font = (final_font_family, 14)
+             self.sticky_note.text_widget.configure(font=note_font)
 
     def _save_to_registry(self, key_name, value):
         if not WIN32_AVAILABLE: return False
@@ -6130,6 +6453,10 @@ class TimedBroadcastApp:
         self.clear_log_btn = ttk.Button(log_header_frame, text="🧹 清除日志", command=self.clear_log,
                                         bootstyle="secondary-outline")
         self.clear_log_btn.pack(side=LEFT, padx=5)
+        self.mini_mode_btn = ttk.Button(log_header_frame, text="🕒 迷你模式", 
+                                        command=self._switch_to_mini_mode,
+                                        bootstyle="secondary-outline")
+        self.mini_mode_btn.pack(side=LEFT, padx=5)
         self.note_btn = ttk.Button(log_header_frame, text="📝 便利贴", 
                                  command=lambda: self._toggle_sticky_note(),
                                  bootstyle="secondary-outline")
@@ -11376,7 +11703,14 @@ class TimedBroadcastApp:
             self.settings = defaults
         self.log("系统设置已加载。")
 
-#便利贴代码
+#模拟模式按钮代码
+def _switch_to_mini_mode(self):
+        """切换到迷你模式：隐藏主窗口，显示迷你悬浮窗"""
+        self.root.withdraw() # 隐藏主窗口
+        self.mini_dashboard.show() # 显示迷你窗
+        self.log("已切换到迷你模式。")
+
+#便利贴按钮代码
     def _on_sticky_note_state_change(self, is_visible):
         """当便利贴显示/隐藏时触发的回调"""
         if hasattr(self, 'note_btn'):
@@ -11390,7 +11724,7 @@ class TimedBroadcastApp:
         if hasattr(self, 'sticky_note'):
             self.sticky_note.toggle()
 
-#即录即播代码
+#即录即播按钮代码
     def _toggle_quick_record(self):
         if not PYAUDIO_AVAILABLE:
             messagebox.showerror("组件缺失", "未检测到 PyAudio 库，无法录音。\n请安装: pip install pyaudio", parent=self.root)
@@ -11528,7 +11862,7 @@ class TimedBroadcastApp:
             self.root.after(0, lambda: messagebox.showerror("保存失败", str(e), parent=self.root))
             self.root.after(0, reset_ui)
 
-#虚拟主播代码
+#虚拟主播按钮代码
     def _on_avatar_state_change(self, is_visible):
         """当虚拟主播显示/隐藏时触发的回调"""
         if hasattr(self, 'avatar_btn'):
