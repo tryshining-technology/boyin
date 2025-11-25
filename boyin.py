@@ -1,6 +1,6 @@
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
-from ttkbootstrap.scrolled import ScrolledText, ScrolledFrame
+from ttkbootstrap.widgets.scrolled import ScrolledText, ScrolledFrame
 from tkinter import messagebox, filedialog, simpledialog, font
 import tkinter as tk
 import subprocess
@@ -1440,7 +1440,7 @@ class TimedBroadcastApp:
         title_label.grid(row=0, column=0, sticky='w', pady=(0, 15))
 
         # --- 播音文字区域 ---
-        text_lf = ttk.LabelFrame(page_frame, text="播音文字", padding=10)
+        text_lf = ttk.Labelframe(page_frame, text="播音文字", padding=10)
         text_lf.grid(row=1, column=0, sticky='nsew')
         text_lf.columnconfigure(0, weight=1)
         text_lf.rowconfigure(0, weight=1)
@@ -1459,7 +1459,7 @@ class TimedBroadcastApp:
         ttk.Button(script_btn_frame, text="导出文稿", command=lambda: self._export_voice_script(content_text.text, None, self.root), bootstyle="outline").pack(side=LEFT, padx=10)
 
         # --- 播音员和参数设置 ---
-        params_lf = ttk.LabelFrame(page_frame, text="播音参数", padding=15)
+        params_lf = ttk.Labelframe(page_frame, text="播音参数", padding=15)
         params_lf.grid(row=2, column=0, sticky='ew', pady=15)
         params_lf.columnconfigure(1, weight=1)
 
@@ -1725,7 +1725,7 @@ class TimedBroadcastApp:
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
 
-        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
+        content_frame = ttk.Labelframe(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
         
@@ -1741,7 +1741,7 @@ class TimedBroadcastApp:
         interval_entry = ttk.Entry(content_frame, font=self.font_11)
         interval_entry.grid(row=2, column=1, sticky='w', pady=2)
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
+        time_frame = ttk.Labelframe(main_frame, text="时间", padding=15)
         time_frame.grid(row=1, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
         
@@ -2251,7 +2251,7 @@ class TimedBroadcastApp:
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
 
-        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
+        content_frame = ttk.Labelframe(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
         
@@ -2274,7 +2274,7 @@ class TimedBroadcastApp:
         args_entry.grid(row=2, column=1, columnspan=2, sticky='ew', padx=5, pady=2)
         ttk.Label(content_frame, text="(可选)", font=self.font_9, bootstyle="secondary").grid(row=3, column=1, sticky='w', padx=5)
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
+        time_frame = ttk.Labelframe(main_frame, text="时间", padding=15)
         time_frame.grid(row=1, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
         
@@ -2302,7 +2302,7 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=3, column=3, padx=5)
 
-        warning_frame = ttk.LabelFrame(main_frame, text="风险警告", padding=10, bootstyle="danger")
+        warning_frame = ttk.Labelframe(main_frame, text="风险警告", padding=10, bootstyle="danger")
         warning_frame.grid(row=2, column=0, sticky='ew', pady=10)
         ttk.Label(warning_frame, text="请确保您完全信任所要运行的程序。运行未知或恶意程序可能对计算机安全造成威胁。\n设置“停止时间”将强制终止进程，可能导致数据未保存或文件损坏。", 
                   bootstyle="inverse-danger", wraplength=550, justify=LEFT).pack(fill=X)
@@ -2482,7 +2482,7 @@ class TimedBroadcastApp:
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
 
-        content_frame = ttk.LabelFrame(main_frame, text="打印内容", padding=10)
+        content_frame = ttk.Labelframe(main_frame, text="打印内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
         
@@ -2519,7 +2519,7 @@ class TimedBroadcastApp:
         copies_entry.grid(row=3, column=1, sticky='w', padx=5, pady=5)
         copies_entry.insert(0, "1")
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间规则", padding=15)
+        time_frame = ttk.Labelframe(main_frame, text="时间规则", padding=15)
         time_frame.grid(row=1, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
         
@@ -2773,7 +2773,7 @@ class TimedBroadcastApp:
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
 
-        content_frame = ttk.LabelFrame(main_frame, text="备份设置", padding=10)
+        content_frame = ttk.Labelframe(main_frame, text="备份设置", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
         
@@ -2804,7 +2804,7 @@ class TimedBroadcastApp:
         ttk.Radiobutton(mode_frame, text="镜像 (完全同步，会删除多余文件)", variable=mode_var, value="mirror").pack(anchor='w')
         ttk.Radiobutton(mode_frame, text="增量 (只复制新增/修改，不删除)", variable=mode_var, value="incremental").pack(anchor='w')
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间规则", padding=15)
+        time_frame = ttk.Labelframe(main_frame, text="时间规则", padding=15)
         time_frame.grid(row=1, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
         
@@ -2986,7 +2986,7 @@ class TimedBroadcastApp:
         ttk.Label(container, text=desc_text, bootstyle="info").pack(fill=X, pady=(0, 15))
 
         # --- 功能1: 提取音频 ---
-        extract_lf = ttk.LabelFrame(container, text=" 1. 从视频中提取音频 ", padding=15)
+        extract_lf = ttk.Labelframe(container, text=" 1. 从视频中提取音频 ", padding=15)
         extract_lf.pack(fill=X, pady=10)
         extract_lf.columnconfigure(1, weight=1)
 
@@ -3012,7 +3012,7 @@ class TimedBroadcastApp:
         self.extract_status_label.grid(row=0, column=2)
 
         # --- 功能2: 转换视频格式 ---
-        convert_lf = ttk.LabelFrame(container, text=" 2. 转换视频格式为通用MP4 ", padding=15)
+        convert_lf = ttk.Labelframe(container, text=" 2. 转换视频格式为通用MP4 ", padding=15)
         convert_lf.pack(fill=X, pady=10)
         convert_lf.columnconfigure(1, weight=1)
 
@@ -3038,7 +3038,7 @@ class TimedBroadcastApp:
         self.convert_status_label.grid(row=0, column=2)
         
         # --- 功能3: 剪辑片段 ---
-        trim_lf = ttk.LabelFrame(container, text=" 3. 剪辑音视频片段 ", padding=15)
+        trim_lf = ttk.Labelframe(container, text=" 3. 剪辑音视频片段 ", padding=15)
         trim_lf.pack(fill=X, pady=10)
         trim_lf.columnconfigure(1, weight=1)
         
@@ -3342,7 +3342,7 @@ class TimedBroadcastApp:
         enable_check.pack(anchor="w", pady=10)
 
         # --- 更换规则 ---
-        rule_lf = ttk.LabelFrame(container, text="更换规则", padding=15)
+        rule_lf = ttk.Labelframe(container, text="更换规则", padding=15)
         rule_lf.pack(fill=X, pady=5)
         
         rule_frame = ttk.Frame(rule_lf)
@@ -3357,7 +3357,7 @@ class TimedBroadcastApp:
         ttk.Label(rule_frame, text="时自动更换壁纸。").pack(side=LEFT, padx=5)
 
         # --- 缓存管理 ---
-        cache_lf = ttk.LabelFrame(container, text="缓存管理", padding=15)
+        cache_lf = ttk.Labelframe(container, text="缓存管理", padding=15)
         cache_lf.pack(fill=X, pady=5)
         
         cache_frame = ttk.Frame(cache_lf)
@@ -3368,7 +3368,7 @@ class TimedBroadcastApp:
         ttk.Label(cache_frame, text="天前的壁纸缓存文件。").pack(side=LEFT, padx=5)
 
         # --- 手动操作 ---
-        manual_lf = ttk.LabelFrame(container, text="手动操作", padding=15)
+        manual_lf = ttk.Labelframe(container, text="手动操作", padding=15)
         manual_lf.pack(fill=X, pady=5)
         
         manual_frame = ttk.Frame(manual_lf)
@@ -3587,7 +3587,7 @@ class TimedBroadcastApp:
         ttk.Separator(container, orient=HORIZONTAL).pack(fill=X, pady=5, padx=10)
 
         # --- 计时设置 ---
-        timer_lf = ttk.LabelFrame(container, text="计时设置", padding=15)
+        timer_lf = ttk.Labelframe(container, text="计时设置", padding=15)
         timer_lf.pack(fill=X, pady=10, padx=10)
 
         mode_frame = ttk.Frame(timer_lf)
@@ -3610,7 +3610,7 @@ class TimedBroadcastApp:
         infinite_check.pack(anchor="w", pady=5, padx=5)
 
         # --- 显示与提醒设置 ---
-        options_lf = ttk.LabelFrame(container, text="附加选项", padding=15)
+        options_lf = ttk.Labelframe(container, text="附加选项", padding=15)
         options_lf.pack(fill=X, pady=10, padx=10)
 
         ttk.Checkbutton(options_lf, text="显示当前系统时间 (年月日星期)", variable=self.timer_show_clock_var, bootstyle="round-toggle").pack(anchor="w", pady=5)
@@ -3873,7 +3873,7 @@ class TimedBroadcastApp:
         container = scrolled.container
 
         # --- 区域 A: 状态显示 ---
-        status_lf = ttk.LabelFrame(container, text="服务状态", padding=15)
+        status_lf = ttk.Labelframe(container, text="服务状态", padding=15)
         status_lf.pack(fill=X, pady=10, padx=5)
         
         self.remote_status_label = ttk.Label(status_lf, text="🔴 服务未启动", font=self.font_14_bold, foreground="gray")
@@ -3883,7 +3883,7 @@ class TimedBroadcastApp:
         self.remote_url_label.pack(anchor='w', pady=(5, 0))
 
         # --- 区域 B: 基础配置 ---
-        config_lf = ttk.LabelFrame(container, text="基础配置", padding=15)
+        config_lf = ttk.Labelframe(container, text="基础配置", padding=15)
         config_lf.pack(fill=X, pady=10, padx=5)
         
         # 端口
@@ -3908,7 +3908,7 @@ class TimedBroadcastApp:
         self._toggle_remote_auth_ui() # 初始化输入框的禁用/启用状态
 
         # --- 区域 C: 启动模式 ---
-        mode_lf = ttk.LabelFrame(container, text="启动模式", padding=15)
+        mode_lf = ttk.Labelframe(container, text="启动模式", padding=15)
         mode_lf.pack(fill=X, pady=10, padx=5)
         
         ttk.Radiobutton(mode_lf, text="永久开启 (每次随软件自动启动)", variable=self.remote_mode_var, value="permanent").pack(anchor='w', pady=5)
@@ -4450,7 +4450,7 @@ class TimedBroadcastApp:
         # --- 【左侧面板：设置】 ---
         
         # A. 服务状态与端口
-        status_lf = ttk.LabelFrame(left_panel, text="服务状态", padding=10)
+        status_lf = ttk.Labelframe(left_panel, text="服务状态", padding=10)
         status_lf.pack(fill=X, pady=5)
         
         self.sr_status_label = ttk.Label(status_lf, text="🔴 服务未启动", font=self.font_12_bold, foreground="gray")
@@ -4466,7 +4466,7 @@ class TimedBroadcastApp:
         self.sr_toggle_btn.pack(side=RIGHT)
 
         # B. 开放规则
-        rule_lf = ttk.LabelFrame(left_panel, text="开放规则 (不受节假日限制)", padding=10)
+        rule_lf = ttk.Labelframe(left_panel, text="开放规则 (不受节假日限制)", padding=10)
         rule_lf.pack(fill=X, pady=5)
         
         time_frame = ttk.Frame(rule_lf)
@@ -4491,7 +4491,7 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(e3, self._handle_date_scroll)
 
         # C. 曲库管理
-        folder_lf = ttk.LabelFrame(left_panel, text="曲库文件夹", padding=10)
+        folder_lf = ttk.Labelframe(left_panel, text="曲库文件夹", padding=10)
         folder_lf.pack(fill=BOTH, expand=True, pady=5)
         
         self.sr_folder_listbox = tk.Listbox(folder_lf, height=5, font=self.font_9)
@@ -4510,14 +4510,14 @@ class TimedBroadcastApp:
         self.sr_count_label.pack(anchor='e')
 
         # D. 安全设置
-        safe_lf = ttk.LabelFrame(left_panel, text="安全设置", padding=10)
+        safe_lf = ttk.Labelframe(left_panel, text="安全设置", padding=10)
         safe_lf.pack(fill=X, pady=5)
         ttk.Label(safe_lf, text="单IP频率限制(分钟):").pack(side=LEFT)
         ttk.Entry(safe_lf, textvariable=self.sr_rate_limit_var, width=5).pack(side=LEFT, padx=5)
 
         # --- 【右侧面板：队列】 ---
         
-        queue_lf = ttk.LabelFrame(right_panel, text="实时点歌队列", padding=10)
+        queue_lf = ttk.Labelframe(right_panel, text="实时点歌队列", padding=10)
         queue_lf.pack(fill=BOTH, expand=True)
         
         columns = ('序号', '时间', '点歌人', '歌曲名', 'IP')
@@ -5151,7 +5151,7 @@ class TimedBroadcastApp:
         main_frame.pack(fill=BOTH, expand=True)
         main_frame.columnconfigure(0, weight=1)
 
-        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
+        content_frame = ttk.Labelframe(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
 
@@ -5182,7 +5182,7 @@ class TimedBroadcastApp:
         for tag in tags:
             ttk.Button(script_btn_frame, text=tag, bootstyle="outline", command=lambda t=tag: insert_tag(t)).pack(side=LEFT, padx=2)
 
-        params_frame = ttk.LabelFrame(main_frame, text="通用参数", padding=10)
+        params_frame = ttk.Labelframe(main_frame, text="通用参数", padding=10)
         params_frame.grid(row=1, column=0, sticky='ew', pady=4)
         # 该Frame内部将使用pack，不再需要columnconfigure
 
@@ -5239,7 +5239,7 @@ class TimedBroadcastApp:
         ttk.Entry(bgm_container, textvariable=bgm_volume_var, font=self.font_11, width=8).grid(row=0, column=4, sticky='w', padx=5)
         # --- ↑↑↑ 布局代码结束 ---
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间规则", padding=15)
+        time_frame = ttk.Labelframe(main_frame, text="时间规则", padding=15)
         time_frame.grid(row=2, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
         
@@ -6391,10 +6391,10 @@ class TimedBroadcastApp:
         self.main_weather_label.pack(side=RIGHT, padx=10)
         self.main_weather_label.bind("<Button-1>", self.on_weather_label_click)
 
-        log_frame = ttk.LabelFrame(page_frame, text="", padding=(10, 5))
+        log_frame = ttk.Labelframe(page_frame, text="", padding=(10, 5))
         log_frame.pack(side=BOTTOM, fill=X, padx=10, pady=5)
 
-        playing_frame = ttk.LabelFrame(page_frame, text="正在播：", padding=(10, 5))
+        playing_frame = ttk.Labelframe(page_frame, text="正在播：", padding=(10, 5))
         playing_frame.pack(side=BOTTOM, fill=X, padx=10, pady=5)
         
         table_frame = ttk.Frame(page_frame, padding=(10, 5))
@@ -6477,7 +6477,7 @@ class TimedBroadcastApp:
         title_label.pack(anchor=W, pady=(0, 10))
 
         # --- 通用设置 ---
-        general_frame = ttk.LabelFrame(settings_frame, text="通用设置", padding=(15, 10))
+        general_frame = ttk.Labelframe(settings_frame, text="通用设置", padding=(15, 10))
         general_frame.pack(fill=X, pady=10)
 
         self.autostart_var = ttk.BooleanVar()
@@ -6537,7 +6537,7 @@ class TimedBroadcastApp:
         ttk.Label(appearance_frame, text="软件主题:").pack(side=RIGHT)
 
         # --- 整点报时 ---
-        time_chime_frame = ttk.LabelFrame(settings_frame, text="整点报时", padding=(15, 10))
+        time_chime_frame = ttk.Labelframe(settings_frame, text="整点报时", padding=(15, 10))
         time_chime_frame.pack(fill=X, pady=10)
         self.time_chime_enabled_var = ttk.BooleanVar()
         self.time_chime_voice_var = ttk.StringVar()
@@ -6563,7 +6563,7 @@ class TimedBroadcastApp:
         pitch_entry.bind("<FocusOut>", self._on_chime_params_changed)
 
         # --- 电源管理 ---
-        power_frame = ttk.LabelFrame(settings_frame, text="电源管理", padding=(15, 10))
+        power_frame = ttk.Labelframe(settings_frame, text="电源管理", padding=(15, 10))
         power_frame.pack(fill=X, pady=10)
         self.daily_shutdown_enabled_var = ttk.BooleanVar()
         self.daily_shutdown_time_var = ttk.StringVar()
@@ -7230,12 +7230,12 @@ class TimedBroadcastApp:
         left_frame = ttk.Frame(main_frame)
         left_frame.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
 
-        name_lf = ttk.LabelFrame(left_frame, text="节目名称", padding=10)
+        name_lf = ttk.Labelframe(left_frame, text="节目名称", padding=10)
         name_lf.pack(fill=X, pady=(0, 5))
         name_entry = ttk.Entry(name_lf, font=self.font_11)
         name_entry.pack(fill=X)
 
-        bell_files_lf = ttk.LabelFrame(left_frame, text="1. 铃声文件设置", padding=10)
+        bell_files_lf = ttk.Labelframe(left_frame, text="1. 铃声文件设置", padding=10)
         bell_files_lf.pack(fill=X, pady=5)
         bell_files_lf.columnconfigure(1, weight=1)
         
@@ -7253,7 +7253,7 @@ class TimedBroadcastApp:
         ttk.Entry(bell_files_lf, textvariable=bell_volume_var, width=8, font=self.font_11).grid(row=2, column=1, sticky='w')
         ttk.Label(bell_files_lf, text="(0-100)", font=self.font_9, bootstyle="secondary").grid(row=2, column=1, sticky='w', padx=70)
 
-        schedule_lf = ttk.LabelFrame(left_frame, text="2. 通用规则设置", padding=10)
+        schedule_lf = ttk.Labelframe(left_frame, text="2. 通用规则设置", padding=10)
         schedule_lf.pack(fill=X, pady=5)
         schedule_lf.columnconfigure(1, weight=1)
 
@@ -7270,7 +7270,7 @@ class TimedBroadcastApp:
         daterange_entry_schedule.grid(row=1, column=1, sticky='ew')
         ttk.Button(schedule_lf, text="设置", bootstyle="outline", width=5, command=lambda: self.show_daterange_settings_dialog(daterange_entry_schedule)).grid(row=1, column=2, padx=5)
 
-        class_time_lf = ttk.LabelFrame(left_frame, text="3. 时间点设置", padding=10)
+        class_time_lf = ttk.Labelframe(left_frame, text="3. 时间点设置", padding=10)
         class_time_lf.pack(fill=X, pady=5)
         
         notebook = ttk.Notebook(class_time_lf)
@@ -7346,7 +7346,7 @@ class TimedBroadcastApp:
         right_frame.rowconfigure(0, weight=1)
         right_frame.columnconfigure(0, weight=1)
 
-        preview_lf = ttk.LabelFrame(right_frame, text="4. 生成预览", padding=10)
+        preview_lf = ttk.Labelframe(right_frame, text="4. 生成预览", padding=10)
         preview_lf.pack(fill=BOTH, expand=True)
         preview_lf.rowconfigure(0, weight=1)
         preview_lf.columnconfigure(0, weight=1)
@@ -7555,7 +7555,7 @@ class TimedBroadcastApp:
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
 
-        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
+        content_frame = ttk.Labelframe(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
 
@@ -7676,7 +7676,7 @@ class TimedBroadcastApp:
         ttk.Label(volume_frame, text="0-100").pack(side=LEFT, padx=5)
 
         # --- 6. 时间与规则 ---
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
+        time_frame = ttk.Labelframe(main_frame, text="时间", padding=15)
         time_frame.grid(row=1, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
         
@@ -7738,7 +7738,7 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=4, column=3, padx=5)
 
-        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=10)
+        other_frame = ttk.Labelframe(main_frame, text="其它", padding=10)
         other_frame.grid(row=2, column=0, sticky='ew', pady=5)
         other_frame.columnconfigure(1, weight=1)
         
@@ -7904,7 +7904,7 @@ class TimedBroadcastApp:
         main_layout.pack(fill=BOTH, expand=True)
 
         # 左侧：列表区域
-        list_frame = ttk.LabelFrame(main_layout, text=f"当前歌曲 ({len(current_playlist)} 首)", padding=5)
+        list_frame = ttk.Labelframe(main_layout, text=f"当前歌曲 ({len(current_playlist)} 首)", padding=5)
         list_frame.pack(side=LEFT, fill=BOTH, expand=True)
         
         listbox = tk.Listbox(list_frame, font=self.font_11, selectmode=EXTENDED, activestyle='none')
@@ -8061,18 +8061,18 @@ class TimedBroadcastApp:
         main_frame.pack(fill=BOTH, expand=True)
         main_frame.columnconfigure(0, weight=1)
 
-        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
+        content_frame = ttk.Labelframe(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
 
-        playback_frame = ttk.LabelFrame(main_frame, text="播放选项", padding=10)
+        playback_frame = ttk.Labelframe(main_frame, text="播放选项", padding=10)
         playback_frame.grid(row=1, column=0, sticky='ew', pady=4)
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
+        time_frame = ttk.Labelframe(main_frame, text="时间", padding=15)
         time_frame.grid(row=2, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
 
-        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=10)
+        other_frame = ttk.Labelframe(main_frame, text="其它", padding=10)
         other_frame.grid(row=3, column=0, sticky='ew', pady=5)
         other_frame.columnconfigure(1, weight=1)
 
@@ -8162,7 +8162,7 @@ class TimedBroadcastApp:
 
         toggle_resolution_combo()
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
+        time_frame = ttk.Labelframe(main_frame, text="时间", padding=15)
         time_frame.grid(row=2, column=0, sticky='ew', pady=4)
         time_frame.columnconfigure(1, weight=1)
 
@@ -8221,7 +8221,7 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=4, column=3, padx=5)
 
-        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=10)
+        other_frame = ttk.Labelframe(main_frame, text="其它", padding=10)
         other_frame.grid(row=3, column=0, sticky='ew', pady=5)
         other_frame.columnconfigure(1, weight=1)
 
@@ -8413,7 +8413,7 @@ class TimedBroadcastApp:
         main_frame.pack(fill=BOTH, expand=True)
         main_frame.columnconfigure(0, weight=1)
 
-        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=10)
+        content_frame = ttk.Labelframe(main_frame, text="内容", padding=10)
         content_frame.grid(row=0, column=0, sticky='ew', pady=2)
         content_frame.columnconfigure(1, weight=1)
 
@@ -8556,7 +8556,7 @@ class TimedBroadcastApp:
         ttk.Radiobutton(bg_image_btn_frame, text="顺序", variable=bg_image_order_var, value="sequential").pack(side=LEFT, padx=(10,0))
         ttk.Radiobutton(bg_image_btn_frame, text="随机", variable=bg_image_order_var, value="random").pack(side=LEFT)
 
-        time_frame = ttk.LabelFrame(main_frame, text="时间", padding=10)
+        time_frame = ttk.Labelframe(main_frame, text="时间", padding=10)
         time_frame.grid(row=1, column=0, sticky='ew', pady=2)
         time_frame.columnconfigure(1, weight=1)
         
@@ -8603,7 +8603,7 @@ class TimedBroadcastApp:
         self._bind_mousewheel_to_entry(date_range_entry, self._handle_date_scroll)
         ttk.Button(time_frame, text="设置...", command=lambda: self.show_daterange_settings_dialog(date_range_entry), bootstyle="outline").grid(row=3, column=3, padx=5)
 
-        other_frame = ttk.LabelFrame(main_frame, text="其它", padding=15)
+        other_frame = ttk.Labelframe(main_frame, text="其它", padding=15)
         other_frame.grid(row=2, column=0, sticky='ew', pady=4)
         other_frame.columnconfigure(1, weight=1)
         
@@ -9491,7 +9491,7 @@ class TimedBroadcastApp:
         main_frame = ttk.Frame(dialog, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
         ttk.Label(main_frame, text="24小时制 HH:MM:SS", font=self.font_11_bold).pack(anchor='w', pady=5)
-        list_frame = ttk.LabelFrame(main_frame, text="时间列表", padding=5)
+        list_frame = ttk.Labelframe(main_frame, text="时间列表", padding=5)
         list_frame.pack(fill=BOTH, expand=True, pady=5)
         box_frame = ttk.Frame(list_frame); box_frame.pack(side=LEFT, fill=BOTH, expand=True)
         listbox = tk.Listbox(box_frame, font=self.font_11, height=10)
@@ -9561,7 +9561,7 @@ class TimedBroadcastApp:
         main_frame.pack(fill=BOTH, expand=True)
         
         week_type_var = tk.StringVar(value="week")
-        week_frame = ttk.LabelFrame(main_frame, text="按周", padding=10)
+        week_frame = ttk.Labelframe(main_frame, text="按周", padding=10)
         week_frame.pack(fill=X, pady=5)
         ttk.Radiobutton(week_frame, text="每周", variable=week_type_var, value="week").grid(row=0, column=0, sticky='w')
         
@@ -9570,7 +9570,7 @@ class TimedBroadcastApp:
         for i, (day, num) in enumerate(weekdays): 
             ttk.Checkbutton(week_frame, text=day, variable=week_vars[num]).grid(row=(i // 4) + 1, column=i % 4, sticky='w', padx=10, pady=3)
         
-        day_frame = ttk.LabelFrame(main_frame, text="按月", padding=10)
+        day_frame = ttk.Labelframe(main_frame, text="按月", padding=10)
         day_frame.pack(fill=BOTH, expand=True, pady=5)
         ttk.Radiobutton(day_frame, text="每月", variable=week_type_var, value="day").grid(row=0, column=0, sticky='w')
         
@@ -9722,7 +9722,7 @@ class TimedBroadcastApp:
             self.root.focus_force()
         # --- ↑↑↑ 【最终BUG修复 V4】核心修改结束 ↑↑↑ ---
 
-        week_frame = ttk.LabelFrame(dialog, text="选择周几", padding=10)
+        week_frame = ttk.Labelframe(dialog, text="选择周几", padding=10)
         week_frame.pack(fill=X, pady=10, padx=10)
         weekdays = [("周一", 1), ("周二", 2), ("周三", 3), ("周四", 4), ("周五", 5), ("周六", 6), ("周日", 7)]
         week_vars = {num: tk.IntVar() for day, num in weekdays}
@@ -9730,7 +9730,7 @@ class TimedBroadcastApp:
         for day_num_str in current_days: week_vars[int(day_num_str)].set(1)
         for i, (day, num) in enumerate(weekdays): ttk.Checkbutton(week_frame, text=day, variable=week_vars[num]).grid(row=0, column=i, sticky='w', padx=10, pady=3)
         
-        time_frame = ttk.LabelFrame(dialog, text="设置时间", padding=10)
+        time_frame = ttk.Labelframe(dialog, text="设置时间", padding=10)
         time_frame.pack(fill=X, pady=10, padx=10)
         ttk.Label(time_frame, text="时间 (HH:MM:SS):").pack(side=LEFT)
         time_entry = ttk.Entry(time_frame, font=self.font_11, width=15)
@@ -12758,8 +12758,8 @@ class TimedBroadcastApp:
         recurring_rb = ttk.Radiobutton(type_frame, text="循环任务", variable=type_var, value="recurring")
         recurring_rb.pack(side=LEFT, padx=10)
 
-        onetime_lf = ttk.LabelFrame(main_frame, text="一次性任务设置", padding=10)
-        recurring_lf = ttk.LabelFrame(main_frame, text="循环任务设置", padding=10)
+        onetime_lf = ttk.Labelframe(main_frame, text="一次性任务设置", padding=10)
+        recurring_lf = ttk.Labelframe(main_frame, text="循环任务设置", padding=10)
         recurring_lf.columnconfigure(1, weight=1)
 
         # --- “一次性任务”界面 ---
