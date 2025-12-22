@@ -5,7 +5,7 @@ pygame>=2.5.0
 pywin32>=306
 psutil>=5.9.0
 requests
-edge-tts>=7.2.3
+edge-tts>=7.2.7
 Flask>=3.0.3
 
 # --- UI、界面美化与图像处理 ---
